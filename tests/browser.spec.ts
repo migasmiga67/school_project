@@ -67,7 +67,10 @@ test('Mur Światła korzysta z tego samego modelu co karty bohaterów', async ({
 });
 
 test('pełna legalna kampania przez interfejs kończy się odzyskaniem Rdzenia', async ({ page }) => {
-  test.setTimeout(120000);
+  // This is an entire 46-command run through the real UI. Shared CI runners
+  // can be considerably slower than a local browser; individual expectations
+  // still retain their normal 10-second timeout and every assertion remains.
+  test.setTimeout(300000);
   const { freshSave, newRun } = await import('../src/progression');
   const { DIRECTIONS } = await import('../src/core/model');
   const initial = newRun(freshSave());
@@ -86,39 +89,41 @@ test('pełna legalna kampania przez interfejs kończy się odzyskaniem Rdzenia',
   const commands = campaignSolutions as Command[][];
   const choices = ['teeth', 'lens'];
   for (let room = 0; room < 3; room++) {
-    for (const command of commands[room]) {
-      await page.waitForFunction(() => !(window as unknown as { __GRID_TEST__: { busy: boolean } }).__GRID_TEST__.busy);
-      const before: BattleState = await page.evaluate(key => JSON.parse(localStorage.getItem(key)!).run.battle, SAVE_KEY);
-      if (command.type === 'endTurn') {
-        await page.locator('#end-turn').click();
-      } else {
-        await page.locator(`[data-hero="${command.actorId}"]`).click();
-        await page.locator(`[data-mode="${command.type}"]`).click();
-        if (command.type === 'move') await clickCell(page, command.destination.x, command.destination.y);
-        else if (command.type === 'bash') {
-          const target = before.units[command.targetId].cell;
-          await clickCell(page, target.x, target.y);
-        } else if (command.type === 'snare') await clickCell(page, command.cell.x, command.cell.y);
-        else if (command.type === 'lightning') await clickCell(page, command.anchor.x, command.anchor.y);
-        else if (command.type === 'swap') {
-          const first = before.units[command.firstId].cell, second = before.units[command.secondId].cell;
-          await clickCell(page, first.x, first.y);
-          await clickCell(page, second.x, second.y);
-        } else if (command.type === 'shoot') {
-          const delta = DIRECTIONS[command.direction];
-          const cell = { ...before.units[command.actorId].cell };
-          for (let step = 0; step < 7; step++) {
-            cell.x += delta.x; cell.y += delta.y;
-            const occupied = Object.values(before.units).some(unit => unit.cell.x === cell.x && unit.cell.y === cell.y)
-              || Object.values(before.objects).some(object => object.cell.x === cell.x && object.cell.y === cell.y);
-            if (occupied || before.board[cell.y]?.[cell.x] === 'wall') break;
+    for (const [actionIndex, command] of commands[room].entries()) {
+      await test.step(`Komnata ${room + 1} · akcja ${actionIndex + 1} · ${command.type}${'actorId' in command ? ` · ${command.actorId}` : ''}`, async () => {
+        await page.waitForFunction(() => !(window as unknown as { __GRID_TEST__: { busy: boolean } }).__GRID_TEST__.busy);
+        const before: BattleState = await page.evaluate(key => JSON.parse(localStorage.getItem(key)!).run.battle, SAVE_KEY);
+        if (command.type === 'endTurn') {
+          await page.locator('#end-turn').click();
+        } else {
+          await page.locator(`[data-hero="${command.actorId}"]`).click();
+          await page.locator(`[data-mode="${command.type}"]`).click();
+          if (command.type === 'move') await clickCell(page, command.destination.x, command.destination.y);
+          else if (command.type === 'bash') {
+            const target = before.units[command.targetId].cell;
+            await clickCell(page, target.x, target.y);
+          } else if (command.type === 'snare') await clickCell(page, command.cell.x, command.cell.y);
+          else if (command.type === 'lightning') await clickCell(page, command.anchor.x, command.anchor.y);
+          else if (command.type === 'swap') {
+            const first = before.units[command.firstId].cell, second = before.units[command.secondId].cell;
+            await clickCell(page, first.x, first.y);
+            await clickCell(page, second.x, second.y);
+          } else if (command.type === 'shoot') {
+            const delta = DIRECTIONS[command.direction];
+            const cell = { ...before.units[command.actorId].cell };
+            for (let step = 0; step < 7; step++) {
+              cell.x += delta.x; cell.y += delta.y;
+              const occupied = Object.values(before.units).some(unit => unit.cell.x === cell.x && unit.cell.y === cell.y)
+                || Object.values(before.objects).some(object => object.cell.x === cell.x && object.cell.y === cell.y);
+              if (occupied || before.board[cell.y]?.[cell.x] === 'wall') break;
+            }
+            await clickCell(page, cell.x, cell.y);
           }
-          await clickCell(page, cell.x, cell.y);
+          await expect(page.locator('#confirm-action')).toBeVisible();
+          await page.locator('#confirm-action').click();
         }
-        await expect(page.locator('#confirm-action')).toBeVisible();
-        await page.locator('#confirm-action').click();
-      }
-      await expect.poll(async () => (await page.evaluate(key => JSON.parse(localStorage.getItem(key)!).run.battle.actionSequence, SAVE_KEY))).toBe(before.actionSequence + 1);
+        await expect.poll(async () => (await page.evaluate(key => JSON.parse(localStorage.getItem(key)!).run.battle.actionSequence, SAVE_KEY))).toBe(before.actionSequence + 1);
+      });
     }
     if (room < 2) {
       await expect(page.locator('[data-reward]')).toHaveCount(3);

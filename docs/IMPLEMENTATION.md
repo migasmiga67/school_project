@@ -39,6 +39,12 @@ Wyjście z testów i ich konfiguracja znajdują się w repozytorium. Testy nie z
 - Zalecany jest ekran minimum 960 CSS px. Interfejs telefoniczny w pionie i pełna obsługa czytników ekranu nie są ukończone.
 - Testy przeglądarkowe uruchomiono w Chromium. Firefox i pozostałe przeglądarki wymagają osobnej walidacji.
 
+## Stabilność testów CI
+
+Pełna kampania ma limit 300 sekund, ponieważ wykonuje 46 komend przez interfejs i może trwać ponad 2 minuty na współdzielonym runnerze. Pozostałe testy zachowują limit 30 sekund, asercje 10 sekund, a pojedyncze akcje 15 sekund. Wszystkie sprawdzenia zwycięstwa, HP, nagród i zapisu pozostają aktywne. Każda akcja kampanii jest nazwaną fazą raportu.
+
+Domyślny serwer Playwright `scripts/serve-dist.mjs` udostępnia wyłącznie zbudowany `dist` pod `/school_project/`, bez Vite i dostępu do źródeł. CI zachowuje screenshoty, trace i raport HTML jako artefakt `browser-failure-diagnostics`, gdy krok nie przejdzie.
+
 ## Publikacja
 
 Źródła znajdują się w `src`, wejście deweloperskie w `app`. `npm run build` odświeża `dist` oraz gotowe `index.html` i `assets` w katalogu głównym repozytorium. Strona nie wymaga serwera aplikacji.

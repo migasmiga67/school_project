@@ -26,7 +26,7 @@ npm run build
 npm run test:e2e
 ```
 
-Testy E2E używają lokalnego Chromium, jeśli jest dostępny. W innym środowisku wykonaj `npx playwright install chromium`. Zmienna `CHROMIUM_PATH` wybiera przeglądarkę; `GRID_BASE_URL` pozwala testować własny serwer, również pod podścieżką. Playwright domyślnie uruchamia Vite na porcie 5174.
+Testy E2E używają lokalnego Chromium, jeśli jest dostępny. W innym środowisku wykonaj `npx playwright install chromium`. Zmienna `CHROMIUM_PATH` wybiera przeglądarkę; `GRID_BASE_URL` pozwala testować własny serwer, również pod podścieżką. Playwright domyślnie testuje gotowy `dist` pod `/school_project/` na porcie 5175, więc najpierw wykonaj `npm run build`. Serwer nie uruchamia Vite ani nie testuje surowych źródeł. Pełna kampania ma limit 5 minut dla współdzielonych runnerów CI; zwykłe asercje nadal mają krótki limit 10 sekund.
 
 ## Sterowanie
 
