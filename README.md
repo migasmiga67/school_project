@@ -28,4 +28,10 @@ Ognisko leczy bohatera. Pokonanie przeciwników daje doświadczenie; awans zwię
 
 W repozytorium otwórz **Settings → Pages → Build and deployment → Source** i wybierz **GitHub Actions**. Workflow `Deploy game to GitHub Pages` buduje grę i publikuje katalog `dist` po wysłaniu zmian do `main`. Jeśli ustawienie zmieniono już po pushu, uruchom workflow ręcznie w zakładce **Actions**.
 
-Nie publikuj katalogu źródłowego bez kompilacji: przeglądarka potrzebuje plików z `dist`, a nie odwołania do `/src/main.js`. Przy innym hostingu uruchom `npm ci` i `npm run build`, a jako katalog publikacji ustaw `dist`.
+Nie publikuj samego katalogu `app`: przeglądarka potrzebuje skompilowanych plików. Przy innym hostingu uruchom `npm ci` i `npm run build`, a jako katalog publikacji ustaw `dist`.
+
+## Pliki źródłowe i gotowa strona
+
+Kod gry znajduje się w `app/src/`, a źródłowy HTML w `app/index.html`. `npm run dev` uruchamia ten kod przez Vite.
+
+`npm run build` tworzy `dist` oraz odświeża gotową stronę w katalogu głównym (`index.html`, `assets/`, `favicon.svg`, `.nojekyll`). Te gotowe pliki są zapisane w Git, aby Pages działało również z ustawieniem **Deploy from a branch → main → / (root)**. Po zmianie kodu wykonaj build i wyślij również zaktualizowane pliki wynikowe. Nadal można korzystać z workflow GitHub Actions, który publikuje `dist`.
