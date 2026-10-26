@@ -1,4 +1,4 @@
-name: Deploy Grid Legends
+name: Remove published game
 on:
   push:
     branches: [main]
@@ -11,37 +11,17 @@ concurrency:
   group: pages
   cancel-in-progress: true
 jobs:
-  deploy:
+  remove:
     runs-on: ubuntu-latest
     environment:
       name: github-pages
-      url: ${{ steps.deployment.outputs.page_url }}
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
-        with:
-          node-version: 22
-          cache: npm
-      - run: npm ci
-      - run: npm run typecheck
-      - run: npm test
-      - run: npm run build
-      - run: npx playwright install --with-deps chromium
-      - name: Browser smoke and gameplay
-        run: npm run test:e2e
-      - name: Preserve browser failure diagnostics
-        if: failure()
-        uses: actions/upload-artifact@v4
-        with:
-          name: browser-failure-diagnostics
-          path: |
-            test-results/
-            playwright-report/
-          retention-days: 7
-          if-no-files-found: ignore
+      - name: Create empty deployment
+        run: |
+          mkdir empty-site
+          printf '<!doctype html><html><head><title>404</title></head><body>404</body></html>' > empty-site/404.html
       - uses: actions/configure-pages@v5
       - uses: actions/upload-pages-artifact@v3
         with:
-          path: dist
-      - id: deployment
-        uses: actions/deploy-pages@v4
+          path: empty-site
+      - uses: actions/deploy-pages@v4
