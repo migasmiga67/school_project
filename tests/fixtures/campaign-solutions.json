@@ -1,0 +1,298 @@
+[
+  [
+    {
+      "type": "shoot",
+      "actorId": "kael",
+      "direction": "N"
+    },
+    {
+      "type": "snare",
+      "actorId": "kael",
+      "cell": {
+        "x": 4,
+        "y": 3
+      }
+    },
+    {
+      "type": "lightning",
+      "actorId": "lyra",
+      "anchor": {
+        "x": 5,
+        "y": 2
+      }
+    },
+    {
+      "type": "move",
+      "actorId": "ignis",
+      "destination": {
+        "x": 2,
+        "y": 3
+      }
+    },
+    {
+      "type": "bash",
+      "actorId": "ignis",
+      "targetId": "husk-1"
+    },
+    {
+      "type": "endTurn"
+    },
+    {
+      "type": "swap",
+      "actorId": "lyra",
+      "firstId": "lyra",
+      "secondId": "husk-1"
+    },
+    {
+      "type": "move",
+      "actorId": "ignis",
+      "destination": {
+        "x": 4,
+        "y": 4
+      }
+    },
+    {
+      "type": "move",
+      "actorId": "lyra",
+      "destination": {
+        "x": 5,
+        "y": 1
+      }
+    },
+    {
+      "type": "move",
+      "actorId": "kael",
+      "destination": {
+        "x": 5,
+        "y": 6
+      }
+    },
+    {
+      "type": "shoot",
+      "actorId": "kael",
+      "direction": "N"
+    },
+    {
+      "type": "bash",
+      "actorId": "ignis",
+      "targetId": "husk-3"
+    }
+  ],
+  [
+    {
+      "type": "lightning",
+      "actorId": "lyra",
+      "anchor": {
+        "x": 5,
+        "y": 1
+      }
+    },
+    {
+      "type": "move",
+      "actorId": "ignis",
+      "destination": {
+        "x": 1,
+        "y": 3
+      }
+    },
+    {
+      "type": "move",
+      "actorId": "kael",
+      "destination": {
+        "x": 4,
+        "y": 2
+      }
+    },
+    {
+      "type": "shoot",
+      "actorId": "kael",
+      "direction": "E"
+    },
+    {
+      "type": "bash",
+      "actorId": "ignis",
+      "targetId": "husk-1"
+    },
+    {
+      "type": "endTurn"
+    },
+    {
+      "type": "swap",
+      "actorId": "lyra",
+      "firstId": "lyra",
+      "secondId": "husk-1"
+    },
+    {
+      "type": "move",
+      "actorId": "ignis",
+      "destination": {
+        "x": 2,
+        "y": 1
+      }
+    },
+    {
+      "type": "bash",
+      "actorId": "ignis",
+      "targetId": "thorn-1"
+    },
+    {
+      "type": "move",
+      "actorId": "kael",
+      "destination": {
+        "x": 4,
+        "y": 1
+      }
+    },
+    {
+      "type": "move",
+      "actorId": "lyra",
+      "destination": {
+        "x": 3,
+        "y": 0
+      }
+    },
+    {
+      "type": "snare",
+      "actorId": "kael",
+      "cell": {
+        "x": 4,
+        "y": 0
+      }
+    },
+    {
+      "type": "endTurn"
+    },
+    {
+      "type": "shoot",
+      "actorId": "kael",
+      "direction": "E"
+    }
+  ],
+  [
+    {
+      "type": "swap",
+      "actorId": "lyra",
+      "firstId": "kael",
+      "secondId": "thorn-2"
+    },
+    {
+      "type": "shoot",
+      "actorId": "kael",
+      "direction": "W"
+    },
+    {
+      "type": "move",
+      "actorId": "ignis",
+      "destination": {
+        "x": 4,
+        "y": 5
+      }
+    },
+    {
+      "type": "bash",
+      "actorId": "ignis",
+      "targetId": "thorn-2"
+    },
+    {
+      "type": "move",
+      "actorId": "kael",
+      "destination": {
+        "x": 6,
+        "y": 1
+      }
+    },
+    {
+      "type": "endTurn"
+    },
+    {
+      "type": "shoot",
+      "actorId": "kael",
+      "direction": "W"
+    },
+    {
+      "type": "lightning",
+      "actorId": "lyra",
+      "anchor": {
+        "x": 4,
+        "y": 6
+      }
+    },
+    {
+      "type": "move",
+      "actorId": "ignis",
+      "destination": {
+        "x": 2,
+        "y": 4
+      }
+    },
+    {
+      "type": "move",
+      "actorId": "kael",
+      "destination": {
+        "x": 6,
+        "y": 0
+      }
+    },
+    {
+      "type": "move",
+      "actorId": "ignis",
+      "destination": {
+        "x": 2,
+        "y": 3
+      }
+    },
+    {
+      "type": "endTurn"
+    },
+    {
+      "type": "move",
+      "actorId": "ignis",
+      "destination": {
+        "x": 1,
+        "y": 1
+      }
+    },
+    {
+      "type": "move",
+      "actorId": "kael",
+      "destination": {
+        "x": 3,
+        "y": 1
+      }
+    },
+    {
+      "type": "shoot",
+      "actorId": "kael",
+      "direction": "W"
+    },
+    {
+      "type": "bash",
+      "actorId": "ignis",
+      "targetId": "warden-1"
+    },
+    {
+      "type": "move",
+      "actorId": "lyra",
+      "destination": {
+        "x": 3,
+        "y": 4
+      }
+    },
+    {
+      "type": "move",
+      "actorId": "lyra",
+      "destination": {
+        "x": 1,
+        "y": 3
+      }
+    },
+    {
+      "type": "endTurn"
+    },
+    {
+      "type": "bash",
+      "actorId": "ignis",
+      "targetId": "warden-1"
+    }
+  ]
+]
