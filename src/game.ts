@@ -63,6 +63,19 @@ export function createGame(): GameState {
 export function activeVehicle(s: GameState): Vehicle | undefined {
   return s.player.mode === 'drive' ? s.vehicles.find(v => v.id === s.player.vehicleId) : undefined;
 }
+/** Online rooms share a deterministic ambient traffic clock; claimed cars stay parked. */
+export function synchronizeOnlineTraffic(s: GameState, seconds: number) {
+  if (!Number.isFinite(seconds) || seconds < 0) return;
+  const rt = runtime(s), own = activeVehicle(s);
+  for (let i = 0; i < 8; i++) {
+    const car = s.vehicles.find(item => item.id === `traffic-${i}`);
+    if (!car || car.parked || car === own) continue;
+    const speed = 8 + i % 4;
+    const progress = (i % 2 ? i * 31 + 45 : i * 59 + 50) + speed * seconds;
+    Object.assign(car, loopPose(trafficLoops[i % 2], progress), { speed, wheelPhase: speed * seconds * 1.6 });
+    rt.traffic.set(car.id, progress);
+  }
+}
 export function nearestVehicle(s: GameState): Vehicle | undefined {
   if (s.interior) return undefined;
   return s.vehicles.filter(v => v.kind !== 'police' && v.health > 0 && length(v, s.player) <= 4).sort((a, b) => length(a, s.player) - length(b, s.player))[0];

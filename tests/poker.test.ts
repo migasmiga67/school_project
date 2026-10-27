@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { act, advanceBots, compareHands, createPokerTable, dealHand, evaluateHand, legalActions } from '../src/poker';
+import { act, advanceBots, compareHands, createPokerTable, dealHand, evaluateHand, foldPokerSeat, legalActions } from '../src/poker';
 import type { Card, PokerAction, PokerResult, PokerState, Suit } from '../src/poker-model';
 
 const card = (text: string): Card => ({ rank: ({ A:14,K:13,Q:12,J:11,T:10 } as Record<string,number>)[text[0]] ?? Number(text[0]), suit: ({s:'♠',h:'♥',d:'♦',c:'♣'} as Record<string,Suit>)[text[1]] });
@@ -134,6 +134,20 @@ describe('side pots and tied showdowns',()=>{
  it('splits the pot and gives an odd chip clockwise left of the dealer',()=>{
   const state=river([5,5,5,0],[100,100,0,20],['As 2c','Qs 3c','7s 8c','9s 4c'],'Th Jh Qh Kh Ah',[2,3]);state.actor=1;state.players[1].acted=false;state.players[3].acted=true;
   const result=action(state,{type:'check'});expect(result.payouts).toEqual([7,8,0,0]);expect(result.winners).toEqual([0,1]);expect(total(result)).toBe(total(state));
+ });
+});
+
+describe('forced departures from an online hand',()=>{
+ it('folds an off-turn player without skipping the current actor or mutating input',()=>{
+  const state=deal(),saved=structuredClone(state),actor=state.actor!;
+  const folded=ok(foldPokerSeat(state,0));expect(folded.actor).toBe(actor);expect(folded.players[0].folded).toBe(true);expect(total(folded)).toBe(800);expect(state).toEqual(saved);
+  expect(foldPokerSeat(createPokerTable(1),0).ok).toBe(false);expect(foldPokerSeat(state,99).ok).toBe(false);
+ });
+ it('keeps an off-turn folded overbet in the pot even against short all-ins',()=>{
+  const table=createPokerTable(91);table.players[1].stack=50;table.players[2].stack=50;table.players[3].stack=0;
+  let state=ok(dealHand(table));expect(state.actor).toBe(0);state=action(state,{type:'allIn'});expect(state.currentBet).toBe(200);state=ok(foldPokerSeat(state,0));
+  expect(state.actor).toBe(1);state=action(state,{type:'call'});state=action(state,{type:'call'});
+  expect(state.phase).toBe('showdown');expect(state.board).toHaveLength(5);expect(state.players[0].stack).toBe(0);expect(state.payouts[0]).toBe(0);expect(state.payouts.reduce((sum,value)=>sum+value,0)).toBe(300);expect(total(state)).toBe(300);
  });
 });
 

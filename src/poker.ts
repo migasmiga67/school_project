@@ -93,6 +93,9 @@ function returnUncalled(s: PokerState) {
   const excess = bets[0].amount - (bets[1]?.amount ?? 0);
   if (excess <= 0) return;
   const p = s.players[bets[0].index];
+  // A disconnected player can forfeit an uncalled wager off-turn. Their
+  // committed chips remain dead money rather than returning after cash-out.
+  if (p.folded) return;
   p.bet -= excess; p.contributed -= excess; p.stack += excess; p.allIn = false; s.pot -= excess;
   log(s, `${p.name}: zwrot niesprawdzonych ${excess} żetonów.`);
 }
@@ -121,9 +124,11 @@ function showdown(s: PokerState) {
   for (const level of levels) {
     const contributors = s.players.map((p,i)=>p.contributed >= level ? i : -1).filter(i=>i>=0);
     const amount = (level - previous) * contributors.length;
-    const eligible = contributors.filter(i => !s.players[i].folded);
-    // A valid betting sequence always leaves a contender for every side pot.
-    // Defensive refunds preserve chips if an externally-created fixture does not.
+    let eligible = contributors.filter(i => !s.players[i].folded);
+    // Off-turn departure may leave a layer containing only forfeited bets.
+    // Dead money is contested by the remaining live hands.
+    if (!eligible.length) eligible = s.players.map((p,i)=>!p.folded ? i : -1).filter(i=>i>=0);
+    // Preserve chips even in a malformed external fixture with no live hand.
     if (!eligible.length) { const refund = level - previous; contributors.forEach(i => payouts[i] += refund); previous = level; continue; }
     let winners = [eligible[0]];
     for (const index of eligible.slice(1)) {
@@ -221,6 +226,18 @@ export function act(original: PokerState, index: number, action: PokerAction): P
     } else log(s,`${p.name}: sprawdza ${target-(original.players[index].bet)}${p.allIn?' — all-in':''}.`);
   }
   progress(s,index);
+  return {ok:true,state:s};
+}
+
+/** Host-only departure: forfeit the hand even when it is another seat's turn. */
+export function foldPokerSeat(original: PokerState, index: number): PokerResult {
+  if (!betting(original) || !Number.isInteger(index) || !original.players[index]) return fail('Brak aktywnego rozdania dla tego miejsca.');
+  if (original.players[index].folded) return {ok:true,state:copy(original)};
+  const s=copy(original),p=s.players[index];
+  p.folded=true;p.acted=true;s.raiseRights[index]=false;
+  log(s,`${p.name}: pas — opuścił stół.`);
+  const after=original.actor===index||original.actor===null?index:(original.actor+s.players.length-1)%s.players.length;
+  progress(s,after);
   return {ok:true,state:s};
 }
 

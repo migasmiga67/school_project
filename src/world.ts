@@ -3,6 +3,8 @@ import type { CameraPose } from './camera-controls';
 import { CasinoView } from './casino-view';
 import type { Point } from './model';
 import type { PokerState } from './poker-model';
+import type { OnlineMember } from './multiplayer-model';
+import { RemotePlayersView } from './remote-players';
 import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
 import { BUILDINGS, ROADS, type GameState, type Vehicle } from './model';
 
@@ -41,6 +43,10 @@ export class CityView {
   private lastMode = -1;
   private readonly parent: HTMLElement;
   private readonly casino: CasinoView;
+  private readonly remote: RemotePlayersView;
+  private onlineMembers: OnlineMember[] = [];
+  private onlineSelf = '';
+  private remoteCars = new Set<string>();
   private readonly cityObjects: THREE.Object3D[];
   private readonly cityBackground: THREE.Texture | THREE.Color | null;
   private readonly cityFog: THREE.Fog | THREE.FogExp2 | null;
@@ -99,6 +105,8 @@ export class CityView {
     this.cityObjects = this.scene.children.filter(object => object !== this.hero && object !== this.marker && object !== this.casino.interior);
     this.cityBackground = this.scene.background;
     this.cityFog = this.scene.fog;
+    this.remote = new RemotePlayersView(this.softwareRendering);
+    this.scene.add(this.remote.group);
     this.scene.updateMatrixWorld(true);
     this.observer = new ResizeObserver(() => this.resize());
     this.observer.observe(parent);
@@ -387,6 +395,12 @@ export class CityView {
   }
 
   get presentation(): 'city' | 'casino' | 'poker' { return this.seated ? 'poker' : this.indoors ? 'casino' : 'city'; }
+  get remotePlayers() { return this.remote.visibleCount; }
+  setOnline(members: OnlineMember[], selfId: string) {
+    this.onlineMembers = members;
+    this.onlineSelf = selfId;
+    this.remoteCars = new Set(members.filter(member => member.id !== selfId && member.pose.mode === 'drive' && member.pose.vehicle?.id !== 'stratus').map(member => member.pose.vehicle!.id));
+  }
   setPoker(state: PokerState | null, seated: boolean) {
     if(this.seated !== seated)this.initialized = false;
     this.seated = seated;
@@ -406,7 +420,7 @@ export class CityView {
     const alive = new Set<string>();
     for (const vehicle of [...state.vehicles, ...state.police]) {
       alive.add(vehicle.id); let visual = this.cars.get(vehicle.id); if (!visual) { visual = this.car(vehicle); this.cars.set(vehicle.id, visual); }
-      visual.group.visible = !inside && !(cameraMode === 2 && state.player.mode === 'drive' && state.player.vehicleId === vehicle.id);
+      visual.group.visible = !inside && !this.remoteCars.has(vehicle.id) && !(cameraMode === 2 && state.player.mode === 'drive' && state.player.vehicleId === vehicle.id);
       visual.group.position.set(vehicle.x, 0.05, vehicle.z); visual.group.rotation.y = -vehicle.heading;
       visual.wheels.forEach(wheel => { wheel.rotation.x = vehicle.wheelPhase; }); visual.frontWheels.forEach(wheel => { wheel.rotation.y = vehicle.steer * 0.35; });
       visual.brake.emissiveIntensity = vehicle.speed < 1 ? 0.8 : 0.2;
@@ -457,8 +471,9 @@ export class CityView {
       const obstruction = this.raycaster.intersectObjects(this.occluders, false)[0];
       if (obstruction) this.camera.position.copy(pivot).addScaledVector(offset.normalize(), Math.max(0.4, obstruction.distance - 0.55));
     }
+    this.remote.update(this.onlineMembers, this.onlineSelf, state.interior, dt);
     this.camera.lookAt(lookAt); this.renderer.render(this.scene, this.camera);this.renderFrames++;
   }
   resize() { const width = Math.max(1, this.parent.clientWidth), height = Math.max(1, this.parent.clientHeight); this.camera.aspect = width / height; this.camera.updateProjectionMatrix(); this.renderer.setSize(width, height, false); }
-  destroy() { this.observer.disconnect(); this.casino.destroy(); this.scene.traverse(object => { if (object instanceof THREE.Mesh) { object.geometry.dispose(); for (const material of Array.isArray(object.material) ? object.material : [object.material]) material.dispose(); } }); this.glowTexture.dispose(); this.smokeTexture.dispose(); this.renderer.dispose(); this.renderer.domElement.remove(); }
+  destroy() { this.observer.disconnect(); this.remote.destroy(); this.casino.destroy(); this.scene.traverse(object => { if (object instanceof THREE.Mesh) { object.geometry.dispose(); for (const material of Array.isArray(object.material) ? object.material : [object.material]) material.dispose(); } }); this.glowTexture.dispose(); this.smokeTexture.dispose(); this.renderer.dispose(); this.renderer.domElement.remove(); }
 }

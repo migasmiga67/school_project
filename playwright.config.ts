@@ -6,7 +6,7 @@ const executablePath = process.env.CHROMIUM_PATH || (existsSync('/usr/bin/chromi
 
 export default defineConfig({
   testDir: './tests',
-  testMatch: ['browser.spec.ts', 'casino.browser.spec.ts'],
+  testMatch: ['browser.spec.ts', 'casino.browser.spec.ts', 'multiplayer.browser.spec.ts'],
   timeout: 45000,
   expect: { timeout: 10000 },
   workers: 1,
@@ -24,11 +24,21 @@ export default defineConfig({
     screenshot: 'only-on-failure',
     trace: 'retain-on-failure',
   },
-  webServer: process.env.NEON_BASE_URL ? undefined : {
+  webServer: process.env.NEON_BASE_URL ? undefined : [{
     command: 'node scripts/serve-dist.mjs',
     url: baseURL,
     reuseExistingServer: !process.env.CI,
     timeout: 30000,
-  },
+  }, {
+    command: 'node scripts/serve-peers.mjs',
+    url: 'http://127.0.0.1:9000/peerjs',
+    reuseExistingServer: !process.env.CI,
+    timeout: 30000,
+  }, {
+    command: 'node scripts/serve-turn.mjs',
+    url: 'http://127.0.0.1:9002/health',
+    reuseExistingServer: !process.env.CI,
+    timeout: 30000,
+  }],
   reporter: [['list'], ['html', { open: 'never' }]],
 });
