@@ -83,6 +83,11 @@ export class MouseLook {
     },{signal});
     document.addEventListener('pointerlockchange',()=>{
       const locked=this.locked;
+      // Permission may arrive after the player has already opened a menu.
+      if(locked&&!options.active()) {
+        this.wasLocked=true;this.ignoreUnlock=true;
+        this.stopDrag();document.exitPointerLock();options.onChange();return;
+      }
       if(locked)this.stopDrag();
       const shouldPause=this.wasLocked&&!locked&&!this.ignoreUnlock;
       this.wasLocked=locked;this.ignoreUnlock=false;options.onChange();
