@@ -6,7 +6,7 @@ const executablePath = process.env.CHROMIUM_PATH || (existsSync('/usr/bin/chromi
 
 export default defineConfig({
   testDir: './tests',
-  testMatch: 'browser.spec.ts',
+  testMatch: ['browser.spec.ts', 'casino.browser.spec.ts'],
   timeout: 45000,
   expect: { timeout: 10000 },
   workers: 1,

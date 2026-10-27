@@ -1,4 +1,5 @@
 import { BUILDINGS, ROADS, WORLD_BOUNDS } from './model';
+import { CASINO } from './casino-location';
 import type { GameEvent, GameState, Input, Point, Vehicle } from './model';
 
 const START: Point = { x: 0, z: 68 };
@@ -48,6 +49,7 @@ export function createGame(): GameState {
     cars.push(vehicle(`traffic-${i}`, i % 3 === 0 ? 'sport' : 'sedan', p.x, p.z, p.heading, [0x51a89e, 0xe0b878, 0x926f9b, 0xa5b6c4][i % 4], false));
   }
   const s: GameState = {
+    interior: null,
     player: { ...START, heading: 0, mode: 'drive', vehicleId: 'stratus', health: 100 }, vehicles: cars, police: [],
     money: 1250, wanted: 0, heat: 0, time: 0, arrestProgress: 0, collisionCooldown: 0, escapeTimer: 0,
     missionsWon: 0, bestRace: null,
@@ -62,7 +64,26 @@ export function activeVehicle(s: GameState): Vehicle | undefined {
   return s.player.mode === 'drive' ? s.vehicles.find(v => v.id === s.player.vehicleId) : undefined;
 }
 export function nearestVehicle(s: GameState): Vehicle | undefined {
+  if (s.interior) return undefined;
   return s.vehicles.filter(v => v.kind !== 'police' && v.health > 0 && length(v, s.player) <= 4).sort((a, b) => length(a, s.player) - length(b, s.player))[0];
+}
+/** Contextual E prompt has the same priority as the actual interaction. */
+export function casinoAction(s: GameState): 'enter' | 'exit' | 'poker' | null {
+  if (s.player.mode !== 'foot') return null;
+  if (s.interior === 'casino') {
+    if (length(s.player, CASINO.exit) <= 2) return 'exit';
+    if (length(s.player, CASINO.table) <= 5.5) return 'poker';
+    return null;
+  }
+  return length(s.player, CASINO.door) <= 3 ? 'enter' : null;
+}
+function moveIndoor(p: Point, dx: number, dz: number, radius: number) {
+  const { bounds, tableCollider: table } = CASINO;
+  const occupied = (point: Point) => point.x > table.x - table.halfX - radius && point.x < table.x + table.halfX + radius && point.z > table.z - table.halfZ - radius && point.z < table.z + table.halfZ + radius;
+  const x = clamp(p.x + dx, bounds.minX + radius, bounds.maxX - radius);
+  if (!occupied({ x, z: p.z })) p.x = x;
+  const z = clamp(p.z + dz, bounds.minZ + radius, bounds.maxZ - radius);
+  if (!occupied({ x: p.x, z })) p.z = z;
 }
 function blocked(p: Point, radius: number): boolean {
   return BUILDINGS.some(b => p.x > b.x - b.halfX - radius && p.x < b.x + b.halfX + radius && p.z > b.z - b.halfZ - radius && p.z < b.z + b.halfZ + radius);
@@ -111,6 +132,22 @@ function interact(s: GameState, events: GameEvent[]) {
     car.speed = 0; car.parked = true; Object.assign(s.player, exit, { mode: 'foot', vehicleId: null });
     events.push({ kind: 'info', text: 'Wysiadłeś. WASD — ruch, Shift — sprint, E — wejdź do pobliskiego auta.' });
   } else {
+    const action = casinoAction(s);
+    if (action === 'enter') {
+      if (s.wanted > 0) { events.push({ kind: 'info', text: 'Zgub pościg, zanim wejdziesz do kasyna.' }); return; }
+      s.interior = 'casino';
+      Object.assign(s.player, CASINO.entry, { heading: 0, mode: 'foot', vehicleId: null });
+      events.push({ kind: 'interior', text: `Witaj w ${CASINO.name}. Podejdź do stołu i naciśnij E, aby zagrać w pokera.` });
+      return;
+    }
+    if (action === 'exit') {
+      s.interior = null;
+      Object.assign(s.player, { x: CASINO.door.x, z: CASINO.door.z + 1.8, heading: Math.PI, mode: 'foot', vehicleId: null });
+      events.push({ kind: 'interior', text: 'Wyszedłeś z kasyna. Miasto znów czeka.' });
+      return;
+    }
+    if (action === 'poker') { events.push({ kind: 'poker', text: 'Texas Hold’em — zajmij miejsce przy stole.' }); return; }
+    if (s.interior) { events.push({ kind: 'info', text: 'Podejdź do stołu pokerowego lub drzwi wyjściowych.' }); return; }
     const target = nearestVehicle(s);
     if (!target) { events.push({ kind: 'info', text: 'Podejdź bliżej samochodu, aby do niego wsiąść.' }); return; }
     target.parked = true; target.speed = 0;
@@ -146,7 +183,8 @@ function walk(s: GameState, input: Input, dt: number) {
   if (norm) {
     const speed = input.sprint ? 6 : 3.2;
     s.player.heading = Math.atan2(x, -z);
-    move(s.player, x / norm * speed * dt, z / norm * speed * dt, .55);
+    if (s.interior === 'casino') moveIndoor(s.player, x / norm * speed * dt, z / norm * speed * dt, .55);
+    else move(s.player, x / norm * speed * dt, z / norm * speed * dt, .55);
   }
 }
 function traffic(s: GameState, dt: number, events: GameEvent[]) {
@@ -244,6 +282,7 @@ function pursuit(s: GameState, dt: number, events: GameEvent[]) {
 }
 
 export function missionStart(s: GameState): GameEvent[] {
+  if (s.interior) return [{ kind: 'info', text: 'Zlecenia możesz wybierać po wyjściu z kasyna.' }];
   if (s.mission.active) return [{ kind: 'info', text: 'Masz już aktywne zlecenie. Podążaj do znacznika na mapie.' }];
   // Lifetime statistics can be restored independently from a fresh city session.
   // Advance the current story only after success; a failed story is retried.
@@ -292,9 +331,24 @@ export function step(s: GameState, input: Input, delta: number): GameEvent[] {
   const dt = Number.isFinite(delta) ? clamp(delta, 0, .05) : 0;
   const events: GameEvent[] = [];
   if (dt <= 0) return events;
-  s.time += dt; s.collisionCooldown = Math.max(0, s.collisionCooldown - dt);
+  s.time += dt;
+  if (s.interior === 'casino') {
+    if (input.reset) {
+      Object.assign(s.player, CASINO.entry, { heading: 0 });
+      events.push({ kind: 'info', text: 'Wróciłeś do wejścia kasyna.' });
+      return events;
+    }
+    if (input.interact) interact(s, events);
+    // A portal transition is one action; do not reinterpret the same E outdoors.
+    if (s.interior !== 'casino') return events;
+    if (input.nextMission) events.push(...missionStart(s));
+    walk(s, input, dt);
+    return events;
+  }
+  s.collisionCooldown = Math.max(0, s.collisionCooldown - dt);
   if (input.reset) { recover(s, events); return events; }
   if (input.interact) interact(s, events);
+  if (s.interior === 'casino') return events;
   if (input.nextMission) events.push(...missionStart(s));
   const car = activeVehicle(s);
   if (car) drive(s, car, input, dt, events); else walk(s, input, dt);

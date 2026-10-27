@@ -1,5 +1,7 @@
 import * as THREE from 'three';
 import type { CameraPose } from './camera-controls';
+import { CasinoView } from './casino-view';
+import type { Point } from './model';
 import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
 import { BUILDINGS, ROADS, type GameState, type Vehicle } from './model';
 
@@ -37,6 +39,11 @@ export class CityView {
   private initialized = false;
   private lastMode = -1;
   private readonly parent: HTMLElement;
+  private readonly casino: CasinoView;
+  private readonly cityObjects: THREE.Object3D[];
+  private readonly cityBackground: THREE.Texture | THREE.Color | null;
+  private readonly cityFog: THREE.Fog | THREE.FogExp2 | null;
+  private indoors = false;
   private motion = 0;
   private readonly occluders: THREE.Mesh[] = [];
   private readonly raycaster = new THREE.Raycaster();
@@ -83,6 +90,11 @@ export class CityView {
     this.mesh(new THREE.ConeGeometry(1.15, 1.5, 4), arrowMat, this.markerArrow, 0, 6.05, 0).rotation.z = Math.PI;
     this.scene.add(this.marker);
     this.waterMaterial = this.water();
+    this.casino = new CasinoView(this.softwareRendering);
+    this.scene.add(this.casino.exterior, this.casino.interior);
+    this.cityObjects = this.scene.children.filter(object => object !== this.hero && object !== this.marker && object !== this.casino.interior);
+    this.cityBackground = this.scene.background;
+    this.cityFog = this.scene.fog;
     this.scene.updateMatrixWorld(true);
     this.observer = new ResizeObserver(() => this.resize());
     this.observer.observe(parent);
@@ -370,11 +382,20 @@ export class CityView {
     return visual;
   }
 
-  update(state: GameState, dt: number, cameraMode: number, pose?: CameraPose) {
+  update(state: GameState, dt: number, cameraMode: number, pose?: CameraPose, navigation?: Point) {
+    const inside = state.interior === 'casino';
+    if(inside !== this.indoors) {
+      this.indoors = inside;this.initialized = false;
+      for(const object of this.cityObjects)object.visible = !inside;
+      this.casino.interior.visible = inside;
+      this.scene.background = inside ? new THREE.Color(0x101420) : this.cityBackground;
+      this.scene.fog = inside ? new THREE.Fog(0x101420,35,80) : this.cityFog;
+    }
+    this.casino.update(state.time);
     const alive = new Set<string>();
     for (const vehicle of [...state.vehicles, ...state.police]) {
       alive.add(vehicle.id); let visual = this.cars.get(vehicle.id); if (!visual) { visual = this.car(vehicle); this.cars.set(vehicle.id, visual); }
-      visual.group.visible = !(cameraMode === 2 && state.player.mode === 'drive' && state.player.vehicleId === vehicle.id);
+      visual.group.visible = !inside && !(cameraMode === 2 && state.player.mode === 'drive' && state.player.vehicleId === vehicle.id);
       visual.group.position.set(vehicle.x, 0.05, vehicle.z); visual.group.rotation.y = -vehicle.heading;
       visual.wheels.forEach(wheel => { wheel.rotation.x = vehicle.wheelPhase; }); visual.frontWheels.forEach(wheel => { wheel.rotation.y = vehicle.steer * 0.35; });
       visual.brake.emissiveIntensity = vehicle.speed < 1 ? 0.8 : 0.2;
@@ -384,7 +405,7 @@ export class CityView {
     for (const [id, visual] of this.cars) if (!alive.has(id)) visual.group.visible = false;
     const p = state.player; this.motion = this.lastPlayer ? Math.hypot(p.x - this.lastPlayer.x, p.z - this.lastPlayer.z) : 0; this.lastPlayer = {x:p.x,z:p.z}; this.hero.visible = p.mode === 'foot' && cameraMode !== 2; this.hero.position.set(p.x, 0.1, p.z); this.hero.rotation.y = -p.heading;
     const walking = this.motion > 0.003; this.heroLegs.forEach((leg, index) => { leg.rotation.x = walking ? Math.sin(state.time * 10 + index * Math.PI) * 0.45 : 0; }); this.heroArms.forEach((arm, index) => { arm.rotation.x = walking ? Math.sin(state.time * 10 + index * Math.PI) * -0.3 : 0; });
-    const waypoint = state.mission.active ? state.mission.waypoint : null; this.marker.visible = Boolean(waypoint); if (waypoint) { this.marker.position.set(waypoint.x, 0, waypoint.z); this.markerArrow.position.y = Math.sin(state.time * 2.5) * 0.4; this.markerArrow.rotation.y = state.time * 0.7; this.markerRing.rotation.z = state.time * 0.25; }
+    const waypoint = inside ? null : navigation ?? (state.mission.active ? state.mission.waypoint : null); this.marker.visible = Boolean(waypoint); if (waypoint) { this.marker.position.set(waypoint.x, 0, waypoint.z); this.markerArrow.position.y = Math.sin(state.time * 2.5) * 0.4; this.markerArrow.rotation.y = state.time * 0.7; this.markerRing.rotation.z = state.time * 0.25; }
     this.waterMaterial.uniforms.uTime.value = state.time;
     this.palms.forEach((palm, index) => { palm.rotation.z = Math.sin(state.time * 0.6 + index) * 0.009; });
     const heading = pose?.yaw ?? p.heading;
@@ -408,7 +429,7 @@ export class CityView {
     if(this.camera.fov !== fieldOfView){this.camera.fov = fieldOfView;this.camera.updateProjectionMatrix();}
     if (!this.initialized || this.lastMode !== cameraMode) { this.camera.position.copy(destination); this.initialized = true; this.lastMode = cameraMode; }
     else this.camera.position.lerp(destination, 1 - Math.exp(-Math.min(dt, 0.2) * 5.8));
-    if (cameraMode !== 2) {
+    if (cameraMode !== 2 && !inside) {
       const pivot = new THREE.Vector3(p.x, 1.8, p.z);
       const offset = this.camera.position.clone().sub(pivot);
       this.raycaster.set(pivot, offset.clone().normalize()); this.raycaster.far = offset.length();
@@ -418,5 +439,5 @@ export class CityView {
     this.camera.lookAt(lookAt); this.renderer.render(this.scene, this.camera);
   }
   resize() { const width = Math.max(1, this.parent.clientWidth), height = Math.max(1, this.parent.clientHeight); this.camera.aspect = width / height; this.camera.updateProjectionMatrix(); this.renderer.setSize(width, height, false); }
-  destroy() { this.observer.disconnect(); this.scene.traverse(object => { if (object instanceof THREE.Mesh) { object.geometry.dispose(); for (const material of Array.isArray(object.material) ? object.material : [object.material]) material.dispose(); } }); this.glowTexture.dispose(); this.smokeTexture.dispose(); this.renderer.dispose(); this.renderer.domElement.remove(); }
+  destroy() { this.observer.disconnect(); this.casino.destroy(); this.scene.traverse(object => { if (object instanceof THREE.Mesh) { object.geometry.dispose(); for (const material of Array.isArray(object.material) ? object.material : [object.material]) material.dispose(); } }); this.glowTexture.dispose(); this.smokeTexture.dispose(); this.renderer.dispose(); this.renderer.domElement.remove(); }
 }
