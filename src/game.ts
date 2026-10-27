@@ -137,8 +137,17 @@ function drive(s: GameState, car: Vehicle, input: Input, dt: number, events: Gam
   Object.assign(s.player, { x: car.x, z: car.z, heading: car.heading });
 }
 function walk(s: GameState, input: Input, dt: number) {
-  const x = Number(input.right) - Number(input.left), z = Number(input.brake) - Number(input.throttle), norm = Math.hypot(x, z);
-  if (norm) { const speed = input.sprint ? 6 : 3.2; s.player.heading = Math.atan2(x, -z); move(s.player, x / norm * speed * dt, z / norm * speed * dt, .55); }
+  const forward = Number(input.throttle) - Number(input.brake);
+  const right = Number(input.right) - Number(input.left);
+  const viewHeading = Number.isFinite(input.viewHeading) ? input.viewHeading! : 0;
+  const x = Math.sin(viewHeading) * forward + Math.cos(viewHeading) * right;
+  const z = -Math.cos(viewHeading) * forward + Math.sin(viewHeading) * right;
+  const norm = Math.hypot(x, z);
+  if (norm) {
+    const speed = input.sprint ? 6 : 3.2;
+    s.player.heading = Math.atan2(x, -z);
+    move(s.player, x / norm * speed * dt, z / norm * speed * dt, .55);
+  }
 }
 function traffic(s: GameState, dt: number, events: GameEvent[]) {
   const rt = runtime(s), playerCar = activeVehicle(s);

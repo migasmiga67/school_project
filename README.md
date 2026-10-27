@@ -20,15 +20,20 @@ To mały samodzielny prototyp, a nie projekt o skali pełnej produkcji AAA. Nie 
 
 | Klawisz | Akcja |
 | --- | --- |
-| WASD / strzałki | jazda lub poruszanie się pieszo |
+| WASD / strzałki | pieszo: ruch względem kamery; w aucie: gaz, hamulec i skręt |
+| Mysz po kliknięciu obrazu gry | swobodne rozglądanie |
+| Prawy przycisk + przeciąganie | obrót kamery bez blokowania kursora |
+| Kółko myszy | przybliżanie i oddalanie |
 | Spacja | hamulec ręczny |
 | Shift | nitro / sprint |
 | E | wsiadanie i wysiadanie po zwolnieniu |
-| C | zmiana kamery |
+| C | zmiana widoku: pościgowy, z góry, pierwsza osoba |
 | M | kolejne zlecenie po zakończeniu aktualnego |
 | R | powrót na drogę i naprawa za opłatą |
-| P / Esc | pauza |
+| P / Esc | pauza i zwolnienie kursora |
 | H / ? | pomoc |
+
+Kliknij obraz miasta, aby przechwycić mysz. Esc zwalnia kursor i otwiera pauzę; po wznowieniu możesz ponownie kliknąć obraz. Możesz też trzymać prawy przycisk i przeciągać, zachowując dostęp do kursora. Pieszo W zawsze prowadzi w kierunku widoku, a A/D przesuwa w bok. W aucie obrót kamery służy rozglądaniu; skręt pozostaje na A/D.
 
 Złoty znacznik wskazuje cel. Przejmowanie obcych aut i kolizje przyciągają policję. Aby zgubić pościg, oddal się od radiowozów. Misja ucieczki wymaga także dotarcia do kryjówki.
 

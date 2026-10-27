@@ -96,6 +96,61 @@ describe('walking and entering vehicles',()=>{
  });
 });
 
+
+describe('camera-relative movement',()=>{
+ function pedestrian(): GameState {
+  const state=createGame();clearTraffic(state);
+  Object.assign(state.player,{mode:'foot',vehicleId:null,x:0,z:0,heading:0});
+  return state;
+ }
+ it('walks forward toward the view direction at 90 and 180 degrees',()=>{
+  const east=pedestrian(),south=pedestrian();
+  advance(east,1,{throttle:true,viewHeading:Math.PI/2});
+  advance(south,1,{throttle:true,viewHeading:Math.PI});
+  expect(east.player.x).toBeCloseTo(3.2,8);expect(east.player.z).toBeCloseTo(0,8);
+  expect(east.player.heading).toBeCloseTo(Math.PI/2,8);
+  expect(south.player.x).toBeCloseTo(0,8);expect(south.player.z).toBeCloseTo(3.2,8);
+ });
+ it('strafes left or right and walks backward relative to a rotated view',()=>{
+  const left=pedestrian(),right=pedestrian(),backward=pedestrian();
+  advance(left,1,{left:true,viewHeading:Math.PI/2});
+  advance(right,1,{right:true,viewHeading:Math.PI/2});
+  advance(backward,1,{brake:true,viewHeading:Math.PI/2});
+  expect(left.player.x).toBeCloseTo(0,8);expect(left.player.z).toBeCloseTo(-3.2,8);
+  expect(right.player.x).toBeCloseTo(0,8);expect(right.player.z).toBeCloseTo(3.2,8);
+  expect(backward.player.x).toBeCloseTo(-3.2,8);expect(backward.player.z).toBeCloseTo(0,8);
+ });
+ it('normalizes diagonal walking and sprinting independently of camera bearing',()=>{
+  const walk=pedestrian(),sprint=pedestrian();
+  advance(walk,1,{throttle:true,right:true,viewHeading:Math.PI/2});
+  advance(sprint,1,{throttle:true,right:true,sprint:true,viewHeading:Math.PI/2});
+  expect(walk.player.x).toBeCloseTo(3.2/Math.SQRT2,8);
+  expect(walk.player.z).toBeCloseTo(3.2/Math.SQRT2,8);
+  expect(Math.hypot(walk.player.x,walk.player.z)).toBeCloseTo(3.2,8);
+  expect(Math.hypot(sprint.player.x,sprint.player.z)).toBeCloseTo(6,8);
+ });
+ it('preserves vehicle steering and acceleration when the mouse view points elsewhere',()=>{
+  const forwardView=createGame(),sideView=createGame();clearTraffic(forwardView);clearTraffic(sideView);
+  advance(forwardView,1,{throttle:true,left:true,viewHeading:0});
+  advance(sideView,1,{throttle:true,left:true,viewHeading:Math.PI/2});
+  expect(sideView.player).toEqual(forwardView.player);
+  expect(activeVehicle(sideView)).toEqual(activeVehicle(forwardView));
+ });
+ it('uses the original forward bearing for missing or nonfinite view values',()=>{
+  for(const viewHeading of [undefined,NaN,Infinity,-Infinity]){
+   const state=pedestrian();advance(state,1,{throttle:true,viewHeading});
+   expect(state.player.x).toBeCloseTo(0,8);expect(state.player.z).toBeCloseTo(-3.2,8);
+   expect(Number.isFinite(state.player.heading)).toBe(true);
+  }
+ });
+ it('still blocks camera-relative movement at a building face',()=>{
+  const state=pedestrian();state.player.x=38;state.player.z=20;
+  advance(state,3,{throttle:true,viewHeading:-Math.PI/2});
+  expect(state.player.x).toBeGreaterThanOrEqual(32.5);
+  expect(state.player.z).toBeCloseTo(20,8);
+ });
+});
+
 describe('mission and pursuit progression',()=>{
  it('requires a vehicle at courier checkpoints and rewards delivery exactly once',()=>{
   const state=createGame();const car=clearTraffic(state);state.player.mode='foot';state.player.vehicleId=null;state.player.x=-40;state.player.z=0;
