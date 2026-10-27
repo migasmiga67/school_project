@@ -48,6 +48,7 @@ export class OrbitCamera implements CameraPose {
 
 interface MouseLookOptions {
   active:()=>boolean;
+  canLock?:()=>boolean;
   onChange:()=>void;
   onUnlock:()=>void;
   onUnavailable:()=>void;
@@ -84,7 +85,7 @@ export class MouseLook {
     document.addEventListener('pointerlockchange',()=>{
       const locked=this.locked;
       // Permission may arrive after the player has already opened a menu.
-      if(locked&&!options.active()) {
+      if(locked&&(!options.active()||options.canLock?.()===false)) {
         this.wasLocked=true;this.ignoreUnlock=true;
         this.stopDrag();document.exitPointerLock();options.onChange();return;
       }
@@ -104,7 +105,7 @@ export class MouseLook {
     this.dragId=event.pointerId;this.lastX=event.clientX;this.lastY=event.clientY;
     this.canvas.setPointerCapture(event.pointerId);
     // Right-button drag and touch work even when pointer lock is unavailable.
-    if(event.button===0&&event.pointerType==='mouse') {
+    if(event.button===0&&event.pointerType==='mouse'&&this.options.canLock?.()!==false) {
       try {
         if(!this.canvas.requestPointerLock){this.unavailable();return;}
         const request=this.canvas.requestPointerLock();

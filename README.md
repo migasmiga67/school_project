@@ -11,7 +11,7 @@ Oryginalny, niewielki sandbox 3D w przeglądarce, inspirowany miejskimi grami ak
 - Gaz, hamulec, jazda wstecz, ręczny, nitro i kolizje z zabudową oraz pojazdami.
 - Trzy typy zleceń: dostawa, wyścig przez punkty kontrolne, ucieczka przed policją.
 - Trzy poziomy pościgu, radiowozy, areszt i powrót na drogę.
-- Kasyno Sapphire Club z wejściem pieszo, wnętrzem 3D i stołem Texas Hold’em przeciwko trzem komputerowym graczom.
+- Kasyno Sapphire Club z wejściem pieszo, wnętrzem 3D i stołem Texas Hold’em przeciwko trzem komputerowym graczom; rozdanie rozgrywa się przy stole w widocznej sali kasyna.
 - Poker: flop, turn, river, podbijanie, all-in, pule boczne i rozliczanie wygranych z wirtualną gotówką postaci.
 - Minimapka, znacznik celu, gotówka, stan auta, trzy kamery, pauza, syntetyczny dźwięk.
 - Gotówka, liczba ukończonych misji, rekord i ustawienie dźwięku zapisują się lokalnie. Po odświeżeniu rozpoczyna się nowa sesja miasta; pozycja i etap bieżącej misji nie są zapisywane.
@@ -44,6 +44,8 @@ Złoty znacznik wskazuje cel. Przejmowanie obcych aut i kolizje przyciągają po
 Kliknij **♠** w górnym pasku, aby wyznaczyć trasę do Sapphire Club. Kasyno jest też oznaczone na minimapie. Wysiądź z auta, podejdź do drzwi i naciśnij **E**. Wejście wymaga zgubienia pościgu. W środku podejdź do stołu i ponownie naciśnij **E**; przy drzwiach ten sam klawisz wraca do miasta. Ruch uliczny i czas zlecenia zatrzymują się podczas pobytu w kasynie.
 
 Wpisowe wynosi **$200**, a ciemne **$5 / $10**. Grasz własnymi kartami przeciwko trzem NPC, wybierając pas, czekanie, sprawdzenie, podbicie lub all-in. Po rozdaniu możesz rozdać kolejne karty albo odejść z pozostałymi żetonami. Cała gotówka jest wirtualna i pochodzi z portfela postaci.
+
+Przy stole kamera pokazuje wnętrze kasyna, przeciwników, karty i żetony w 3D. Przeciągaj wolny obszar widoku prawym przyciskiem myszy, aby rozglądać się po sali. Karty i przyciski licytacji pozostają w niewielkich panelach; po odejściu od stołu wracasz do swobodnego chodzenia po kasynie.
 
 Wyjście w trakcie rozdania wymaga potwierdzenia i oznacza pas. Niewykorzystane żetony wracają do portfela, a postawione zostają w puli. Odświeżenie strony działa tak samo: zwraca zapisany, niewykorzystany stos tylko raz; bieżące rozdanie nie jest wznawiane.
 

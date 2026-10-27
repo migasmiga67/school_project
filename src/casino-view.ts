@@ -1,6 +1,8 @@
 import * as THREE from 'three';
 import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
 import { CASINO } from './casino-location';
+import { PokerTableView } from './poker-view';
+import type { PokerState } from './poker-model';
 
 type LitMaterial = THREE.MeshLambertMaterial | THREE.MeshStandardMaterial;
 
@@ -13,6 +15,7 @@ export class CasinoView {
   private readonly entranceRing: THREE.Mesh;
   private readonly tableRing: THREE.Mesh;
   private readonly software: boolean;
+  private readonly poker: PokerTableView;
 
   constructor(software: boolean) {
     this.software = software;
@@ -32,6 +35,9 @@ export class CasinoView {
     this.interior.visible = false;
     this.compact(this.exterior);
     this.compact(this.interior);
+    this.poker = new PokerTableView();
+    this.poker.group.position.set(CASINO.table.x, 0, CASINO.table.z);
+    this.interior.add(this.poker.group);
   }
 
   private material(color: number, emissive = 0x000000, intensity = 0): LitMaterial {
@@ -129,15 +135,26 @@ export class CasinoView {
     const overhead = new THREE.PointLight(0xffddb0, 22, 24, 2);
     overhead.position.set(0, 6.2, -1); root.add(overhead);
 
-    // A cutaway front and low side walls leave the orbit camera usable in the lobby.
+    // A complete room surrounds the walking and seated cameras.
     this.box(22, 0.18, 20, dark, root, 0, -0.12, 0);
     for (let x = -10; x <= 10; x += 2) for (let z = -9; z <= 9; z += 2) {
       this.box(1.95, 0.05, 1.95, ((x / 2 + (z + 9) / 2) & 1) ? tile : ivory, root, x, 0.005, z);
     }
-    this.box(22.4, 3.8, 0.3, dark, root, 0, 1.85, -10.0);
+    this.box(22.4, 6.8, 0.3, dark, root, 0, 3.35, -10.0);
+    this.box(22.4, 0.2, 20.3, dark, root, 0, 6.8, 0);
+    for(const x of [-6.5,6.5])this.box(9,6.8,.3,dark,root,x,3.35,10);
+    this.box(4,2.8,.3,dark,root,0,5.35,10);
+    for(const x of [-2.1,2.1])this.box(.18,4,.35,gold,root,x,2,9.8);
+    this.box(4.4,.15,.35,gold,root,0,4.05,9.8);
+    this.label('WYJŚCIE · E','#c9f3dc',3.2,.58,root,0,3.56,9.78,Math.PI);
     for (const x of [-11, 11]) {
-      this.box(0.3, 1.15, 20.3, dark, root, x, 0.55, 0);
+      this.box(0.3, 6.8, 20.3, dark, root, x, 3.35, 0);
       this.box(0.34, 0.12, 20.3, gold, root, x, 1.16, 0);
+      this.box(0.34, 0.12, 20.3, gold, root, x, 5.7, 0);
+      for(const z of [-7,-2,3,8]) {
+        this.box(.4,5.5,.2,gold,root,x*.98,2.8,z);
+        this.box(.41,3.7,.07,blue,root,x*.977,3,z+.2);
+      }
     }
     this.box(22, 0.16, 0.22, gold, root, 0, 3.8, -9.8);
     this.label('SAPPHIRE CLUB', '#f4db9d', 9, 1.5, root, 0, 2.65, -9.78);
@@ -148,12 +165,12 @@ export class CasinoView {
     this.box(4.25, 0.035, 7.4, red, root, 0, 0.07, 5.3);
     for (const x of [-2.18, 2.18]) this.box(0.045, 0.04, 7.4, gold, root, x, 0.09, 5.3);
 
-    // Mark the cutaway exit on the floor, leaving the chase camera's view open.
+    // The floor marker remains visible when approaching the actual doorway.
     const exitSign = this.label('WYJŚCIE · E', '#c9f3dc', 2.8, 0.65, root, 0, 0.13, 8.45);
     exitSign.rotation.x = -Math.PI / 2;
     this.mesh(new THREE.TorusGeometry(1.1, 0.04, 5, 36), blue, root, CASINO.exit.x, 0.12, CASINO.exit.z).rotation.x = -Math.PI / 2;
 
-    // One oval table, four clear seats, cards, chips and an illuminated dealer plaque.
+    // A physical table; dealt cards and chips are updated by PokerTableView.
     const table = new THREE.Group(); table.position.set(CASINO.table.x, 0, CASINO.table.z); root.add(table);
     const pedestal = this.mesh(new THREE.CylinderGeometry(0.65, 1.15, 0.92, 12), dark, table, 0, 0.58, 0);
     pedestal.scale.x = 1.4;
@@ -165,20 +182,13 @@ export class CasinoView {
     felt.scale.set(3.34, 1, 1.65);
     const oval = this.mesh(new THREE.TorusGeometry(1, 0.008, 4, 48), gold, table, 0, 1.305, 0);
     oval.rotation.x = -Math.PI / 2; oval.scale.set(2.65, 1.08, 1);
-    this.mesh(new THREE.CylinderGeometry(0.14, 0.14, 0.025, 12), ivory, table, 0, 1.31, -1.1);
-    for (let i = 0; i < 5; i++) {
-      const card = this.mesh(new THREE.PlaneGeometry(0.3, 0.43), ivory, table, -0.77 + i * 0.38, 1.312, 0.02);
-      card.rotation.x = -Math.PI / 2;
-      this.mesh(new THREE.PlaneGeometry(0.07, 0.1), i % 2 ? red : dark, table, -0.81 + i * 0.38, 1.315, -0.08).rotation.x = -Math.PI / 2;
-    }
-    for (const x of [-2.4, 2.4]) for (const z of [-0.38, 0.1, 0.58]) {
-      const mat = z < 0 ? red : z > 0.3 ? blue : gold;
-      for (let h = 0; h < 3; h++) this.mesh(new THREE.CylinderGeometry(0.15, 0.15, 0.035, 12), mat, table, x, 1.32 + h * 0.035, z);
-    }
     for (const [x, z, rotation] of [[0, 3.25, 0], [-4.35, 0, -Math.PI / 2], [4.35, 0, Math.PI / 2], [0, -3.3, Math.PI]]) {
       this.chair(table, x, z, rotation, wood, red, gold);
     }
-    this.label('TEXAS HOLD’EM · E', '#eddda9', 3.2, 0.64, root, 0, 2.7, -3.9);
+    this.guest(table,-4.35,0,-Math.PI/2,0x8f4f66,0xc28c67,0x2b2227);
+    this.guest(table,0,-3.3,Math.PI,0x3e6475,0xc7a080,0x343036);
+    this.guest(table,4.35,0,Math.PI/2,0x3d715f,0x9f7256,0x29252b);
+    this.label('TEXAS HOLD’EM', '#eddda9', 4.5, 0.6, root, 0, 1.55, -9.77);
 
     // A lounge counter and art-deco trim establish the room without fake slot games.
     this.box(2.3, 1.2, 5.4, wood, root, -8.65, 0.7, -4.7);
@@ -206,6 +216,31 @@ export class CasinoView {
     this.box(1.08, 1.0, 0.18, wood, seat, 0, 1.13, 0.48);
     this.box(0.82, 0.67, 0.2, cushion, seat, 0, 1.17, 0.36);
     for (const x of [-0.43, 0.43]) for (const z of [-0.37, 0.37]) this.box(0.075, 0.6, 0.075, gold, seat, x, 0.32, z);
+  }
+
+  private guest(root:THREE.Object3D,x:number,z:number,rotation:number,jacketColor:number,skinColor:number,hairColor:number) {
+    const guest=new THREE.Group();guest.position.set(x,0,z);guest.rotation.y=rotation;root.add(guest);
+    const jacket=this.material(jacketColor),skin=this.material(skinColor),hair=this.material(hairColor),trousers=this.material(0x19292c),shirt=this.material(0xd1c9af);
+    this.box(.68,.74,.39,jacket,guest,0,1.16,0);
+    this.box(.15,.48,.41,shirt,guest,0,1.23,-.02);
+    this.box(.22,.21,.22,skin,guest,0,1.62,0);
+    this.box(.43,.45,.4,skin,guest,0,1.93,0);
+    this.box(.45,.14,.42,hair,guest,0,2.13,.01);
+    this.box(.45,.32,.12,hair,guest,0,1.99,.17);
+    for(const side of [-1,1]) {
+      this.box(.23,.24,.65,trousers,guest,side*.22,.72,-.33);
+      this.box(.23,.57,.24,trousers,guest,side*.22,.39,-.57);
+      this.box(.26,.17,.43,hair,guest,side*.22,.12,-.69);
+      const arm=this.box(.23,.52,.24,jacket,guest,side*.44,1.22,-.12);arm.rotation.x=-.35;
+      this.box(.2,.2,.56,jacket,guest,side*.44,1,-.46);
+      this.box(.18,.15,.2,skin,guest,side*.44,1,-.82);
+      this.box(.07,.05,.02,hair,guest,side*.11,1.96,-.211);
+    }
+  }
+
+  updatePoker(state:PokerState|null,seated:boolean) {
+    this.poker.update(state,seated);
+    this.tableRing.visible=!seated;
   }
 
   /** Batch opaque meshes by material so low-end/software WebGL stays inexpensive. */
@@ -242,6 +277,7 @@ export class CasinoView {
   }
 
   destroy() {
+    this.poker.destroy();
     const geometries = new Set<THREE.BufferGeometry>(); const materials = new Set<THREE.Material>();
     for (const root of [this.exterior, this.interior]) root.traverse(object => {
       if (object instanceof THREE.Mesh) {

@@ -8,6 +8,7 @@ export interface PokerCallbacks {
   onReserve:(chips:number)=>void;
   onCashOut:(chips:number)=>void;
   onClose:()=>void;
+  onState?:(state:PokerState|null)=>void;
   onMessage?:(text:string)=>void;
 }
 const BUY_IN=200;
@@ -45,10 +46,10 @@ export class PokerUI {
       if(event.key==='Escape'){event.preventDefault();this.handleEscape();return;}
       if(event.key==='Tab')this.trapFocus(event);
     });
-    this.parent.append(this.root);this.render();
+    this.parent.append(this.root);this.callbacks.onState?.(null);this.render();
   }
   handleEscape(){if(this.visible)this.requestLeave();}
-  destroy(){this.stopTimer();this.visible=false;this.destroyed=true;this.root?.remove();this.root=null;this.state=null;}
+  destroy(){this.stopTimer();this.visible=false;this.destroyed=true;this.root?.remove();this.root=null;this.state=null;this.callbacks.onState?.(null);}
   private query<T extends HTMLElement=HTMLElement>(selector:string):T|null{return this.root?.querySelector<T>(selector)??null;}
   private focusDefault(){(this.query<HTMLButtonElement>('button:not(:disabled)')??this.root)?.focus({preventScroll:true});}
   private stopTimer(){if(this.timer!==null){clearTimeout(this.timer);this.timer=null;}}
@@ -73,6 +74,7 @@ export class PokerUI {
     if(!result.ok){this.error=result.reason;this.render();return;}
     this.error='';this.state=result.state;
     this.callbacks.onReserve(this.state.players[0]?.stack??0);
+    this.callbacks.onState?.(structuredClone(this.state));
     this.render();this.scheduleBot();
   }
   private action(action:PokerAction){
@@ -101,6 +103,7 @@ export class PokerUI {
     this.stopTimer();const refund=this.state?.players[0]?.stack??0;const hadBuyIn=this.claimedBuyIn;
     // Mark closed before callbacks: parent may destroy this component synchronously.
     this.visible=false;this.claimedBuyIn=false;this.leavePending=false;this.root?.remove();this.root=null;this.state=null;
+    this.callbacks.onState?.(null);
     if(hadBuyIn)this.callbacks.onCashOut(refund);
     this.callbacks.onClose();this.previousFocus?.focus({preventScroll:true});
   }
@@ -128,6 +131,10 @@ export class PokerUI {
     if(state.board.length>=3){try{return evaluateHand([...hero.hole,...state.board]).name;}catch{return'Twoje karty';}}
     return hero.hole[0].rank===hero.hole[1].rank?'Para w ręku':'Twoje karty · poczekaj na flop';
   }
+  private header(state:PokerState|null){
+    const payout=state?.payouts.reduce((sum,value)=>sum+value,0)??0;
+    return `<header class="poker-header poker-panel"><div class="poker-brand"><span>♠</span><div>SAPPHIRE CLUB<small>TEXAS HOLD’EM · SALA GIER</small></div></div>${state?`<div class="poker-header-meta"><span>BLINDY <b>${money(state.smallBlind)} / ${money(state.bigBlind)}</b></span><span>ROZDANIE <b>#${state.handNumber}</b></span><span class="poker-pot"><small>${state.phase==='showdown'?'ROZLICZONA PULA':'PULA'}</small><strong id="poker-pot">${money(state.phase==='showdown'?payout:state.pot)}</strong></span></div>`:'<span class="poker-header-welcome">Twój wieczór w Sapphire Club</span>'}<button id="poker-leave" class="poker-button poker-button--quiet">${state?'Wstań od stołu':'Wróć do sali'}</button></header><div class="poker-view-hint">PPM + ruch — rozejrzyj się <span>· Esc — wstań</span></div>`;
+  }
   private render(){
     if(!this.visible||!this.root)return;
     const state=this.state;this.root.dataset.phase=state?.phase??'lobby';this.root.dataset.actor=state?.actor===null?'':String(state?.actor??'');
@@ -136,8 +143,18 @@ export class PokerUI {
     const funded=state.players.filter(seat=>seat.stack>0).length;const canDeal=!isHand(state)&&state.players[0].stack>0&&funded>=2;
     const min=Math.max(0,Math.ceil(legal.minRaiseTo)),max=Math.max(min,Math.floor(legal.maxRaiseTo));
     this.raiseValue=Math.min(max,Math.max(min,this.raiseValue||min));
-    const payout=state.payouts.reduce((sum,value)=>sum+value,0);
-    this.root.innerHTML=`<div class="poker-shell"><header class="poker-header"><div class="poker-brand"><span>♠</span><div>SAPPHIRE CLUB<small>TEXAS HOLD’EM · SALON PRYWATNY</small></div></div><div class="poker-header-meta"><span>BLINDY <b>${money(state.smallBlind)} / ${money(state.bigBlind)}</b></span><span>ROZDANIE <b>#${state.handNumber}</b></span></div><button id="poker-leave" class="poker-button poker-button--quiet">Odejdź od stołu</button></header><main class="poker-game"><div class="poker-floor-pattern"></div><div class="poker-table"><div class="poker-table-stitch"></div><div class="poker-table-title">SAPPHIRE <span>♠</span> CLUB<small>NO LIMIT HOLD’EM</small></div><div class="poker-pot"><small>${state.phase==='showdown'?'ROZLICZONA PULA':'PULA STOŁU'}</small><strong id="poker-pot">${money(state.phase==='showdown'?payout:state.pot)}</strong><div class="poker-chip-stack"><i></i><i></i><i></i></div></div><div class="poker-board" id="poker-board" aria-label="Karty wspólne">${Array.from({length:5},(_,index)=>this.card(state.board[index]??null,false,true)).join('')}</div><div class="poker-street"><span>${streets[state.phase]}</span><span>◆</span><span>${state.phase==='showdown'?'Koniec rozdania':`${state.board.length} / 5 kart wspólnych`}</span></div></div>${state.players.map((seat,index)=>this.seat(seat,index,state)).join('')}<div class="poker-hand-label">${escape(this.heroHand(state))}</div></main><footer class="poker-footer"><div class="poker-round-message"><span class="poker-round-dot ${humanTurn?'poker-round-dot--you':''}"></span><div><strong id="poker-status" role="status" aria-live="polite">${humanTurn?'Twoja kolej':state.phase==='showdown'?'Rozdanie rozliczone':state.actor!==null?`${escape(state.players[state.actor]?.name??'Przeciwnik')} podejmuje decyzję…`:'Poczekaj na kolejne rozdanie'}</strong><small>${escape(this.error||state.message||'Wybierz akcję przy stole.')}</small></div></div>${isHand(state)?`<div class="poker-action-area"><div class="poker-actions"><button id="poker-fold" class="poker-button poker-button--fold" ${!humanTurn||!legal.canFold?'disabled':''}>Pas</button><button id="poker-check" class="poker-button" ${!humanTurn||!legal.canCheck?'disabled':''}>Czekaj</button><button id="poker-call" class="poker-button poker-button--mint" ${!humanTurn||!legal.canCall?'disabled':''}>Sprawdź ${money(legal.callAmount)}</button><button id="poker-allin" class="poker-button poker-button--outline" ${!humanTurn||!legal.canAllIn?'disabled':''}>All-in ${money(state.players[0].stack)}</button></div><div class="poker-raise-control"><label for="poker-raise-amount">Podbij łącznie do <strong id="poker-raise-value">${money(this.raiseValue)}</strong></label><input id="poker-raise-amount" aria-label="Łączna stawka podbicia" type="range" min="${min}" max="${max}" step="1" value="${this.raiseValue}" ${!humanTurn||!legal.canRaise?'disabled':''}><button id="poker-raise" class="poker-button poker-button--gold" ${!humanTurn||!legal.canRaise?'disabled':''}>Podbij</button></div></div>`:`<div class="poker-result-actions"><button id="poker-next-hand" class="poker-button poker-button--gold" ${!canDeal?'disabled':''}>Następne rozdanie →</button><button id="poker-cashout" class="poker-button">Zabierz ${money(state.players[0].stack)} i wstań</button>${!canDeal?`<small>${state.players[0].stack<=0?'Skończyły ci się żetony. Możesz odejść i ponownie opłacić wpisowe.':'Pozostali gracze zakończyli sesję. Zabierz żetony i usiądź ponownie.'}</small>`:''}</div>`}<div class="poker-bottom-note"><span>Portfel poza stołem: ${money(this.callbacks.getWallet())}</span><span>Wirtualne żetony · Esc — odejdź</span></div></footer><aside class="poker-log" aria-label="Ostatnie akcje">${state.log.slice(-3).reverse().map(line=>`<span>${escape(line)}</span>`).join('')}</aside></div>${this.leavePending?this.leaveDialog():''}`;
+    this.root.innerHTML=`<div class="poker-shell">
+      ${this.header(state)}
+      <aside class="poker-opponents" aria-label="Gracze przy stole">${state.players.slice(1).map((seat,index)=>this.seat(seat,index+1,state)).join('')}</aside>
+      <footer class="poker-dock poker-panel">
+        <div class="poker-cards-row">
+          <div class="poker-hero">${this.seat(state.players[0],0,state)}<span class="poker-hand-label">${escape(this.heroHand(state))}</span></div>
+          <div class="poker-community"><div class="poker-street"><strong>${streets[state.phase]}</strong><span>KARTY WSPÓLNE</span></div><div class="poker-board" id="poker-board" aria-label="Karty wspólne">${Array.from({length:5},(_,index)=>this.card(state.board[index]??null,false,true)).join('')}</div></div>
+          <div class="poker-round-message"><span class="poker-round-dot ${humanTurn?'poker-round-dot--you':''}"></span><div><strong id="poker-status" role="status" aria-live="polite">${humanTurn?'Twoja kolej':state.phase==='showdown'?'Rozdanie rozliczone':state.actor!==null?`${escape(state.players[state.actor]?.name??'Przeciwnik')} podejmuje decyzję…`:'Poczekaj na kolejne rozdanie'}</strong><small>${escape(this.error||state.message||'Wybierz akcję przy stole.')}</small><span class="poker-wallet">Portfel: ${money(this.callbacks.getWallet())}</span></div></div>
+        </div>
+        ${isHand(state)?`<div class="poker-action-area" id="poker-actions"><div class="poker-actions"><button id="poker-fold" class="poker-button poker-button--fold" ${!humanTurn||!legal.canFold?'disabled':''}>Pas</button><button id="poker-check" class="poker-button" ${!humanTurn||!legal.canCheck?'disabled':''}>Czekaj</button><button id="poker-call" class="poker-button poker-button--mint" ${!humanTurn||!legal.canCall?'disabled':''}>Sprawdź ${money(legal.callAmount)}</button><button id="poker-allin" class="poker-button poker-button--outline" ${!humanTurn||!legal.canAllIn?'disabled':''}>All-in ${money(state.players[0].stack)}</button></div><div class="poker-raise-control"><label for="poker-raise-amount">Podbij do <strong id="poker-raise-value">${money(this.raiseValue)}</strong></label><input id="poker-raise-amount" aria-label="Łączna stawka podbicia" type="range" min="${min}" max="${max}" step="1" value="${this.raiseValue}" ${!humanTurn||!legal.canRaise?'disabled':''}><button id="poker-raise" class="poker-button poker-button--gold" ${!humanTurn||!legal.canRaise?'disabled':''}>Podbij</button></div></div>`:`<div class="poker-result-actions" id="poker-actions"><button id="poker-next-hand" class="poker-button poker-button--gold" ${!canDeal?'disabled':''}>Następne rozdanie →</button><button id="poker-cashout" class="poker-button">Zabierz ${money(state.players[0].stack)} i wstań</button>${!canDeal?`<small>${state.players[0].stack<=0?'Skończyły ci się żetony. Możesz ponownie opłacić wpisowe.':'Pozostali gracze zakończyli sesję. Możesz usiąść ponownie.'}</small>`:''}</div>`}
+      </footer>
+    </div>${this.leavePending?this.leaveDialog():''}`;
     this.bindActions();
     if(this.leavePending)this.query<HTMLButtonElement>('#poker-stay')?.focus();
     else if(!isHand(state))this.query<HTMLButtonElement>(canDeal?'#poker-next-hand':'#poker-cashout')?.focus({preventScroll:true});
@@ -146,9 +163,10 @@ export class PokerUI {
   private renderLobby(){
     if(!this.root)return;
     const wallet=this.callbacks.getWallet();
-    this.root.innerHTML=`<section class="poker-lobby"><div class="poker-lobby-orbit poker-lobby-orbit--one"></div><div class="poker-lobby-orbit poker-lobby-orbit--two"></div><button id="poker-leave" class="poker-button poker-button--quiet poker-lobby-back">← Wróć do sali</button><span class="poker-lobby-suit">♠</span><div class="poker-eyebrow">SAPPHIRE CLUB · PRYWATNY STÓŁ</div><h1>Twoje miejsce<br>przy stole czeka.</h1><p class="poker-lobby-description">Dwie karty w dłoni. Pięć wspólnych.<br>Trzech przeciwników i jedna pula.</p><div class="poker-lobby-stakes"><span>WPISOWE<strong>${money(BUY_IN)}</strong></span><span>BLINDY<strong>$5 / $10</strong></span><span>GRACZE<strong>1 + 3 NPC</strong></span></div><button id="poker-buyin" class="poker-button poker-button--gold poker-buyin" ${wallet<BUY_IN?'disabled':''}>Usiądź za ${money(BUY_IN)} <span>→</span></button><div class="poker-lobby-wallet">Twój portfel: <strong>${money(wallet)}</strong>${wallet<BUY_IN?'<span>Zdobądź gotówkę w mieście, aby opłacić wpisowe.</span>':''}</div>${this.error?`<p class="poker-error" role="alert">${escape(this.error)}</p>`:''}<details class="poker-rules"><summary>Jak grać w Texas Hold’em?</summary><p>Ułóż najlepszy układ pięciu kart z dwóch własnych i pięciu wspólnych. Kolejno odkrywamy flop (3 karty), turn i river. Możesz spasować, czekać, sprawdzić lub podbić. All-in stawia pozostałe żetony; przy różnych stosach powstają pule boczne. Po rozliczeniu możesz rozegrać kolejne rozdanie albo zabrać pozostałe żetony.</p></details><p class="poker-lobby-note">Gotówka jest wirtualna. Odświeżenie lub wyjście podczas rozdania oznacza pas; niewykorzystane żetony wracają do portfela.</p></section>`;
+    this.root.innerHTML=`<div class="poker-shell">${this.header(null)}<section class="poker-lobby poker-panel"><div class="poker-eyebrow">PRZY STOLE · SAPPHIRE CLUB</div><h1>Texas Hold’em</h1><p class="poker-lobby-description">Zajmij miejsce przy stole.<br>Maya, Viktor i Leon czekają na rozdanie.</p><div class="poker-lobby-stakes"><span>WPISOWE<strong>${money(BUY_IN)}</strong></span><span>BLINDY<strong>$5 / $10</strong></span><span>GRACZE<strong>1 + 3 NPC</strong></span></div><button id="poker-buyin" class="poker-button poker-button--gold poker-buyin" ${wallet<BUY_IN?'disabled':''}>Usiądź za ${money(BUY_IN)} <span>→</span></button><div class="poker-lobby-wallet">Twój portfel: <strong>${money(wallet)}</strong>${wallet<BUY_IN?'<span>Zdobądź gotówkę w mieście, aby opłacić wpisowe.</span>':''}</div>${this.error?`<p class="poker-error" role="alert">${escape(this.error)}</p>`:''}<details class="poker-rules"><summary>Jak grać?</summary><p>Ułóż najlepszy układ pięciu kart z dwóch własnych i pięciu wspólnych. Flop odkrywa trzy karty, potem turn i river. Możesz spasować, czekać, sprawdzić lub podbić. All-in stawia pozostałe żetony. Po rozdaniu możesz zagrać ponownie albo zabrać swój stos.</p><p>Gotówka jest wirtualna. Odświeżenie lub wyjście podczas rozdania oznacza pas; niewykorzystane żetony wracają do portfela.</p></details></section></div>`;
     this.query<HTMLButtonElement>('#poker-buyin')?.addEventListener('click',()=>this.begin());
-    this.query<HTMLButtonElement>('#poker-leave')?.addEventListener('click',()=>this.requestLeave());this.focusDefault();
+    this.query<HTMLButtonElement>('#poker-leave')?.addEventListener('click',()=>this.requestLeave());
+    this.query<HTMLButtonElement>('#poker-buyin:not(:disabled)')?.focus({preventScroll:true});
   }
   private leaveDialog(){
     const chips=this.state?.players[0]?.stack??0,committed=this.state?.players[0]?.contributed??0;

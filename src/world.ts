@@ -2,6 +2,7 @@ import * as THREE from 'three';
 import type { CameraPose } from './camera-controls';
 import { CasinoView } from './casino-view';
 import type { Point } from './model';
+import type { PokerState } from './poker-model';
 import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
 import { BUILDINGS, ROADS, type GameState, type Vehicle } from './model';
 
@@ -44,6 +45,9 @@ export class CityView {
   private readonly cityBackground: THREE.Texture | THREE.Color | null;
   private readonly cityFog: THREE.Fog | THREE.FogExp2 | null;
   private indoors = false;
+  private seated = false;
+  private visualTime = 0;
+  renderFrames = 0;
   private motion = 0;
   private readonly occluders: THREE.Mesh[] = [];
   private readonly raycaster = new THREE.Raycaster();
@@ -382,6 +386,12 @@ export class CityView {
     return visual;
   }
 
+  get presentation(): 'city' | 'casino' | 'poker' { return this.seated ? 'poker' : this.indoors ? 'casino' : 'city'; }
+  setPoker(state: PokerState | null, seated: boolean) {
+    if(this.seated !== seated)this.initialized = false;
+    this.seated = seated;
+    this.casino.updatePoker(state, seated);
+  }
   update(state: GameState, dt: number, cameraMode: number, pose?: CameraPose, navigation?: Point) {
     const inside = state.interior === 'casino';
     if(inside !== this.indoors) {
@@ -391,7 +401,8 @@ export class CityView {
       this.scene.background = inside ? new THREE.Color(0x101420) : this.cityBackground;
       this.scene.fog = inside ? new THREE.Fog(0x101420,35,80) : this.cityFog;
     }
-    this.casino.update(state.time);
+    this.visualTime += dt;
+    this.casino.update(this.visualTime);
     const alive = new Set<string>();
     for (const vehicle of [...state.vehicles, ...state.police]) {
       alive.add(vehicle.id); let visual = this.cars.get(vehicle.id); if (!visual) { visual = this.car(vehicle); this.cars.set(vehicle.id, visual); }
@@ -403,7 +414,7 @@ export class CityView {
       visual.smoke.forEach((sprite, index) => { sprite.visible = vehicle.health < 35; const phase = ((state.time * 0.6 + index / 3) % 1); sprite.position.set(0, 1 + phase * 2, -1.3 + phase * 0.6); sprite.scale.setScalar(0.5 + phase * 1.8); (sprite.material as THREE.SpriteMaterial).opacity = vehicle.health < 35 ? (1 - phase) * 0.3 : 0; });
     }
     for (const [id, visual] of this.cars) if (!alive.has(id)) visual.group.visible = false;
-    const p = state.player; this.motion = this.lastPlayer ? Math.hypot(p.x - this.lastPlayer.x, p.z - this.lastPlayer.z) : 0; this.lastPlayer = {x:p.x,z:p.z}; this.hero.visible = p.mode === 'foot' && cameraMode !== 2; this.hero.position.set(p.x, 0.1, p.z); this.hero.rotation.y = -p.heading;
+    const p = state.player; this.motion = this.lastPlayer ? Math.hypot(p.x - this.lastPlayer.x, p.z - this.lastPlayer.z) : 0; this.lastPlayer = {x:p.x,z:p.z}; this.hero.visible = !this.seated && p.mode === 'foot' && cameraMode !== 2; this.hero.position.set(p.x, 0.1, p.z); this.hero.rotation.y = -p.heading;
     const walking = this.motion > 0.003; this.heroLegs.forEach((leg, index) => { leg.rotation.x = walking ? Math.sin(state.time * 10 + index * Math.PI) * 0.45 : 0; }); this.heroArms.forEach((arm, index) => { arm.rotation.x = walking ? Math.sin(state.time * 10 + index * Math.PI) * -0.3 : 0; });
     const waypoint = inside ? null : navigation ?? (state.mission.active ? state.mission.waypoint : null); this.marker.visible = Boolean(waypoint); if (waypoint) { this.marker.position.set(waypoint.x, 0, waypoint.z); this.markerArrow.position.y = Math.sin(state.time * 2.5) * 0.4; this.markerArrow.rotation.y = state.time * 0.7; this.markerRing.rotation.z = state.time * 0.25; }
     this.waterMaterial.uniforms.uTime.value = state.time;
@@ -413,19 +424,29 @@ export class CityView {
     const zoom = pose?.zoom ?? 1;
     const pitch = pose?.pitch ?? (cameraMode === 1 ? 1 : cameraMode === 2 ? .02 : .38);
     let destination: THREE.Vector3; let lookAt: THREE.Vector3;
-    if (cameraMode === 2) {
+    if (inside && this.seated) {
+      destination = new THREE.Vector3(0, 2.8, 3.2);
+      const headYaw = THREE.MathUtils.clamp(heading, -1.25, 1.25);
+      const headPitch = THREE.MathUtils.clamp(pitch - .1, -.15, 1.05);
+      lookAt = destination.clone().add(new THREE.Vector3(Math.sin(headYaw) * Math.cos(headPitch), -Math.sin(headPitch), -Math.cos(headYaw) * Math.cos(headPitch)).multiplyScalar(10));
+    } else if (cameraMode === 2) {
       const vehicleForward = new THREE.Vector3(Math.sin(p.heading), 0, -Math.cos(p.heading));
       destination = new THREE.Vector3(p.x, p.mode === 'drive' ? 1.45 : 1.75, p.z);
       if(p.mode === 'drive')destination.addScaledVector(vehicleForward, .6);
       lookAt = destination.clone().addScaledVector(forward, 25);lookAt.y -= Math.tan(pitch) * 25;
     } else {
-      const distance = (cameraMode === 1 ? 32 : p.mode === 'drive' ? 12 : 7) * zoom;
+      const distance = (cameraMode === 1 ? (inside ? 7 : 32) : p.mode === 'drive' ? 12 : inside ? 4 : 7) * zoom;
       const pivot = new THREE.Vector3(p.x, 1.6, p.z);
       destination = pivot.clone().addScaledVector(forward, -Math.cos(pitch) * distance);
       destination.y += Math.sin(pitch) * distance;
       lookAt = pivot.clone().addScaledVector(forward, cameraMode === 1 ? 0 : p.mode === 'drive' ? 4 : 1.4);
     }
-    const fieldOfView = cameraMode === 2 ? THREE.MathUtils.clamp(58 / zoom, 35, 85) : 58;
+    if(inside) {
+      destination.x = THREE.MathUtils.clamp(destination.x, -9.9, 9.9);
+      destination.z = THREE.MathUtils.clamp(destination.z, -8.7, 9.2);
+      destination.y = THREE.MathUtils.clamp(destination.y, .6, 5.8);
+    }
+    const fieldOfView = this.seated ? THREE.MathUtils.clamp((this.camera.aspect < 1 ? 78 : 62) / zoom, 42, 90) : cameraMode === 2 ? THREE.MathUtils.clamp(58 / zoom, 35, 85) : 58;
     if(this.camera.fov !== fieldOfView){this.camera.fov = fieldOfView;this.camera.updateProjectionMatrix();}
     if (!this.initialized || this.lastMode !== cameraMode) { this.camera.position.copy(destination); this.initialized = true; this.lastMode = cameraMode; }
     else this.camera.position.lerp(destination, 1 - Math.exp(-Math.min(dt, 0.2) * 5.8));
@@ -436,7 +457,7 @@ export class CityView {
       const obstruction = this.raycaster.intersectObjects(this.occluders, false)[0];
       if (obstruction) this.camera.position.copy(pivot).addScaledVector(offset.normalize(), Math.max(0.4, obstruction.distance - 0.55));
     }
-    this.camera.lookAt(lookAt); this.renderer.render(this.scene, this.camera);
+    this.camera.lookAt(lookAt); this.renderer.render(this.scene, this.camera);this.renderFrames++;
   }
   resize() { const width = Math.max(1, this.parent.clientWidth), height = Math.max(1, this.parent.clientHeight); this.camera.aspect = width / height; this.camera.updateProjectionMatrix(); this.renderer.setSize(width, height, false); }
   destroy() { this.observer.disconnect(); this.casino.destroy(); this.scene.traverse(object => { if (object instanceof THREE.Mesh) { object.geometry.dispose(); for (const material of Array.isArray(object.material) ? object.material : [object.material]) material.dispose(); } }); this.glowTexture.dispose(); this.smokeTexture.dispose(); this.renderer.dispose(); this.renderer.domElement.remove(); }

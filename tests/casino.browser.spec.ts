@@ -7,10 +7,26 @@ type Snapshot = {
   paused: boolean;
   started: boolean;
   casino: { pokerOpen: boolean; poker: PokerState | null; reserve: number };
+  camera: { yaw: number; pitch: number; zoom: number; locked: boolean };
+  rendering: { view: 'city' | 'casino' | 'poker'; frames: number; calls: number };
 };
 
 async function snapshot(page: Page): Promise<Snapshot> {
   return page.evaluate(() => (window as unknown as { __NEON_TEST__: Snapshot }).__NEON_TEST__);
+}
+
+/** The playable table must keep the actual, live casino scene in view. */
+async function expectCasinoView(page: Page, view: 'casino' | 'poker') {
+  await expect.poll(async () => (await snapshot(page)).rendering.view).toBe(view);
+  await expect(page.locator('#world canvas')).toBeVisible();
+  const before = await snapshot(page);
+  expect(before.state.interior).toBe('casino');
+  expect(before.rendering.calls).toBeGreaterThan(0);
+  await expect.poll(async () => (await snapshot(page)).rendering.frames).toBeGreaterThan(before.rendering.frames);
+  if (view === 'poker') {
+    expect(await page.locator('#poker-root').evaluate(element => getComputedStyle(element).backgroundColor)).toBe('rgba(0, 0, 0, 0)');
+    expect(await page.evaluate(() => document.elementFromPoint(innerWidth / 2, innerHeight * .43)?.matches('#world canvas'))).toBe(true);
+  }
 }
 
 async function walkUntil(page: Page, key: string, axis: 'x' | 'z', target: number, increasing: boolean, sprint = false) {
@@ -46,11 +62,13 @@ async function visitCasinoTable(page: Page, capture?: (name: string) => Promise<
   await capture?.('casino-entrance.png');
   await page.keyboard.press('e');
   await expect.poll(async () => (await snapshot(page)).state.interior).toBe('casino');
+  await expectCasinoView(page, 'casino');
   await capture?.('casino-interior.png');
   await walkUntil(page, 'w', 'z', 2.5, false);
   await page.keyboard.press('e');
   await expect.poll(async () => (await snapshot(page)).casino.pokerOpen).toBe(true);
   await expect(page.locator('#poker-buyin')).toBeVisible();
+  await expectCasinoView(page, 'poker');
 }
 
 async function buyIn(page: Page) {
@@ -76,7 +94,24 @@ test('można wejść do kasyna, rozegrać pokera, wypłacić żetony i wrócić 
   page.on('response', response => { if (response.status() >= 400) failed.push(`${response.status()} ${response.url()}`); });
   await visitCasinoTable(page, name => page.screenshot({ path: testInfo.outputPath(name), fullPage: true }).then(() => undefined));
   await page.screenshot({ path: testInfo.outputPath('casino-table-lobby.png'), fullPage: true });
+  const seated = await snapshot(page);
+  const viewport = page.viewportSize()!;
+  const lookFrom = { x: viewport.width / 2, y: viewport.height * .43 };
+  await page.mouse.click(lookFrom.x, lookFrom.y);
+  await page.mouse.move(lookFrom.x, lookFrom.y);
+  await page.mouse.down({ button: 'right' });
+  await page.mouse.move(lookFrom.x + 80, lookFrom.y + 15, { steps: 4 });
+  await page.mouse.up({ button: 'right' });
+  await expect.poll(async () => Math.abs((await snapshot(page)).camera.yaw - seated.camera.yaw)).toBeGreaterThan(.05);
+  expect((await snapshot(page)).state.player).toEqual(seated.state.player);
+  expect((await snapshot(page)).casino.pokerOpen).toBe(true);
+  expect((await snapshot(page)).camera.locked).toBe(false);
+  // Return the view to the table before dealing. Looking never moves the actor.
+  await page.mouse.down({ button: 'right' });
+  await page.mouse.move(lookFrom.x, lookFrom.y, { steps: 4 });
+  await page.mouse.up({ button: 'right' });
   await buyIn(page);
+  await expectCasinoView(page, 'poker');
   await page.screenshot({ path: testInfo.outputPath('casino-poker.png'), fullPage: true });
 
   // Choose actions through real controls. Bots retain their own shuffled hands.
@@ -105,19 +140,15 @@ test('można wejść do kasyna, rozegrać pokera, wypłacić żetony i wrócić 
   await expect(page.locator('#poker-board [data-testid="poker-board-card"]')).toHaveCount(result.board.length);
   await expect(page.locator('#poker-status')).toHaveText(/\S/);
   await page.setViewportSize({ width: 390, height: 844 });
+  await expectCasinoView(page, 'poker');
   await page.screenshot({ path: testInfo.outputPath('casino-poker-mobile.png'), fullPage: true });
   expect(await page.locator('#poker-root').evaluate(element => element.scrollWidth <= element.clientWidth)).toBe(true);
-  expect(await page.locator('#poker-board').evaluate(element => {
-    const board = element.getBoundingClientRect();
-    return [...document.querySelectorAll('.poker-seat--left .poker-seat-info,.poker-seat--right .poker-seat-info')].every(seat => {
-      const box = seat.getBoundingClientRect();
-      return box.bottom <= board.top || box.top >= board.bottom || box.right <= board.left || box.left >= board.right;
-    });
-  })).toBe(true);
+  await expect(page.locator('#poker-board')).toBeInViewport();
   await page.setViewportSize({ width: 1440, height: 900 });
   const refund = result.players[0].stack;
   await page.locator('#poker-leave').click();
   await expect.poll(async () => (await snapshot(page)).casino.pokerOpen).toBe(false);
+  await expectCasinoView(page, 'casino');
   expect((await snapshot(page)).casino.reserve).toBe(0);
   expect((await snapshot(page)).state.money).toBe(1050 + refund);
   expect((await snapshot(page)).state.interior).toBe('casino');
