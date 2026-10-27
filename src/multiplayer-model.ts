@@ -1,10 +1,21 @@
 import type { PokerAction, PokerState } from './poker-model';
-import type { VehicleKind } from './model';
+import type { Point, VehicleKind } from './model';
 
 export const MAX_ROOM_PLAYERS = 4;
-export const ROOM_PROTOCOL = 1;
+export const ROOM_PROTOCOL = 2;
 export const ONLINE_BUY_IN = 200;
 export const ONLINE_TURN_MS = 30000;
+export const CREW_DURATION_MS = 150000;
+export const CREW_COOLDOWN_MS = 20000;
+export const CREW_REWARD = 300;
+export const CREW_CHECKPOINTS: readonly Readonly<Point>[] = [{x:0,z:40},{x:40,z:40},{x:40,z:80}];
+export interface CrewChallenge {
+  status: 'idle' | 'active' | 'completed' | 'failed';
+  run: number; eligible: boolean;
+  /** Zero-based next checkpoint; equals total after successful completion. */
+  checkpoint: number; total: 3; target: Point | null;
+  remainingMs: number; cooldownMs: number; reward: 300; contributors: string[];
+}
 export interface OnlineVehicle {
   id: string; kind: VehicleKind; x: number; z: number; heading: number;
   color: number; speed: number; health: number;
@@ -21,10 +32,11 @@ export interface RoomSnapshot {
   vehicles: OnlineVehicle[]; worldTime: number;
   wallet: number; seated: boolean; poker: PokerState | null;
   tableVersion: number; turnDeadline: number | null;
+  challenge: CrewChallenge;
 }
 export type RoomCommand =
   | { type: 'pose'; pose: OnlinePose }
-  | { type: 'sit' | 'stand' | 'deal' | 'ping' }
+  | { type: 'sit' | 'stand' | 'deal' | 'ping' | 'challengeStart' }
   | { type: 'action'; action: PokerAction; version: number }
   | { type: 'spend'; amount: number };
 export type RoomResult = { ok: true } | { ok: false; reason: string };
@@ -43,4 +55,5 @@ export interface MultiplayerSession {
   deal(): void;
   action(action: PokerAction): void;
   spend(amount: number): void;
+  startChallenge(): void;
 }

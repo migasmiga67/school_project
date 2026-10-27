@@ -1,6 +1,6 @@
 import { Peer, util, type DataConnection, type PeerOptions } from 'peerjs';
 import { RoomAuthority } from './room-authority';
-import { MAX_ROOM_PLAYERS, ROOM_PROTOCOL, type MultiplayerSession, type MultiplayerState, type OnlinePose, type RoomCommand, type RoomSnapshot } from './multiplayer-model';
+import { CREW_CHECKPOINTS, CREW_COOLDOWN_MS, CREW_DURATION_MS, CREW_REWARD, MAX_ROOM_PLAYERS, ROOM_PROTOCOL, type MultiplayerSession, type MultiplayerState, type OnlinePose, type RoomCommand, type RoomSnapshot } from './multiplayer-model';
 import type { PokerAction } from './poker-model';
 
 const CONNECT_MS = 15000;
@@ -61,7 +61,7 @@ function packet(value: unknown): Record<string, unknown> | null {
 }
 function command(value: unknown): value is RoomCommand {
   if (!record(value)) return false;
-  if (['sit', 'stand', 'deal', 'ping'].includes(String(value.type))) return true;
+  if (['sit', 'stand', 'deal', 'ping', 'challengeStart'].includes(String(value.type))) return true;
   if (value.type === 'pose') return record(value.pose);
   if (value.type === 'spend') return integer(value.amount);
   if (value.type === 'action') return integer(value.version) && record(value.action) && ['fold', 'check', 'call', 'raise', 'allIn'].includes(String(value.action.type));
@@ -79,6 +79,15 @@ function snapshot(value: unknown, hostId: string, youId: string, code: string): 
     ids.add(member.id);
   }
   if (!ids.has(youId) || !ids.has(hostId)) return false;
+  const challenge=value.challenge;
+  if(!record(challenge)||!['idle','active','completed','failed'].includes(String(challenge.status))||!integer(challenge.run)||typeof challenge.eligible!=='boolean'||!integer(challenge.checkpoint)||Number(challenge.checkpoint)>3||challenge.total!==3||challenge.reward!==CREW_REWARD)return false;
+  if(!integer(challenge.remainingMs)||Number(challenge.remainingMs)>CREW_DURATION_MS||!integer(challenge.cooldownMs)||Number(challenge.cooldownMs)>CREW_COOLDOWN_MS||!Array.isArray(challenge.contributors)||challenge.contributors.length>MAX_ROOM_PLAYERS||new Set(challenge.contributors).size!==challenge.contributors.length)return false;
+  if(!challenge.contributors.every(id=>typeof id==='string'&&/^[A-Za-z0-9_-]{1,128}$/.test(id)))return false;
+  if(challenge.status==='active') {
+    const target=CREW_CHECKPOINTS[Number(challenge.checkpoint)];
+    if(!target||!record(challenge.target)||challenge.target.x!==target.x||challenge.target.z!==target.z||challenge.cooldownMs!==0)return false;
+  } else if(challenge.target!==null||challenge.remainingMs!==0||(challenge.status==='completed'&&challenge.checkpoint!==3)||(challenge.status==='idle'&&(challenge.run!==0||challenge.eligible||challenge.checkpoint!==0||challenge.cooldownMs!==0||challenge.contributors.length!==0)))return false;
+  if(challenge.status!=='idle'&&Number(challenge.run)<1)return false;
   if (value.poker !== null) {
     const hand = value.poker;
     if (!record(hand) || !Array.isArray(hand.players) || hand.players.length !== 4 || !Array.isArray(hand.deck) || hand.deck.length !== 0 || hand.seed !== 0 || !Array.isArray(hand.board) || hand.board.length > 5) return false;
@@ -144,6 +153,7 @@ export class MultiplayerClient implements MultiplayerSession {
     if (this.current.snapshot) this.issue({ type: 'action', action, version: this.current.snapshot.tableVersion });
   }
   spend(amount: number) { this.issue({ type: 'spend', amount }); }
+  startChallenge() { this.issue({ type: 'challengeStart' }); }
 
   private start(host: boolean, rawName: string, code: string): Promise<void> {
     this.clean('Poprzednie łączenie zostało anulowane.');
@@ -295,7 +305,7 @@ export class MultiplayerClient implements MultiplayerSession {
   }
   private acceptSnapshot(value: RoomSnapshot, notice?: string) {
     const previous = this.current.snapshot;
-    const changed = !previous || previous.tableVersion !== value.tableVersion || previous.wallet !== value.wallet || previous.seated !== value.seated;
+    const changed = !previous || previous.tableVersion !== value.tableVersion || previous.wallet !== value.wallet || previous.seated !== value.seated || previous.challenge.status !== value.challenge.status || previous.challenge.checkpoint !== value.challenge.checkpoint;
     this.publish({ status: 'online', message: notice ?? (changed ? '' : this.current.message), snapshot: clone(value) });
   }
   private drop(guest: Guest, reason?: string) {

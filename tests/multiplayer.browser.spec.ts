@@ -11,6 +11,7 @@ type Snapshot = {
   started: boolean;
   online: MultiplayerState;
   casino: { pokerOpen: boolean; poker: PokerState | null; reserve: number };
+  navigation: { remotePlayers: number; route: { x: number; z: number }[] };
   rendering: { remotePlayers: number; view: 'city' | 'casino' | 'poker'; frames: number };
 };
 
@@ -181,6 +182,142 @@ test('dwie przeglądarki widzą ruch graczy, lokalną pauzę i zakończenie poko
     throw error;
   } finally {
     await Promise.allSettled(pair.contexts.map(context => context.close()));
+  }
+});
+
+test('ekipa zalicza wspólną trasę, widzi GPS i otrzymuje nagrodę tylko w portfelu online', async ({ browser }, testInfo) => {
+  test.setTimeout(180000);
+  const pair = await createPair(browser, testInfo);
+  const { host, guest } = pair;
+  try {
+    await host.bringToFront();
+    if ((await snapshot(host)).paused) await host.locator('#resume').click();
+    await expect(host.locator('#crew-start')).toBeEnabled();
+    await expect(guest.locator('#crew-start')).toBeDisabled();
+    await host.locator('#crew-start').click();
+    for (const page of [host, guest]) {
+      await expect.poll(async () => (await room(page)).challenge.status).toBe('active');
+      expect((await room(page)).challenge.target).toEqual({ x: 0, z: 40 });
+      expect((await room(page)).challenge.eligible).toBe(true);
+      await expect(page.locator('#mission-title')).toContainText('Nocny przerzut');
+      await expect.poll(async () => (await snapshot(page)).navigation.remotePlayers).toBe(1);
+      await expect.poll(async () => (await snapshot(page)).navigation.route.length).toBeGreaterThan(1);
+    }
+
+    // The host reaches the first stop using normal controls, then pauses locally.
+    await host.keyboard.press('e');
+    await expect.poll(async () => (await snapshot(host)).state.player.mode).toBe('foot');
+    await walkUntil(host, 'w', 'z', 40.5, false);
+    for (const page of [host, guest]) {
+      await expect.poll(async () => (await room(page)).challenge.checkpoint).toBe(1);
+      expect((await room(page)).challenge.target).toEqual({ x: 40, z: 40 });
+    }
+    const hostId = (await room(host)).youId, guestId = (await room(guest)).youId;
+    expect((await room(host)).challenge.contributors).toContain(hostId);
+    await host.keyboard.press('Escape');
+    await expect.poll(async () => (await snapshot(host)).paused).toBe(true);
+    const pausedPosition = (await snapshot(host)).state.player;
+    const beforeGuestWalk = (await room(host)).challenge.remainingMs;
+
+    // The guest contributes the remaining stops; the host's pause never pauses
+    // the room or its deadline, and progress is replicated to both clients.
+    await guest.bringToFront();
+    if ((await snapshot(guest)).paused) await guest.locator('#resume').click();
+    await guest.keyboard.press('e');
+    await expect.poll(async () => (await snapshot(guest)).state.player.mode).toBe('foot');
+    await walkUntil(guest, 'w', 'z', 40.5, false);
+    await expect.poll(async () => (await room(host)).challenge.remainingMs).toBeLessThan(beforeGuestWalk - 1000);
+    expect((await snapshot(host)).state.player).toEqual(pausedPosition);
+    expect((await snapshot(host)).paused).toBe(true);
+    await walkUntil(guest, 'd', 'x', 40, true);
+    for (const page of [host, guest]) {
+      await expect.poll(async () => (await room(page)).challenge.checkpoint).toBe(2);
+      expect((await room(page)).challenge.target).toEqual({ x: 40, z: 80 });
+    }
+    await guest.screenshot({ path: testInfo.outputPath('crew-route-gps.png'), fullPage: true });
+    await walkUntil(guest, 's', 'z', 80, true);
+    for (const page of [host, guest]) {
+      await expect.poll(async () => (await room(page)).challenge.status).toBe('completed');
+      await expect.poll(async () => (await room(page)).wallet).toBe(1550);
+      const completed = (await room(page)).challenge;
+      expect(completed.checkpoint).toBe(3);
+      expect(completed.contributors).toEqual(expect.arrayContaining([hostId, guestId]));
+      expect(completed.cooldownMs).toBeGreaterThan(0);
+      expect(completed.target).toBeNull();
+      await expect(page.locator('#crew-start')).toBeDisabled();
+      const profile = await page.evaluate(() => JSON.parse(localStorage.getItem('neon-coast-profile-v1') ?? '{}'));
+      expect(profile.money).toBe(1250);
+    }
+    // More accepted poses and host ticks must not pay the completed run again.
+    const completedAt = (await room(guest)).worldTime;
+    await walkUntil(guest, 'a', 'x', 38, false);
+    await expect.poll(async () => (await room(guest)).worldTime).toBeGreaterThan(completedAt + .5);
+    expect((await room(host)).wallet + (await room(guest)).wallet).toBe(3100);
+
+    await leaveHostRoom(host);
+    await expect.poll(async () => (await snapshot(guest)).online.status).not.toBe('online');
+    for (const page of [host, guest]) {
+      expect((await snapshot(page)).state.money).toBe(1250);
+      expect((await snapshot(page)).state.mission.active).toBe(true);
+      await expect.poll(async () => (await snapshot(page)).navigation.remotePlayers).toBe(0);
+    }
+    expect(pair.errors).toEqual([]);
+    expect(pair.failed).toEqual([]);
+  } catch (error) {
+    await captureFailure(pair.contexts, testInfo);
+    throw error;
+  } finally {
+    await Promise.allSettled(pair.contexts.map(context => context.close()));
+  }
+});
+
+test('anulowanie łączenia zamyka panel i pozwala ponowić próbę bez zmiany gry solo', async ({ page }) => {
+  await page.addInitScript(() => {
+    Object.defineProperty(window, '__NEON_SIGNALING__', {
+      value: { host: '127.0.0.1', port: 9000, path: '/peerjs', secure: false, config: { iceServers: [] } },
+    });
+  });
+  let releaseSignaling!: () => void;
+  const signalingHeld = new Promise<void>(resolve => { releaseSignaling = resolve; });
+  // Leave the signaling socket open without forwarding a handshake. HTTP
+  // fallback is held as well, so a fast "room missing" reply cannot race Esc.
+  await page.routeWebSocket('ws://127.0.0.1:9000/**', () => {});
+  await page.route('http://127.0.0.1:9000/**', async route => {
+    await signalingHeld;
+    await route.abort();
+  });
+  try {
+    await page.goto('./');
+    await page.locator('#start-game').click();
+    const before = (await snapshot(page)).state;
+    await page.locator('#online').click();
+    await page.locator('#online-name').fill('Alicja');
+    await page.locator('#online-room').fill('ABCDEFGH');
+    await page.locator('#online-join').click();
+    await expect.poll(async () => (await snapshot(page)).online.status).toBe('connecting');
+    await expect(page.locator('#online-cancel-connect')).toBeVisible();
+    await page.keyboard.press('Escape');
+    await expect(page.locator('#online-dialog')).toHaveCount(0);
+    await expect.poll(async () => (await snapshot(page)).online.status).toBe('offline');
+    expect((await snapshot(page)).state.player).toEqual(before.player);
+    expect((await snapshot(page)).state.money).toBe(1250);
+    await expect(page.locator('#online')).toBeFocused();
+
+    await page.locator('#online').click();
+    await expect(page.locator('#online-join')).toBeEnabled();
+    await page.locator('#online-join').click();
+    await expect.poll(async () => (await snapshot(page)).online.status).toBe('connecting');
+    await page.locator('#online-cancel-connect').click();
+    await expect(page.locator('#online-dialog')).toHaveCount(0);
+    await expect.poll(async () => (await snapshot(page)).online.status).toBe('offline');
+    releaseSignaling();
+    await expect.poll(async () => (await snapshot(page)).rendering.frames).toBeGreaterThan(5);
+    expect((await snapshot(page)).online.status).toBe('offline');
+    expect((await snapshot(page)).state.money).toBe(1250);
+    expect((await snapshot(page)).state.mission.active).toBe(true);
+  } finally {
+    releaseSignaling();
+    await page.unrouteAll({ behavior: 'wait' });
   }
 });
 

@@ -1,0 +1,12 @@
+.crew-legend{display:flex;flex-wrap:wrap;gap:6px;margin-top:8px;max-width:100%}
+.crew-member{display:inline-flex;align-items:center;gap:5px;min-width:0;max-width:calc(50% - 3px);padding:4px 7px 4px 4px;border:1px solid #d3e6dc26;border-radius:6px;background:#11232de6;font-size:9px;color:#e3e9e0}
+.crew-member b{display:grid;place-items:center;flex:0 0 16px;width:16px;height:16px;border-radius:50%;font-size:9px;color:#13232b}
+.crew-member span{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.crew-start{border-color:#bde7d760;background:#bde7d71c;color:#d2f2df;font-weight:600;line-height:1.4}
+.crew-start:not(:disabled):hover{background:#bde7d735}
+.crew-start:disabled{opacity:.7}
+.crew-timer{font-variant-numeric:tabular-nums;letter-spacing:1px;font-size:12px;white-space:nowrap}
+.card-eyebrow .crew-timer-low{color:#ffc39a}
+.crew-timer-low:before{background:#ffc39a}
+@media(max-width:700px){.crew-legend{gap:4px;margin-top:6px}.crew-member{font-size:8px;padding:3px;gap:3px}.crew-member b{flex-basis:14px;width:14px;height:14px;font-size:8px}.crew-start{font-size:9px;padding:8px 5px}.crew-timer{font-size:11px}}
+@media(max-height:650px){.mission-card{max-height:calc(100vh - 180px);overflow:auto;pointer-events:auto}.crew-legend{margin-top:5px}}

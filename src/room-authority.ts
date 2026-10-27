@@ -1,8 +1,8 @@
 import { CASINO } from './casino-location';
 import { WORLD_BOUNDS } from './model';
 import { act, createPokerTable, dealHand, foldPokerSeat, legalActions } from './poker';
-import { MAX_ROOM_PLAYERS, ONLINE_BUY_IN, ONLINE_TURN_MS } from './multiplayer-model';
-import type { OnlineMember, OnlinePose, OnlineVehicle, RoomCommand, RoomResult, RoomSnapshot } from './multiplayer-model';
+import { CREW_CHECKPOINTS, CREW_COOLDOWN_MS, CREW_DURATION_MS, CREW_REWARD, MAX_ROOM_PLAYERS, ONLINE_BUY_IN, ONLINE_TURN_MS } from './multiplayer-model';
+import type { CrewChallenge, OnlineMember, OnlinePose, OnlineVehicle, RoomCommand, RoomResult, RoomSnapshot } from './multiplayer-model';
 import type { PokerAction, PokerSeat, PokerState } from './poker-model';
 
 interface Member { view: OnlineMember; wallet: number; lastSpend: number }
@@ -27,6 +27,13 @@ export class RoomAuthority {
   private now=0;
   private epoch:number|null=null;
   private readonly vehicles=new Map<string,OnlineVehicle>();
+  private challengeStatus:CrewChallenge['status']='idle';
+  private challengeRun=0;
+  private checkpoint=0;
+  private challengeDeadline=0;
+  private challengeReadyAt=0;
+  private readonly challengeEligible=new Set<string>();
+  private readonly contributors=new Set<string>();
 
   constructor(code:string,hostId:string,name:string,seed?:number) {
     if(typeof code!=='string'||!/^[A-Z2-9]{8}$/i.test(code)||!validId(hostId)||!validName(nickname(name)))throw new Error('Niepoprawny kod pokoju lub pseudonim.');
@@ -53,6 +60,7 @@ export class RoomAuthority {
     this.stand(id);
     const car=this.people.get(id)?.view.pose.vehicle;
     if(car&&car.id!=='stratus')this.vehicles.set(car.id,{...car,speed:0});
+    this.challengeEligible.delete(id);
     this.people.delete(id);
   }
 
@@ -63,6 +71,7 @@ export class RoomAuthority {
     if(!command||typeof command!=='object'||typeof command.type!=='string')return no('Niepoprawne polecenie pokoju.');
     switch(command.type) {
       case 'ping': return yes;
+      case 'challengeStart': return this.startChallenge(id,member);
       case 'pose': return this.move(member,command.pose);
       case 'sit': return this.sit(id,member);
       case 'stand': return this.stand(id);
@@ -89,10 +98,14 @@ export class RoomAuthority {
     if(!finite(now)||now<0)return false;
     this.now=Math.max(this.now,now);
     if(this.epoch===null)this.epoch=this.now;
-    if(this.deadline===null||this.now<this.deadline||!handActive(this.table)||this.table.actor===null)return false;
+    let changed=false;
+    if(this.challengeStatus==='active'&&this.now>=this.challengeDeadline) {
+      this.challengeStatus='failed';this.challengeReadyAt=this.challengeDeadline+CREW_COOLDOWN_MS;changed=true;
+    }
+    if(this.deadline===null||this.now<this.deadline||!handActive(this.table)||this.table.actor===null)return changed;
     const seat=this.table.actor,legal=legalActions(this.table,seat);
     const result=act(this.table,seat,legal.canCheck?{type:'check'}:{type:'fold'});
-    if(!result.ok)return false;
+    if(!result.ok)return changed;
     this.table=result.state;this.changed();return true;
   }
 
@@ -101,7 +114,36 @@ export class RoomAuthority {
     if(!member)throw new Error('Nie należysz do tego pokoju.');
     const seat=this.seats.indexOf(id);
     const poker=seat>=0?this.publicTable(seat):null;
-    return {code:this.code,hostId:this.hostId,youId:id,members:[...this.people.values()].map(person=>structuredClone(person.view)).sort((a,b)=>a.slot-b.slot),wallet:member.wallet,seated:seat>=0,poker,tableVersion:this.version,turnDeadline:this.deadline,vehicles:[...this.vehicles.values()].map(car=>({...car})),worldTime:this.epoch===null?0:(this.now-this.epoch)/1000};
+    return {code:this.code,hostId:this.hostId,youId:id,members:[...this.people.values()].map(person=>structuredClone(person.view)).sort((a,b)=>a.slot-b.slot),wallet:member.wallet,seated:seat>=0,poker,tableVersion:this.version,turnDeadline:this.deadline,vehicles:[...this.vehicles.values()].map(car=>({...car})),worldTime:this.epoch===null?0:(this.now-this.epoch)/1000,challenge:this.publicChallenge(id)};
+  }
+
+  private startChallenge(id:string,member:Member):RoomResult {
+    if(id!==this.hostId)return no('Tylko gospodarz może rozpocząć Nocny przerzut.');
+    if(this.people.size<2)return no('Zaproś co najmniej jednego znajomego do wspólnego zlecenia.');
+    if(member.view.pose.interior!==null||member.view.pose.seated)return no('Wyjdź z kasyna, aby rozpocząć zlecenie ekipy.');
+    if(this.challengeStatus==='active')return no('Nocny przerzut już trwa. Jedźcie do wspólnego celu.');
+    if(this.now<this.challengeReadyAt)return no('Ekipa potrzebuje chwili przed następnym przerzutem.');
+    this.challengeStatus='active';this.challengeRun++;this.checkpoint=0;this.challengeDeadline=this.now+CREW_DURATION_MS;
+    this.challengeEligible.clear();for(const memberId of this.people.keys())this.challengeEligible.add(memberId);
+    this.contributors.clear();return yes;
+  }
+
+  private publicChallenge(id:string):CrewChallenge {
+    const active=this.challengeStatus==='active';
+    return {status:this.challengeStatus,run:this.challengeRun,eligible:this.challengeEligible.has(id),checkpoint:this.checkpoint,total:3,target:active?{...CREW_CHECKPOINTS[this.checkpoint]}:null,remainingMs:active?Math.max(0,Math.ceil(this.challengeDeadline-this.now)):0,cooldownMs:active?0:Math.max(0,Math.ceil(this.challengeReadyAt-this.now)),reward:CREW_REWARD,contributors:[...this.contributors]};
+  }
+
+  private reachCheckpoint(member:Member) {
+    if(this.challengeStatus!=='active'||member.view.pose.interior!==null||member.view.pose.seated)return;
+    const target=CREW_CHECKPOINTS[this.checkpoint],pose=member.view.pose;
+    if(Math.hypot(pose.x-target.x,pose.z-target.z)>5)return;
+    this.contributors.add(member.view.id);this.checkpoint++;
+    if(this.checkpoint<CREW_CHECKPOINTS.length)return;
+    this.challengeStatus='completed';this.challengeReadyAt=this.now+CREW_COOLDOWN_MS;
+    for(const id of this.challengeEligible) {
+      const participant=this.people.get(id);
+      if(participant)participant.wallet+=CREW_REWARD;
+    }
   }
 
   private validAction(value:unknown):value is PokerAction {
@@ -129,6 +171,7 @@ export class RoomAuthority {
     if(previousCar&&previousCar.id!=='stratus'&&previousCar.id!==vehicle?.id)this.vehicles.set(previousCar.id,{...previousCar,speed:0});
     if(vehicle&&vehicle.id!=='stratus')this.vehicles.set(vehicle.id,{...vehicle});
     member.view.pose={x:value.x,z:value.z,heading:Math.atan2(Math.sin(value.heading),Math.cos(value.heading)),mode:value.mode,interior:value.interior,seated,vehicle};
+    this.reachCheckpoint(member);
     return yes;
   }
 

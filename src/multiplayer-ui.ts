@@ -45,7 +45,7 @@ export class MultiplayerUI {
     this.visible = true; this.leavePending = false; this.notice = ''; this.error = '';
     this.previousFocus = document.activeElement as HTMLElement;
     this.root = document.createElement('div'); this.root.className = 'online-overlay'; this.root.id = 'online-dialog';
-    this.root.setAttribute('role', 'dialog'); this.root.setAttribute('aria-modal', 'true'); this.root.setAttribute('aria-labelledby', 'online-heading');
+    this.root.setAttribute('role', 'dialog'); this.root.setAttribute('aria-modal', 'true'); this.root.setAttribute('aria-labelledby', 'online-heading'); this.root.setAttribute('aria-describedby', 'online-description');
     this.root.addEventListener('keydown', event => {
       event.stopPropagation();
       if (event.key === 'Escape') { event.preventDefault(); this.handleEscape(); }
@@ -59,10 +59,23 @@ export class MultiplayerUI {
   }
   close() {
     if (!this.visible) return;
+    const cancelConnection = this.session.state.status === 'connecting';
+    const previousFocus = this.previousFocus;
+    this.operation++; this.busy = false; this.previousFocus = null;
     this.visible = false; this.leavePending = false; this.root?.remove(); this.root = null;
-    this.callbacks.onClose(); this.previousFocus?.focus({preventScroll: true});
+    if (cancelConnection) this.session.leave();
+    this.callbacks.onClose();
+    // Entering the city can hide the original start-menu button in this same
+    // event. Restore focus after that callback, to a control that is still shown.
+    queueMicrotask(() => {
+      if (this.visible) return;
+      const visible = (element: HTMLElement | null): element is HTMLElement => Boolean(element?.isConnected && element.getClientRects().length && element.tagName !== 'BODY' && !element.matches(':disabled'));
+      const fallback = document.querySelector<HTMLElement>('#online');
+      const target = visible(previousFocus) ? previousFocus : visible(fallback) ? fallback : null;
+      target?.focus({preventScroll: true});
+    });
   }
-  handleEscape() { if (this.leavePending) { this.leavePending = false; this.render(); } else this.close(); }
+  handleEscape() { if (this.leavePending) { this.leavePending = false; this.render(); this.query('#online-leave')?.focus(); } else this.close(); }
   destroy() { this.operation++; this.unsubscribe(); this.close(); }
   private query<T extends HTMLElement = HTMLElement>(selector: string) { return this.root?.querySelector<T>(selector) ?? null; }
   private normalizeCode(raw: string) {
@@ -75,7 +88,8 @@ export class MultiplayerUI {
     const controls = [...(area?.querySelectorAll<HTMLElement>('button:not(:disabled),input:not(:disabled),summary,a[href]') ?? [])];
     const first = controls[0], last = controls.at(-1);
     if (!first) { event.preventDefault(); return; }
-    if (event.shiftKey && document.activeElement === first) { last?.focus(); event.preventDefault(); }
+    if (!controls.includes(document.activeElement as HTMLElement)) { (event.shiftKey ? last : first)?.focus(); event.preventDefault(); }
+    else if (event.shiftKey && document.activeElement === first) { last?.focus(); event.preventDefault(); }
     else if (!event.shiftKey && document.activeElement === last) { first.focus(); event.preventDefault(); }
   }
   private async connect(kind: 'create' | 'join') {
@@ -115,7 +129,7 @@ export class MultiplayerUI {
     const current = this.session.state, snapshot = current.snapshot, connected = current.status === 'online' && snapshot !== null;
     const connecting = this.busy || current.status === 'connecting';
     const host = connected && snapshot.hostId === snapshot.youId;
-    this.root.innerHTML = `<section class="online-card"><button id="online-close" class="online-close" aria-label="Zamknij panel online">×</button><div class="online-eyebrow">NEON COAST · MULTIPLAYER</div><h1 id="online-heading">${connected ? 'Twoje miasto. Wasza ekipa.' : 'Zaproś swoją ekipę.'}</h1><p class="online-description">${connected ? 'Wspólna jazda, spotkania w kasynie i poker między graczami.' : 'Stwórz pokój dla maksymalnie czterech osób albo dołącz do znajomego.'}</p>${connected ? `
+    this.root.innerHTML = `<section class="online-card"><button id="online-close" class="online-close" aria-label="${connecting ? 'Anuluj łączenie i zamknij panel online' : 'Zamknij panel online'}">×</button><div class="online-eyebrow">NEON COAST · MULTIPLAYER</div><h1 id="online-heading">${connected ? 'Twoje miasto. Wasza ekipa.' : 'Zaproś swoją ekipę.'}</h1><p class="online-description" id="online-description">${connected ? 'Wspólna jazda, spotkania w kasynie i poker między graczami.' : 'Stwórz pokój dla maksymalnie czterech osób albo dołącz do znajomego.'}</p>${connected ? `
       <div class="online-room-code"><span>KOD POKOJU</span><strong id="online-code">${safe(snapshot.code)}</strong><span>${snapshot.members.length} / 4 GRACZY</span></div>
       <div class="online-invitation"><label for="online-invite">Zaproszenie dla znajomego</label><div><input id="online-invite" readonly value="${safe(this.invitation(snapshot.code))}"><button id="online-copy" class="online-button">Kopiuj</button></div><p id="online-notice" role="status">${safe(this.notice)}</p></div>
       <ul class="online-members" aria-label="Gracze w pokoju">${snapshot.members.map(member => `<li><span class="online-member-icon">${safe(member.name.slice(0, 1).toUpperCase())}</span><span>${safe(member.name)}${member.id === snapshot.youId ? '<small>TY</small>' : ''}</span>${member.id === snapshot.hostId ? '<b>GOSPODARZ</b>' : '<b>POŁĄCZONO</b>'}</li>`).join('')}</ul>
@@ -123,8 +137,9 @@ export class MultiplayerUI {
       <p class="online-note">${host ? 'Jesteś gospodarzem. Zostaw grę otwartą, aby znajomi mogli zostać w pokoju.' : 'Pokój działa, dopóki gospodarz ma otwartą grę.'} Gotówka online należy do tej sesji; twój zapis solo pozostaje osobno.</p>` : `
       <label class="online-label" for="online-name">TWOJA NAZWA</label><input id="online-name" class="online-input" autocomplete="nickname" maxlength="18" value="${safe(this.name)}" placeholder="Np. Nova" ${connecting ? 'disabled' : ''}>
       <div class="online-connect"><section><span class="online-step">NOWA EKIPA</span><h2>Wasz własny pokój</h2><p>Dostaniesz kod i link zaproszenia.</p><button id="online-create" class="online-button online-button--primary" ${connecting ? 'disabled' : ''}>Utwórz pokój</button></section><section><span class="online-step">MASZ ZAPROSZENIE?</span><label for="online-room">Kod pokoju</label><input id="online-room" class="online-input online-code-input" autocomplete="off" spellcheck="false" maxlength="250" value="${safe(this.code)}" placeholder="8 znaków lub link" ${connecting ? 'disabled' : ''}><button id="online-join" class="online-button" ${connecting ? 'disabled' : ''}>Dołącz</button></section></div>
-      ${connecting ? '<p class="online-connecting" role="status">Łączenie z pokojem…</p>' : ''}${this.error ? `<p class="online-error" role="alert">${safe(this.error)}</p>` : ''}<p class="online-note">Pokój pomieści do 4 osób. Gospodarz utrzymuje połączenie przez swoją przeglądarkę. Po jego wyjściu sesja się kończy.</p>`}</section>${this.leavePending && connected ? `<div class="online-confirm"><section class="online-card online-confirm-card" id="online-leave-dialog" role="alertdialog" aria-modal="true" aria-labelledby="online-leave-heading"><div class="online-eyebrow">${host ? 'ZAKOŃCZENIE SESJI' : 'WYJŚCIE Z POKOJU'}</div><h2 id="online-leave-heading">${host ? 'Zakończyć pokój dla wszystkich?' : 'Opuścić ten pokój?'}</h2><p>${host ? 'Znajomi zostaną rozłączeni. Portfel i żetony tej sesji online nie są zapisywane.' : 'Wrócisz do gry solo. Portfel i żetony tej sesji online nie są zapisywane.'}</p><div class="online-buttons"><button id="online-cancel-leave" class="online-button online-button--primary">Zostań</button><button id="online-confirm-leave" class="online-button">${host ? 'Zakończ pokój' : 'Opuść pokój'}</button></div></section></div>` : ''}`;
+      ${connecting ? '<div class="online-connection-status"><p class="online-connecting" role="status">Łączenie z pokojem…</p><button id="online-cancel-connect" class="online-button online-button--quiet">Anuluj łączenie</button></div>' : ''}${this.error ? `<p class="online-error" role="alert">${safe(this.error)}</p>` : ''}<p class="online-note">Pokój pomieści do 4 osób. Gospodarz utrzymuje połączenie przez swoją przeglądarkę. Po jego wyjściu sesja się kończy.</p>`}</section>${this.leavePending && connected ? `<div class="online-confirm"><section class="online-card online-confirm-card" id="online-leave-dialog" role="alertdialog" aria-modal="true" aria-labelledby="online-leave-heading"><div class="online-eyebrow">${host ? 'ZAKOŃCZENIE SESJI' : 'WYJŚCIE Z POKOJU'}</div><h2 id="online-leave-heading">${host ? 'Zakończyć pokój dla wszystkich?' : 'Opuścić ten pokój?'}</h2><p>${host ? 'Znajomi zostaną rozłączeni. Portfel i żetony tej sesji online nie są zapisywane.' : 'Wrócisz do gry solo. Portfel i żetony tej sesji online nie są zapisywane.'}</p><div class="online-buttons"><button id="online-cancel-leave" class="online-button online-button--primary">Zostań</button><button id="online-confirm-leave" class="online-button">${host ? 'Zakończ pokój' : 'Opuść pokój'}</button></div></section></div>` : ''}`;
     this.query('#online-close')?.addEventListener('click', () => this.close());
+    this.query('#online-cancel-connect')?.addEventListener('click', () => this.close());
     this.query<HTMLInputElement>('#online-name')?.addEventListener('input', event => { this.name = (event.target as HTMLInputElement).value; });
     this.query<HTMLInputElement>('#online-room')?.addEventListener('input', event => { this.code = (event.target as HTMLInputElement).value; });
     this.query('#online-create')?.addEventListener('click', () => { void this.connect('create'); });

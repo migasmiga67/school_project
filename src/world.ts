@@ -35,6 +35,7 @@ export class CityView {
   private readonly marker = new THREE.Group();
   private readonly markerRing: THREE.Mesh;
   private readonly markerArrow: THREE.Group;
+  private crewMarker=false;
   private readonly waterMaterial: THREE.ShaderMaterial;
   private readonly glowTexture: THREE.CanvasTexture;
   private readonly smokeTexture: THREE.CanvasTexture;
@@ -406,7 +407,7 @@ export class CityView {
     this.seated = seated;
     this.casino.updatePoker(state, seated);
   }
-  update(state: GameState, dt: number, cameraMode: number, pose?: CameraPose, navigation?: Point) {
+  update(state: GameState, dt: number, cameraMode: number, pose?: CameraPose, navigation?: Point, crewTarget=false) {
     const inside = state.interior === 'casino';
     if(inside !== this.indoors) {
       this.indoors = inside;this.initialized = false;
@@ -430,6 +431,15 @@ export class CityView {
     for (const [id, visual] of this.cars) if (!alive.has(id)) visual.group.visible = false;
     const p = state.player; this.motion = this.lastPlayer ? Math.hypot(p.x - this.lastPlayer.x, p.z - this.lastPlayer.z) : 0; this.lastPlayer = {x:p.x,z:p.z}; this.hero.visible = !this.seated && p.mode === 'foot' && cameraMode !== 2; this.hero.position.set(p.x, 0.1, p.z); this.hero.rotation.y = -p.heading;
     const walking = this.motion > 0.003; this.heroLegs.forEach((leg, index) => { leg.rotation.x = walking ? Math.sin(state.time * 10 + index * Math.PI) * 0.45 : 0; }); this.heroArms.forEach((arm, index) => { arm.rotation.x = walking ? Math.sin(state.time * 10 + index * Math.PI) * -0.3 : 0; });
+    if(crewTarget!==this.crewMarker){
+      this.crewMarker=crewTarget;
+      this.marker.traverse(object=>{
+        if(!(object instanceof THREE.Mesh))return;
+        const material=object.material as LitMaterial|THREE.MeshBasicMaterial;
+        material.color.setHex(crewTarget?0x8df0c3:0xffdc8b);
+        if('emissive' in material)material.emissive.setHex(crewTarget?0x51dba4:0xffbc4b);
+      });
+    }
     const waypoint = inside ? null : navigation ?? (state.mission.active ? state.mission.waypoint : null); this.marker.visible = Boolean(waypoint); if (waypoint) { this.marker.position.set(waypoint.x, 0, waypoint.z); this.markerArrow.position.y = Math.sin(state.time * 2.5) * 0.4; this.markerArrow.rotation.y = state.time * 0.7; this.markerRing.rotation.z = state.time * 0.25; }
     this.waterMaterial.uniforms.uTime.value = state.time;
     this.palms.forEach((palm, index) => { palm.rotation.z = Math.sin(state.time * 0.6 + index) * 0.009; });

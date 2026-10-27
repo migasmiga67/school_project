@@ -11,10 +11,10 @@ Oryginalny, niewielki sandbox 3D w przeglądarce, inspirowany miejskimi grami ak
 - Gaz, hamulec, jazda wstecz, ręczny, nitro i kolizje z zabudową oraz pojazdami.
 - Trzy typy zleceń: dostawa, wyścig przez punkty kontrolne, ucieczka przed policją.
 - Trzy poziomy pościgu, radiowozy, areszt i powrót na drogę.
-- Pokoje online do 4 osób: widoczni gracze i ich samochody oraz wspólny stół pokerowy.
+- Pokoje online do 4 osób: widoczni gracze i ich samochody, wspólny stół pokerowy i kooperacyjne zlecenie „Nocny przerzut”.
 - Kasyno Sapphire Club z wejściem pieszo, wnętrzem 3D i stołem Texas Hold’em przeciwko trzem komputerowym graczom; rozdanie rozgrywa się przy stole w widocznej sali kasyna.
 - Poker: flop, turn, river, podbijanie, all-in, pule boczne i rozliczanie wygranych z wirtualną gotówką postaci.
-- Minimapka, znacznik celu, gotówka, stan auta, trzy kamery, pauza, syntetyczny dźwięk.
+- Minimapka z GPS prowadzącym ulicami, numerowanymi znacznikami ekipy i legendą; znacznik celu w świecie, gotówka, stan auta, trzy kamery, pauza, syntetyczny dźwięk.
 - Gotówka, liczba ukończonych misji, rekord i ustawienie dźwięku zapisują się lokalnie. Po odświeżeniu rozpoczyna się nowa sesja miasta; pozycja i etap bieżącej misji nie są zapisywane.
 
 To mały samodzielny prototyp, a nie projekt o skali pełnej produkcji AAA. Nie zawiera kampanii fabularnej ani broni.
@@ -31,7 +31,7 @@ To mały samodzielny prototyp, a nie projekt o skali pełnej produkcji AAA. Nie 
 | Shift | nitro / sprint |
 | E | wsiadanie i wysiadanie po zwolnieniu; wejście do kasyna, stół i wyjście |
 | C | zmiana widoku: pościgowy, z góry, pierwsza osoba |
-| M | kolejne zlecenie po zakończeniu aktualnego |
+| M | solo: kolejne zlecenie po zakończeniu aktualnego; online: gospodarz rozpoczyna „Nocny przerzut” |
 | R | powrót na drogę i naprawa za opłatą |
 | P / Esc | pauza i zwolnienie kursora |
 | H / ? | pomoc |
@@ -42,19 +42,23 @@ Złoty znacznik wskazuje cel. Przejmowanie obcych aut i kolizje przyciągają po
 
 ## Kasyno i poker
 
-Kliknij **♠** w górnym pasku, aby wyznaczyć trasę do Sapphire Club. Kasyno jest też oznaczone na minimapie. Wysiądź z auta, podejdź do drzwi i naciśnij **E**. Wejście wymaga zgubienia pościgu. W środku podejdź do stołu i ponownie naciśnij **E**; przy drzwiach ten sam klawisz wraca do miasta. Ruch uliczny i czas zlecenia zatrzymują się podczas pobytu w kasynie.
+Kliknij **♠** w górnym pasku, aby wyznaczyć trasę do Sapphire Club. Kasyno jest też oznaczone na minimapie. Wysiądź z auta, podejdź do drzwi i naciśnij **E**. Wejście wymaga zgubienia pościgu. W środku podejdź do stołu i ponownie naciśnij **E**; przy drzwiach ten sam klawisz wraca do miasta. W trybie solo ruch uliczny i czas zlecenia zatrzymują się podczas pobytu w kasynie.
 
-Wpisowe wynosi **$200**, a ciemne **$5 / $10**. Grasz własnymi kartami przeciwko trzem NPC, wybierając pas, czekanie, sprawdzenie, podbicie lub all-in. Po rozdaniu możesz rozdać kolejne karty albo odejść z pozostałymi żetonami. Cała gotówka jest wirtualna i pochodzi z portfela postaci.
+Wpisowe wynosi **$200**, a ciemne **$5 / $10**. W trybie solo grasz własnymi kartami przeciwko trzem NPC, wybierając pas, czekanie, sprawdzenie, podbicie lub all-in. Po rozdaniu możesz rozdać kolejne karty albo odejść z pozostałymi żetonami. Cała gotówka jest wirtualna i pochodzi z portfela postaci.
 
 Przy stole kamera pokazuje wnętrze kasyna, przeciwników, karty i żetony w 3D. Przeciągaj wolny obszar widoku prawym przyciskiem myszy, aby rozglądać się po sali. Karty i przyciski licytacji pozostają w niewielkich panelach; po odejściu od stołu wracasz do swobodnego chodzenia po kasynie.
 
-Wyjście w trakcie rozdania wymaga potwierdzenia i oznacza pas. Niewykorzystane żetony wracają do portfela, a postawione zostają w puli. Odświeżenie strony działa tak samo: zwraca zapisany, niewykorzystany stos tylko raz; bieżące rozdanie nie jest wznawiane.
+Wyjście w trakcie rozdania wymaga potwierdzenia i oznacza pas. Niewykorzystane żetony wracają do portfela, a postawione zostają w puli. W trybie solo odświeżenie strony działa tak samo: zwraca zapisany, niewykorzystany stos tylko raz; bieżące rozdanie nie jest wznawiane.
 
 ## Gra online
 
-Wybierz **Graj online** na ekranie startowym lub przycisk online w grze. Wpisz pseudonim i utwórz pokój albo dołącz kodem od znajomego. Gospodarz może skopiować link z zaproszeniem. Po połączeniu wybierz wejście do miasta. W pokoju mieszczą się maksymalnie **4 osoby**.
+Wybierz **Graj online** na ekranie startowym lub przycisk online w grze. Wpisz pseudonim i utwórz pokój albo dołącz kodem od znajomego. Gospodarz może skopiować link z zaproszeniem. Po połączeniu wybierz wejście do miasta. W pokoju mieszczą się maksymalnie **4 osoby**. Podczas łączenia **Anuluj łączenie**, zamknięcie panelu lub **Esc** przerywa próbę; możesz potem ponowić dołączanie. Zamknięcie panelu po udanym połączeniu pozostawia cię w pokoju.
 
-Pokoje służą wspólnej eksploracji miasta i grze w kasynie. Widać poruszające się postacie oraz prowadzone przez innych samochody. Lokalna pauza zatrzymuje twoją postać; pozostali mogą dalej grać. Zlecenia należą do trybu solo i wracają po opuszczeniu pokoju.
+Pokoje służą wspólnej eksploracji miasta, zleceniu ekipy i grze w kasynie. Widać poruszające się postacie oraz prowadzone przez innych samochody. Na minimapie znajdziesz kolorowe, numerowane znaczniki znajomych i legendę z ich nazwami. Osoby przebywające w kasynie są oznaczone przy jego wejściu. GPS prowadzi trasą po ulicach do aktualnego celu. Lokalna pauza zatrzymuje twoją postać; pozostali mogą dalej grać. Osobiste zlecenia trybu solo wracają po opuszczeniu pokoju.
+
+**Nocny przerzut:** gdy w pokoju są co najmniej dwie osoby, gospodarz poza kasynem rozpoczyna zlecenie przyciskiem na karcie misji lub klawiszem **M**. Ekipa ma **150 sekund** na zaliczenie **trzech punktów po kolei**. Przez każdy znacznik może przejść lub przejechać dowolny członek pokoju; wspólny cel i postęp widzą wszyscy. Lokalna pauza ani wejście do kasyna nie zatrzymują odliczania.
+
+Po ukończeniu każdy gracz obecny przy starcie i nadal połączony przy zakończeniu otrzymuje jednorazowo **$300** do portfela online. Osoby dołączające w trakcie mogą pomagać, a nagrodę otrzymają od kolejnego przerzutu. Po ukończeniu lub upływie czasu obowiązuje **20 sekund** przerwy przed ponownym startem.
 
 W kasynie podejdź do stołu i użyj **E**. Każdy gracz osobno zajmuje miejsce za **$200**. Gdy usiądą co najmniej dwie osoby, można rozdać karty. Przy stole online decyzje podejmują ludzie; gospodarz sprawdza kolejność akcji, rozlicza pule i przekazuje każdemu tylko jego prywatne karty. Na ruch jest **30 sekund**; po upływie czasu gracz czeka, jeśli może, albo pasuje.
 
