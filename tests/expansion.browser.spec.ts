@@ -2,6 +2,7 @@ import { expect, test, type Browser, type BrowserContext, type Page, type TestIn
 import type { GarageState } from '../src/garage';
 import type { GameState } from '../src/model';
 import type { MultiplayerState, RoomSnapshot } from '../src/multiplayer-model';
+import { RACE_COUNTDOWN_MS } from '../src/online-jobs';
 
 const GAME_URL = process.env.NEON_BASE_URL || 'http://127.0.0.1:5185/school_project/';
 type Snapshot = {
@@ -15,6 +16,14 @@ type Snapshot = {
   rendering: { frames: number; remotePlayers: number };
 };
 type Pair = { host: Page; guest: Page; contexts: BrowserContext[]; errors: string[]; failed: string[] };
+type RaceInputProof = {
+  grid: { x: number; z: number };
+  before: { x: number; z: number; mode: string; wallet: number; money: number; health: number; wanted: number; paused: boolean; activitiesOpen: boolean };
+  inputs: { key: string; phase: string; remainingMs: number; paused: boolean }[];
+  afterFrame: { x: number; z: number; mode: string; phase: string; remainingMs: number };
+  firstRunningFrame: number;
+  afterGo: { phase: string; mode: string; wallet: number; money: number; health: number; wanted: number; paused: boolean; frames: number };
+};
 
 const snapshot = (page: Page): Promise<Snapshot> => page.evaluate(() => (window as unknown as { __NEON_TEST__: Snapshot }).__NEON_TEST__);
 async function room(page: Page): Promise<RoomSnapshot> {
@@ -105,6 +114,55 @@ async function stopCar(page: Page) {
       return Math.abs(state.vehicles.find(car => car.id === state.player.vehicleId)?.speed ?? 0);
     }, { intervals: [50, 100] }).toBeLessThan(.6);
   } finally { await page.keyboard.up(' '); }
+}
+async function installCountdownInputProbe(page: Page) {
+  await page.evaluate(() => {
+    const observed = window as unknown as { __NEON_TEST__: Snapshot; __RACE_INPUT_PROOF__: RaceInputProof | null };
+    observed.__RACE_INPUT_PROOF__ = null;
+    const observe = () => {
+      const race = observed.__NEON_TEST__.online.snapshot?.jobs.race;
+      if (race?.status !== 'countdown' || !race.grid) { requestAnimationFrame(observe); return; }
+      // Observe the real room state and use the existing UI/keyboard handlers.
+      // No game state, clock, snapshots or network commands are changed here.
+      document.getElementById('activities-close')?.click();
+      const before = observed.__NEON_TEST__, player = before.state.player;
+      const health = (value: Snapshot) => value.state.vehicles.find(car => car.id === value.state.player.vehicleId)?.health ?? 0;
+      const inputs: RaceInputProof['inputs'] = [];
+      const key = (type: 'keydown' | 'keyup', value: string) => {
+        if (type === 'keydown') {
+          const current = observed.__NEON_TEST__, phase = current.online.snapshot?.jobs.race;
+          inputs.push({ key: value, phase: phase?.status ?? 'offline', remainingMs: phase?.countdownMs ?? 0, paused: current.paused });
+        }
+        window.dispatchEvent(new KeyboardEvent(type, { key: value, bubbles: true, cancelable: true }));
+      };
+      const initial = { x: player.x, z: player.z, mode: player.mode, wallet: before.online.snapshot!.wallet, money: before.state.money, health: health(before), wanted: before.state.wanted, paused: before.paused, activitiesOpen: before.activitiesOpen };
+      // All three keydowns run in this browser task while the observed phase is
+      // locked. Slow Playwright/CDP round trips cannot move E/R past GO.
+      key('keydown', 'w'); key('keydown', 'e'); key('keyup', 'e'); key('keydown', 'r'); key('keyup', 'r');
+      requestAnimationFrame(() => {
+        key('keyup', 'w');
+        const after = observed.__NEON_TEST__, phase = after.online.snapshot?.jobs.race;
+        const afterFrame = { x: after.state.player.x, z: after.state.player.z, mode: after.state.player.mode, phase: phase?.status ?? 'offline', remainingMs: phase?.countdownMs ?? 0 };
+        const waitForGo = () => {
+          const firstGo = observed.__NEON_TEST__;
+          if (firstGo.online.snapshot?.jobs.race.status !== 'running') { requestAnimationFrame(waitForGo); return; }
+          const firstRunningFrame = firstGo.rendering.frames;
+          // Let a further RAF run the real GO physics before pausing. Otherwise
+          // pause itself could clear a wrongly deferred E/R and hide the bug.
+          requestAnimationFrame(() => {
+            const go = observed.__NEON_TEST__;
+            const afterGo = { phase: go.online.snapshot?.jobs.race.status ?? 'offline', mode: go.state.player.mode, wallet: go.online.snapshot!.wallet, money: go.state.money, health: health(go), wanted: go.state.wanted, paused: go.paused, frames: go.rendering.frames };
+            window.dispatchEvent(new KeyboardEvent('keydown', { key: 'p', bubbles: true, cancelable: true }));
+            window.dispatchEvent(new KeyboardEvent('keyup', { key: 'p', bubbles: true, cancelable: true }));
+            afterGo.paused = observed.__NEON_TEST__.paused;
+            observed.__RACE_INPUT_PROOF__ = { grid: { ...race.grid! }, before: initial, inputs, afterFrame, firstRunningFrame, afterGo };
+          });
+        };
+        requestAnimationFrame(waitForGo);
+      });
+    };
+    requestAnimationFrame(observe);
+  });
 }
 async function walkToCasinoDoor(page: Page) {
   await focusCity(page);
@@ -257,6 +315,15 @@ test('wyścig ustawia kierowców na starcie i zalicza pierwszy punkt po sygnale'
   test.setTimeout(150000);
   const pair = await createPair(browser, info), { host, guest } = pair;
   try {
+    // Use the real repair action to establish a healthy car and an exact wallet
+    // baseline. R puts this personal car at(0,68), inside the legal staging area.
+    await focusCity(guest);
+    const beforeRepair = (await room(guest)).wallet;
+    await guest.keyboard.press('r');
+    await expect.poll(async () => (await room(guest)).wallet).toBe(beforeRepair - 100);
+    await expect.poll(async () => (await snapshot(guest)).state.vehicles.find(car => car.id === 'stratus')?.health).toBe(100);
+    await guest.keyboard.press('p');
+    await expect.poll(async () => (await snapshot(guest)).paused).toBe(true);
     await openActivities(host);
     await expect(host.locator('#race-start')).toBeEnabled();
     await host.locator('#race-start').click();
@@ -264,31 +331,32 @@ test('wyścig ustawia kierowców na starcie i zalicza pierwszy punkt po sygnale'
     await expect(host.locator('#race-ready')).toBeEnabled();
     await host.locator('#race-ready').click();
     await expect.poll(async () => (await room(host)).jobs.race.ready).toContain((await room(host)).youId);
-    await focusCity(guest);
-    await moveUntil(guest, 's', 'z', 72, true);
-    await stopCar(guest);
     await openActivities(guest);
     await expect(guest.locator('#race-ready')).toBeEnabled();
+    await installCountdownInputProbe(guest);
     await guest.locator('#race-ready').click();
-    await expect.poll(async () => (await room(guest)).jobs.race.status).toBe('countdown');
-    const grid = (await room(guest)).jobs.race.grid!;
-    expect(grid).toEqual({ x: 3, z: 82 });
-    await guest.locator('#activities-close').click();
-    await guest.keyboard.down('w');
-    // One-shot actions during the locked grid must not execute at the GO signal.
-    await guest.keyboard.press('e');
-    await guest.keyboard.press('r');
-    await guest.waitForTimeout(100);
-    const waiting = await snapshot(guest);
-    if (waiting.online.snapshot?.jobs.race.status === 'countdown') {
-      expect(Math.hypot(waiting.state.player.x - grid.x, waiting.state.player.z - grid.z)).toBeLessThan(.1);
+    // Deliberately read the proof after the full countdown window, as a slow CI
+    // client might. Input delivery happened inside the browser during countdown.
+    await guest.waitForTimeout(RACE_COUNTDOWN_MS + 500);
+    await expect.poll(() => guest.evaluate(() => (window as unknown as { __RACE_INPUT_PROOF__: RaceInputProof | null }).__RACE_INPUT_PROOF__)).not.toBeNull();
+    const proof = await guest.evaluate(() => (window as unknown as { __RACE_INPUT_PROOF__: RaceInputProof }).__RACE_INPUT_PROOF__);
+    await info.attach('race-countdown-input-proof', { body: JSON.stringify(proof, null, 2), contentType: 'application/json' });
+    expect(proof.grid).toEqual({ x: 3, z: 82 });
+    expect(proof.before).toMatchObject({ mode: 'drive', wallet: beforeRepair - 100, money: beforeRepair - 100, health: 100, wanted: 0, paused: false, activitiesOpen: false });
+    expect(proof.inputs.map(input => input.key)).toEqual(['w', 'e', 'r']);
+    for (const input of proof.inputs) {
+      expect(input.phase, JSON.stringify(proof)).toBe('countdown');
+      expect(input.remainingMs).toBeGreaterThan(0);
+      expect(input.paused).toBe(false);
     }
-    await guest.keyboard.up('w');
+    expect(Math.hypot(proof.before.x - proof.grid.x, proof.before.z - proof.grid.z)).toBeLessThan(.1);
+    if (proof.afterFrame.phase === 'countdown') expect(Math.hypot(proof.afterFrame.x - proof.grid.x, proof.afterFrame.z - proof.grid.z)).toBeLessThan(.1);
+    expect(proof.afterGo.frames, JSON.stringify(proof)).toBeGreaterThan(proof.firstRunningFrame);
+    expect(proof.afterGo, JSON.stringify(proof)).toMatchObject({ phase: 'running', mode: 'drive', wallet: proof.before.wallet, money: proof.before.money, health: 100, wanted: 0, paused: true });
     await focusCity(host);
     await expect.poll(async () => (await room(host)).jobs.race.status, { timeout: 10000 }).toBe('running');
     expect((await snapshot(guest)).state.player.mode).toBe('drive');
-    // Police arrest costs $200; an incorrectly queued R would cost $100.
-    expect((1250 - (await room(guest)).wallet) % 200).toBe(0);
+    expect((await room(guest)).wallet, JSON.stringify(proof)).toBe(proof.before.wallet);
     await moveUntil(host, 'w', 'z', 40.5, false);
     const hostId = (await room(host)).youId;
     for (const page of [host, guest]) {
