@@ -2,7 +2,7 @@ import { existsSync } from 'node:fs';
 import { defineConfig, type ReporterDescription } from '@playwright/test';
 
 const baseURL = process.env.NEON_BASE_URL || 'http://127.0.0.1:5185/school_project/';
-const executablePath = process.env.CHROMIUM_PATH || (!process.env.CI && existsSync('/usr/bin/chromium') ? '/usr/bin/chromium' : undefined);
+const executablePath = process.env.CHROMIUM_PATH || (existsSync('/usr/bin/chromium') ? '/usr/bin/chromium' : undefined);
 const reporters: ReporterDescription[] = [['list'], ['html', { open: 'never' }]];
 if (process.env.GITHUB_ACTIONS) reporters.push(['github']);
 

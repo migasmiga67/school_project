@@ -11,6 +11,8 @@ permissions:
 jobs:
   public-network:
     runs-on: ubuntu-latest
+    environment:
+      name: TURN_ICE_SERVERS
     timeout-minutes: 5
     steps:
       - uses: actions/checkout@v4
