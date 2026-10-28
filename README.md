@@ -133,7 +133,7 @@ Publiczny sygnalizator PeerJS nadal działa, ale darmowe serwery TURN tej biblio
 Aby uruchomić niezawodne pośrednictwo dla własnej gry:
 
 1. Utwórz konto u dostawcy TURN, np. [Metered Open Relay](https://www.metered.ca/tools/openrelay/), albo przygotuj własny serwer coturn. Pobierz **konfigurację klienta ICE**: adresy `turn:`/`turns:`, `username` i `credential`.
-2. W repozytorium otwórz [Settings → Secrets and variables → Actions](https://github.com/migasmiga67/school_project/settings/secrets/actions). Dodaj **Repository secret** o nazwie **`TURN_ICE_SERVERS`**. Jako wartość wklej tablicę JSON od dostawcy, bez otaczających cudzysłowów z przykładu `.env`.
+2. W repozytorium otwórz **Settings → Environments → TURN_ICE_SERVERS**. Dodaj w nim **Environment secret** o nazwie **`TURN_ICE_SERVERS`**. Jako wartość wklej tablicę JSON od dostawcy, bez otaczających cudzysłowów z przykładu `.env`. Zarówno budowanie, jak i diagnostyka korzystają z tego środowiska. Obsługiwany jest również sekret repozytorium o tej samej nazwie, jeżeli środowisko nie definiuje własnej wartości.
 3. Uruchom **Actions → Deploy Neon Coast → Run workflow → main**. Workflow przekazuje tę konfigurację do kompilacji. Nieprawidłowy JSON, adresy i brak danych klienta zatrzymują budowanie z komunikatem, który nie ujawnia wartości konfiguracji.
 4. Uruchom **Actions → Diagnose public room connections → Run workflow → main**. Ta osobna próba tworzy dwa testowe profile przeglądarki, korzysta z publicznej sygnalizacji i wymusza przejście przez skonfigurowany TURN. Sukces wymaga dwóch graczy w pokoju oraz rzeczywiście wybranych kandydatów relay. Wynik i oczyszczona diagnostyka są w podsumowaniu i artefakcie tego uruchomienia.
 5. Odśwież grę u obu osób i utwórz nowy pokój.
