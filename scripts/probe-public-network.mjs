@@ -5,7 +5,9 @@ import { spawn } from 'node:child_process';
 
 const started = Date.now();
 const url = 'http://127.0.0.1:5185/school_project/';
-const report = { started: new Date(started).toISOString(), stage: 'server', success: false, pages: [] };
+const report = { started: new Date(started).toISOString(), configuration: process.env.NEON_DIAGNOSTIC_ICE_SERVERS ? 'candidate-ice-profile' : 'production-defaults', stage: 'configuration', success: false, pages: [] };
+let diagnosticIceServers;
+const privateIceValues = new Set();
 const contexts = [];
 let browser;
 const server = spawn(process.execPath, ['scripts/serve-dist.mjs'], { env: { ...process.env, PORT: '5185' }, stdio: 'ignore' });
@@ -18,17 +20,37 @@ const bounded = (promise, ms, message) => {
   let timer;
   return Promise.race([promise, new Promise((_, reject) => { timer = setTimeout(() => reject(new Error(message)), ms); })]).finally(() => clearTimeout(timer));
 };
-const redact = value => String(value).replace(/(?:https?|wss?):\/\/[^\s"]+/g, '[endpoint]').replace(/\b(?:\d{1,3}\.){3}\d{1,3}\b/g, '[address]');
+const redact = value => {
+  let text = String(value);
+  for (const secret of privateIceValues) if (secret) text = text.split(secret).join('[redacted]');
+  return text.replace(/(?:https?|wss?):\/\/[^\s"]+/g, '[endpoint]').replace(/\b(?:\d{1,3}\.){3}\d{1,3}\b/g, '[address]');
+};
 const mark = (level, title, message) => console.log(`::${level} title=${title}::${String(message).replace(/%/g, '%25').replace(/\r/g, '%0D').replace(/\n/g, '%0A')}`);
 const status = page => page.evaluate(() => {
   const state = window.__NEON_TEST__.online;
   return { status: state.status, signaling: state.signaling, message: state.message, members: state.snapshot?.members.length ?? 0 };
 });
 
+function readDiagnosticIceServers(raw) {
+  if (!raw) return undefined;
+  let servers;
+  try { servers = JSON.parse(raw); } catch { throw new Error('The diagnostic ICE profile must be valid JSON.'); }
+  const valid = Array.isArray(servers) && servers.length > 0 && servers.length <= 12 && servers.every(server => {
+    if (!server || typeof server !== 'object') return false;
+    const urls = typeof server.urls === 'string' ? [server.urls] : server.urls;
+    return Array.isArray(urls) && urls.length > 0 && urls.length <= 8 && urls.every(url => typeof url === 'string' && /^(stun|turn|turns):[^@\s?#]+(?:\?transport=(udp|tcp))?$/.test(url) && url.length <= 2048)
+      && (server.username === undefined || typeof server.username === 'string')
+      && (server.credential === undefined || typeof server.credential === 'string');
+  });
+  if (!valid) throw new Error('The diagnostic ICE profile must be a nonempty RTCIceServer array using STUN or TURN URLs.');
+  for (const server of servers) { privateIceValues.add(server.username); privateIceValues.add(server.credential); }
+  return servers;
+}
+
 async function openPlayer(role) {
   const context = await browser.newContext({ viewport: { width: 960, height: 720 } });
   contexts.push(context);
-  await context.addInitScript(() => {
+  await context.addInitScript(({ iceOverride }) => {
     const Native = window.RTCPeerConnection;
     window.__PUBLIC_ICE__ = [];
     const service = value => {
@@ -37,9 +59,9 @@ async function openPlayer(role) {
     };
     window.RTCPeerConnection = class extends Native {
       constructor(configuration, constraints) {
-        super({ ...configuration, iceTransportPolicy: 'relay' }, constraints);
+        super({ ...configuration, ...(iceOverride ? { iceServers: iceOverride } : {}), iceTransportPolicy: 'relay' }, constraints);
         // Credentials remain private to this page and never enter the report.
-        const entry = { pc: this, servers: configuration?.iceServers ?? [], errors: [], candidates: [], states: [] };
+        const entry = { pc: this, servers: iceOverride ?? configuration?.iceServers ?? [], originalServers: configuration?.iceServers ?? [], errors: [], candidates: [], states: [] };
         window.__PUBLIC_ICE__.push(entry);
         this.addEventListener('icecandidate', event => {
           if (event.candidate) entry.candidates.push({ type: event.candidate.type, protocol: event.candidate.protocol });
@@ -50,7 +72,7 @@ async function openPlayer(role) {
         });
       }
     };
-  });
+  }, { iceOverride: diagnosticIceServers ?? null });
   const page = await context.newPage();
   const result = { role, sockets: [], states: [], ice: [] }; report.pages.push(result);
   page.on('websocket', socket => {
@@ -80,6 +102,8 @@ async function capture(player) {
   })));
 }
 async function run() {
+  diagnosticIceServers = readDiagnosticIceServers(process.env.NEON_DIAGNOSTIC_ICE_SERVERS);
+  report.stage = 'server';
   for (let attempt = 0; attempt < 25; attempt++) {
     try { if ((await fetch(url, { signal: AbortSignal.timeout(500) })).ok) break; } catch { /* Wait only for the local production build. */ }
     if (attempt === 24) throw new Error('Production build server did not become ready.');
@@ -124,7 +148,7 @@ async function probeTlsFallback() {
   const page = contexts[0].pages()[0];
   if (!page || page.isClosed()) return;
   report.tls443 = await page.evaluate(async () => {
-    const source = window.__PUBLIC_ICE__.flatMap(entry => entry.servers).find(server => {
+    const source = window.__PUBLIC_ICE__.flatMap(entry => entry.originalServers ?? entry.servers).find(server => {
       const urls = typeof server.urls === 'string' ? [server.urls] : server.urls;
       return urls?.some(url => /turn\.peerjs\.com/.test(url)) && server.username && server.credential;
     });
@@ -164,11 +188,15 @@ try {
   report.elapsedMs = Date.now() - started;
   await writeFile('public-network-diagnostic.json', redact(JSON.stringify(report, null, 2)));
   const selected = report.pages.flatMap(page => page.ice.flatMap(connection => connection.selectedPairs)).map(pair => `${pair.localType}/${pair.protocol}${pair.relayProtocol ? '/' + pair.relayProtocol : ''}`);
-  const message = report.success ? `Two real players connected through public PeerJS/TURN (${selected.join(', ')}).` : `${report.stage}: ${report.failure}`;
+  const message = report.success ? `Two real players connected using ${report.configuration} (${selected.join(', ')}); public PeerJS signaling was unchanged.` : `${report.configuration}; ${report.stage}: ${report.failure}`;
   mark(report.success ? 'notice' : 'error', 'Public room connection', message);
-  if (report.failureDetails) console.error(report.failureDetails);
+  if (report.failureDetails) {
+    console.error(report.failureDetails);
+    const diagnostics = report.pages.map(page => ({ role: page.role, ice: page.ice.map(connection => ({ connection: connection.connection, errors: connection.errors, candidates: connection.candidates, selectedPairs: connection.selectedPairs })) }));
+    mark('notice', 'Public room ICE diagnostics', JSON.stringify({ configuration: report.configuration, pages: diagnostics }).slice(0, 12000));
+  }
   if (report.tls443?.attempted) mark('notice', 'Official PeerJS TURN TLS 443', report.tls443.relayAllocated ? 'A relay candidate was allocated successfully.' : 'No relay allocation was confirmed.');
-  if (process.env.GITHUB_STEP_SUMMARY) await appendFile(process.env.GITHUB_STEP_SUMMARY, `## Public room network diagnostic\n\n${report.success ? 'PASS' : 'FAIL'}: ${message}\n\nThis probe used the public signaling service and forced public TURN relays, without a local signaling or relay override.\n${report.tls443?.attempted ? `\nOfficial TURN TLS 443 allocation: ${report.tls443.relayAllocated ? 'confirmed' : 'not confirmed'}.\n` : ''}`);
+  if (process.env.GITHUB_STEP_SUMMARY) await appendFile(process.env.GITHUB_STEP_SUMMARY, `## Public room network diagnostic\n\n${report.success ? 'PASS' : 'FAIL'}: ${message}\n\nICE configuration: **${report.configuration}**. Public PeerJS signaling was unchanged and relay candidates were required. ${report.configuration === 'candidate-ice-profile' ? 'The candidate ICE override is diagnostic-only; this does not prove the production defaults work.' : 'No signaling or ICE override was used.'}\n${report.tls443?.attempted ? `\nOfficial TURN TLS 443 allocation: ${report.tls443.relayAllocated ? 'confirmed' : 'not confirmed'}.\n` : ''}`);
   try { if (browser) await bounded(browser.close(), 3000, 'Browser cleanup timed out.'); } catch { /* Runner cleanup also terminates browser children. */ }
   server.kill('SIGTERM');
 }
