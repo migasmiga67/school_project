@@ -27,6 +27,10 @@ async function room(page: Page): Promise<RoomSnapshot> {
 }
 
 type Pair = { host: Page; guest: Page; contexts: BrowserContext[]; errors: string[]; failed: string[] };
+interface PairOptions {
+  preparePage?: (page: Page, role: 'host' | 'guest') => Promise<void>;
+  guestJoinTimeoutMs?: number;
+}
 
 async function captureFailure(contexts: BrowserContext[], testInfo: TestInfo) {
   await Promise.allSettled(contexts.map(async (context, index) => {
@@ -37,10 +41,10 @@ async function captureFailure(contexts: BrowserContext[], testInfo: TestInfo) {
   }));
 }
 
-async function createPair(browser: Browser, testInfo: TestInfo): Promise<Pair> {
+async function createPair(browser: Browser, testInfo: TestInfo, options: PairOptions = {}): Promise<Pair> {
   const contexts: BrowserContext[] = [];
   const errors: string[] = [], failed: string[] = [];
-  const open = async (name: string) => {
+  const open = async (name: string, role: 'host' | 'guest') => {
     const context = await browser.newContext({ baseURL: GAME_URL, viewport: { width: 960, height: 720 } });
     contexts.push(context);
     // A real local signaling service negotiates two real WebRTC data channels.
@@ -60,6 +64,7 @@ async function createPair(browser: Browser, testInfo: TestInfo): Promise<Pair> {
         failed.push(`${response.status()} ${response.url()}`);
       }
     });
+    await options.preparePage?.(page, role);
     await page.goto('./');
     await expect(page.locator('#intro-online')).toBeVisible();
     await page.locator('#intro-online').click();
@@ -67,7 +72,7 @@ async function createPair(browser: Browser, testInfo: TestInfo): Promise<Pair> {
     return page;
   };
   try {
-    const host = await open('Alicja');
+    const host = await open('Alicja', 'host');
     await host.locator('#online-create').click();
     await expect.poll(async () => (await snapshot(host)).online.status, { timeout: 20000 }).toBe('online');
     await expect(host.locator('#online-code')).toHaveText(/^[A-Z2-9]{8}$/);
@@ -75,10 +80,10 @@ async function createPair(browser: Browser, testInfo: TestInfo): Promise<Pair> {
     await host.locator('#online-enter').click();
     await expect.poll(async () => (await snapshot(host)).started).toBe(true);
 
-    const guest = await open('Borys');
+    const guest = await open('Borys', 'guest');
     await guest.locator('#online-room').fill(code);
     await guest.locator('#online-join').click();
-    await expect.poll(async () => (await snapshot(guest)).online.status, { timeout: 20000 }).toBe('online');
+    await expect.poll(async () => (await snapshot(guest)).online.status, { timeout: options.guestJoinTimeoutMs ?? 20000 }).toBe('online');
     await guest.locator('#online-enter').click();
     await expect.poll(async () => (await snapshot(guest)).started).toBe(true);
     for (const page of [host, guest]) {
@@ -136,6 +141,89 @@ async function leaveHostRoom(host: Page) {
   await host.locator('#online-confirm-leave').click();
   await expect.poll(async () => (await snapshot(host)).online.status).toBe('offline');
 }
+
+test('pokój przyjmuje gracza, gdy prawdziwa odpowiedź WebRTC dociera po 18 sekundach', async ({ browser }, testInfo) => {
+  test.setTimeout(90000);
+  const delayMs = 18000;
+  const timers = new Set<ReturnType<typeof setTimeout>>();
+  const answers: {
+    heldAt: number; forwardedAt?: number; guestStatus?: string;
+    guestSignaling?: string; hostMembers?: number; progressMessage?: string; candidatesHeld: number; error?: string;
+  }[] = [];
+  let hostPage: Page | null = null, guestPage: Page | null = null, pair: Pair | undefined;
+  try {
+    pair = await createPair(browser, testInfo, {
+      guestJoinTimeoutMs: 40000,
+      preparePage: async (page, role) => {
+        if (role === 'guest') { guestPage = page; return; }
+        hostPage = page;
+        await page.routeWebSocket('ws://127.0.0.1:9000/**', socket => {
+          // Connect to the real PeerServer. Preserve SDP/candidate ordering:
+          // a later trickled candidate cannot overtake its delayed SDP answer.
+          const server = socket.connectToServer();
+          const blocked = new Map<string, { candidates: (string | Buffer)[]; answer: typeof answers[number] }>();
+          socket.onMessage(message => {
+            let type = '', connectionId = '';
+            try {
+              const frame = JSON.parse(typeof message === 'string' ? message : message.toString());
+              type = frame.type; connectionId = frame.payload?.connectionId ?? '';
+            } catch { /* Forward non-JSON frames unchanged. */ }
+            const pending = blocked.get(connectionId);
+            if (type === 'CANDIDATE' && pending) { pending.candidates.push(message); pending.answer.candidatesHeld++; return; }
+            if (type !== 'ANSWER') { server.send(message); return; }
+            const answer: typeof answers[number] = { heldAt: Date.now(), candidatesHeld: 0 }; answers.push(answer);
+            const outgoing = { candidates: [] as (string | Buffer)[], answer }; blocked.set(connectionId, outgoing);
+            const timer = setTimeout(async () => {
+              timers.delete(timer);
+              // Read the actual state while the answer is still held, beyond
+              // the former 7s host prune and 15s guest connection timeout.
+              try {
+                const [guest, host] = await Promise.all([snapshot(guestPage!), snapshot(hostPage!)]);
+                answer.guestStatus = guest.online.status; answer.guestSignaling = guest.online.signaling;
+                answer.hostMembers = host.online.snapshot?.members.length;
+                answer.progressMessage = await guestPage!.locator('#online-connection-message').evaluateAll(nodes => nodes[0]?.textContent ?? '');
+              } catch (error) { answer.error = String(error); }
+              try {
+                answer.forwardedAt = Date.now(); server.send(message);
+                for (const candidate of outgoing.candidates) server.send(candidate);
+                blocked.delete(connectionId);
+              }
+              catch (error) { answer.error = String(error); }
+            }, delayMs);
+            timers.add(timer);
+          });
+        });
+      },
+    });
+    await testInfo.attach('delayed-real-webrtc-answer', { body: JSON.stringify(answers, null, 2), contentType: 'application/json' });
+    expect(answers).toHaveLength(1);
+    const answer = answers[0];
+    expect(answer.error).toBeUndefined();
+    expect(answer.forwardedAt).toBeDefined();
+    expect(answer.forwardedAt! - answer.heldAt).toBeGreaterThanOrEqual(delayMs);
+    expect(answer.forwardedAt! - answer.heldAt).toBeLessThan(30000);
+    expect(answer).toMatchObject({ guestStatus: 'connecting', guestSignaling: 'online', hostMembers: 1 });
+    expect(answer.progressMessage).toContain('gospodarzem');
+    for (const page of [pair.host, pair.guest]) expect((await room(page)).members).toHaveLength(2);
+
+    // Successful negotiation must carry actual game data, not just open sockets.
+    await pair.guest.bringToFront();
+    if ((await snapshot(pair.guest)).paused) await pair.guest.locator('#resume').click();
+    await pair.guest.keyboard.press('e');
+    await expect.poll(async () => (await snapshot(pair!.guest)).state.player.mode).toBe('foot');
+    const guestId = (await room(pair.guest)).youId, startX = (await snapshot(pair.guest)).state.player.x;
+    await walkUntil(pair.guest, 'd', 'x', startX + 2, true);
+    await expect.poll(async () => (await room(pair!.host)).members.find(member => member.id === guestId)?.pose.x).toBeGreaterThan(startX + 1.5);
+    expect(pair.errors).toEqual([]); expect(pair.failed).toEqual([]);
+  } catch (error) {
+    await testInfo.attach('delayed-answer-failure', { body: JSON.stringify(answers, null, 2), contentType: 'application/json' });
+    if (pair) await captureFailure(pair.contexts, testInfo);
+    throw error;
+  } finally {
+    for (const timer of timers) clearTimeout(timer);
+    await Promise.allSettled(pair?.contexts.map(context => context.close()) ?? []);
+  }
+});
 
 test('dwie przeglądarki widzą ruch graczy, lokalną pauzę i zakończenie pokoju', async ({ browser }, testInfo) => {
   test.setTimeout(120000);

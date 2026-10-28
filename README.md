@@ -103,6 +103,8 @@ Online dostajesz osobny, sesyjny portfel **$1250**. Wpisowe, wygrane, zakupy w g
 
 Połączenia korzystają z WebRTC i sygnalizatora PeerJS. Gospodarz utrzymuje pokój w swojej przeglądarce — musi pozostawić stronę otwartą. Jego rozłączenie kończy sesję pozostałych osób. Publiczny sygnalizator i serwery ICE muszą być dostępne z sieci graczy. Dostępne są połączenia bezpośrednie oraz pośrednictwo TURN przez UDP lub TCP; całkowita blokada serwerów ICE w sieci może uniemożliwić dołączenie. Po błędzie można ponowić dołączanie lub utworzyć nowy pokój.
 
+Panel pokazuje osobno łączenie z serwerem pokojów, połączenie z gospodarzem i potwierdzenie wejścia. Wolniejsza negocjacja sieciowa nie zużywa już czasu przeznaczonego na potwierdzenie pokoju. Gdy gospodarz chwilowo traci serwer pokojów, działająca ekipa może grać dalej, a kod i zaproszenie wracają po automatycznym przywróceniu połączenia. Komunikat o innej wersji gry wymaga odświeżenia strony u obu osób i utworzenia nowego pokoju.
+
 ## Rozwój i testy
 
 Node.js 22 LTS:
@@ -121,6 +123,8 @@ W środowisku chmurowym można użyć `npm ci --cache /workspace/.npm-cache`. `s
 Testy Playwright wymagają Chromium. Obsługiwany jest `CHROMIUM_PATH`, lokalne `/usr/bin/chromium` lub oficjalny browser z `npx playwright install chromium`. Domyślnie testowany jest **gotowy `dist` pod `/school_project/` na porcie 5185**. `NEON_BASE_URL` pozwala wskazać inny serwer. Grafika i audio powstają programowo; tryb solo nie wymaga zewnętrznych zasobów.
 
 Testy multiplayer uruchamiają lokalny PeerServer na porcie **9000**, serwer TURN/TCP na **3478** (kontrola gotowości: **9002**) i dwie niezależne przeglądarki. Połączenia przechodzą przez prawdziwy serwer TURN, co sprawdza również sieci blokujące bezpośredni ruch UDP. Sprawdzają prawdziwe połączenia WebRTC, ruch graczy, rozdanie, prywatność kart, wypłaty i rozłączenie gospodarza. Nie zastępują weryfikacji publicznego sygnalizatora ani połączeń pomiędzy różnymi sieciami. Ustawienie serwera testowego jest wstrzykiwane wyłącznie na adresie loopback; gotowa strona korzysta z publicznej konfiguracji PeerJS.
+
+Regresja dołączania celowo opóźnia odpowiedź sieciową gospodarza o 18 sekund, zachowując prawdziwe połączenia WebRTC i TURN. Sprawdza, że host nie zamyka trwającej negocjacji oraz że po połączeniu gracze widzą swój ruch. Testy klienta osobno sprawdzają limity kolejnych etapów, anulowanie, niezgodną wersję i ponawianie sygnalizacji.
 
 ### Własny sygnalizator
 

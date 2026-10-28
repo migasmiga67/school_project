@@ -52,7 +52,11 @@ export type RoomCommand =
   | { type: 'exitRide' };
 export type RoomResult = { ok: true } | { ok: false; reason: string };
 export type RoomStatus = 'offline' | 'connecting' | 'online' | 'error';
-export interface MultiplayerState { status: RoomStatus; message: string; snapshot: RoomSnapshot | null }
+export interface MultiplayerState {
+  status: RoomStatus; message: string; snapshot: RoomSnapshot | null;
+  /** Signaling can reconnect independently while existing RTC peers keep playing. */
+  signaling?: 'connecting' | 'online' | 'reconnecting';
+}
 /** UI contract: online play has its own host-maintained session wallet. */
 export interface MultiplayerSession {
   readonly state: MultiplayerState;

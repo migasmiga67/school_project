@@ -5,8 +5,8 @@ import type { PokerAction } from './poker-model';
 import type { GarageAction } from './garage';
 import type { JobAction } from './online-jobs';
 import { cityEventAt } from './city-life';
+import { CONNECTION_PROGRESS, CONNECTION_TIMEOUT_MESSAGE, CONNECTION_TIMEOUT_MS, SIGNALING_UNAVAILABLE_MESSAGE, type ConnectionPhase } from './connection-lifecycle';
 
-const CONNECT_MS = 15000;
 const STALE_MS = 15000;
 const MAX_PACKET = 32768;
 const alphabet = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
@@ -133,9 +133,9 @@ function snapshot(value: unknown, hostId: string, youId: string, code: string): 
 
 interface Guest {
   connection: DataConnection; joined: boolean; sequence: number; lastSeen: number;
-  windowAt: number; messages: number;
+  windowAt: number; messages: number; startedAt: number; openedAt: number | null;
 }
-interface Pending { resolve: () => void; reject: (error: Error) => void; timer: ReturnType<typeof setTimeout> }
+interface Pending { resolve: () => void; reject: (error: Error) => void; timer: ReturnType<typeof setTimeout> | null; phase: ConnectionPhase }
 
 /** Browser-hosted rooms: the host alone owns poker state and personalizes each
  * data-channel response. The public signaling service never handles game data. */
@@ -159,6 +159,7 @@ export class MultiplayerClient implements MultiplayerSession {
   private heartbeatTimer: ReturnType<typeof setInterval> | null = null;
   private watchTimer: ReturnType<typeof setInterval> | null = null;
   private reconnectTimer: ReturnType<typeof setTimeout> | null = null;
+  private reconnectAttempt = 0;
 
   get state() { return clone(this.current); }
   get isHost() { return this.authority !== null; }
@@ -210,15 +211,15 @@ export class MultiplayerClient implements MultiplayerSession {
     this.publish({ status: 'connecting', message: host ? 'Tworzenie pokoju…' : 'Łączenie z pokojem…', snapshot: null });
     const epoch = this.epoch;
     return new Promise<void>((resolve, reject) => {
-      this.pending = { resolve, reject, timer: setTimeout(() => {
-        if (this.epoch === epoch) this.fail('Połączenie trwa zbyt długo. Sprawdź kod, internet i otwartą grę gospodarza, a następnie spróbuj ponownie.');
-      }, CONNECT_MS) };
+      this.pending = { resolve, reject, timer: null, phase: 'signaling' };
+      this.armConnectionPhase('signaling');
       try {
         const peer = new Peer(this.ownId, options()); this.peer = peer;
         let opened = false;
         peer.on('open', () => {
           if (this.epoch !== epoch) return;
           if (this.reconnectTimer !== null) { clearTimeout(this.reconnectTimer); this.reconnectTimer = null; }
+          this.reconnectAttempt = 0;
           if (opened) { this.publish({ ...this.current, message: '' }); return; }
           opened = true;
           if (host) {
@@ -226,10 +227,13 @@ export class MultiplayerClient implements MultiplayerSession {
             this.acceptSnapshot(this.authority.snapshot(this.ownId), '');
             this.startTimers(epoch); this.complete();
           } else {
+            this.armConnectionPhase('rtc');
             const connection = peer.connect(this.hostId, { reliable: true, serialization: 'json', metadata: { protocol: ROOM_PROTOCOL } });
             this.hostConnection = connection; this.hostLastSeen = Date.now();
             connection.on('open', () => {
-              if (this.epoch === epoch && this.hostConnection === connection) this.send(connection, { type: 'hello', protocol: ROOM_PROTOCOL, name, seq: ++this.sequence });
+              if (this.epoch !== epoch || this.hostConnection !== connection) return;
+              this.armConnectionPhase('admission');
+              this.send(connection, { type: 'hello', protocol: ROOM_PROTOCOL, name, seq: ++this.sequence });
             });
             connection.on('data', data => { if (this.epoch === epoch && this.hostConnection === connection) this.receiveHost(data); });
             connection.on('close', () => { if (this.epoch === epoch) this.fail('Połączenie z gospodarzem zostało przerwane. Pokój zakończył działanie.'); });
@@ -246,11 +250,8 @@ export class MultiplayerClient implements MultiplayerSession {
           if (this.epoch !== epoch) return;
           if (this.current.status !== 'online') { this.fail(peerError('network')); return; }
           // Established RTC channels survive a temporary signaling outage.
-          this.publish({ ...this.current, message: 'Serwer połączeń jest chwilowo niedostępny. Obecna sesja pozostaje aktywna.' });
-          if (this.reconnectTimer === null) this.reconnectTimer = setTimeout(() => {
-            this.reconnectTimer = null;
-            if (this.epoch === epoch && peer.disconnected && !peer.destroyed) { try { peer.reconnect(); } catch { /* Existing channels remain usable. */ } }
-          }, 2000);
+          this.publish({ ...this.current, message: SIGNALING_UNAVAILABLE_MESSAGE });
+          this.queueReconnect(epoch);
         });
         peer.on('error', error => {
           if (this.epoch !== epoch) return;
@@ -262,14 +263,48 @@ export class MultiplayerClient implements MultiplayerSession {
       } catch { this.fail('Nie udało się uruchomić połączenia multiplayer w tej przeglądarce.'); }
     });
   }
+  private armConnectionPhase(phase: ConnectionPhase) {
+    const pending = this.pending;
+    if (!pending) return;
+    if (pending.timer !== null) clearTimeout(pending.timer);
+    pending.phase = phase;
+    const epoch = this.epoch;
+    pending.timer = setTimeout(() => {
+      if (this.epoch === epoch && this.pending === pending) this.fail(CONNECTION_TIMEOUT_MESSAGE[phase]);
+    }, CONNECTION_TIMEOUT_MS[phase]);
+    this.publish({ status: 'connecting', message: CONNECTION_PROGRESS[phase], snapshot: null });
+  }
+  private queueReconnect(epoch: number) {
+    if (this.epoch !== epoch || this.current.status !== 'online' || !this.peer || this.peer.destroyed || this.reconnectTimer !== null) return;
+    const delay = Math.min(2000 * 2 ** Math.min(this.reconnectAttempt, 3), 15000);
+    this.reconnectTimer = setTimeout(() => {
+      this.reconnectTimer = null;
+      const peer = this.peer;
+      if (this.epoch !== epoch || this.current.status !== 'online' || !peer || peer.destroyed || peer.open) return;
+      this.reconnectAttempt++;
+      // Arm the watchdog before reconnect(): synchronous failure events must not
+      // schedule another attempt alongside this one. A stalled signaling socket
+      // is closed without disturbing the existing RTC data channels.
+      this.reconnectTimer = setTimeout(() => {
+        this.reconnectTimer = null;
+        if (this.epoch !== epoch || this.peer !== peer || this.current.status !== 'online' || peer.open) return;
+        this.queueReconnect(epoch);
+        if (!peer.disconnected && !peer.destroyed) peer.disconnect();
+      }, CONNECTION_TIMEOUT_MS.signaling);
+      if (!peer.disconnected) peer.disconnect();
+      try { peer.reconnect(); } catch { /* The watchdog retries with backoff. */ }
+    }, delay);
+  }
   private receiveConnection(connection: DataConnection, epoch: number) {
     if (this.guests.has(connection.peer) || this.guests.size >= MAX_ROOM_PLAYERS - 1) {
       connection.on('open', () => { this.send(connection, { type: 'rejected', reason: 'Pokój jest pełny lub masz już w nim otwarte połączenie.' }); connection.close({ flush: true }); });
       return;
     }
-    const guest: Guest = { connection, joined: false, sequence: 0, lastSeen: Date.now(), windowAt: Date.now(), messages: 0 };
+    const now = Date.now();
+    const guest: Guest = { connection, joined: false, sequence: 0, lastSeen: now, windowAt: now, messages: 0, startedAt: now, openedAt: connection.open ? now : null };
     this.guests.set(connection.peer, guest);
     const current = () => this.epoch === epoch && this.guests.get(connection.peer) === guest;
+    connection.on('open', () => { if (current()) guest.openedAt = guest.lastSeen = Date.now(); });
     connection.on('data', data => {
       if (!current() || !this.authority) return;
       const now = Date.now();
@@ -299,7 +334,9 @@ export class MultiplayerClient implements MultiplayerSession {
     const message = packet(data);
     if (!message) { this.fail('Gospodarz wysłał nieprawidłowe dane pokoju.'); return; }
     if ((message.type === 'rejected' || message.type === 'closed') && typeof message.reason === 'string') { this.fail(message.reason.slice(0, 300)); return; }
-    if (message.type !== 'snapshot' || message.protocol !== ROOM_PROTOCOL || !integer(message.seq) || Number(message.seq) <= this.serverSequence) return;
+    if (message.type !== 'snapshot') return;
+    if (message.protocol !== ROOM_PROTOCOL) { this.fail('Gospodarz ma inną wersję gry. Odśwież stronę u obu osób i utwórz nowy pokój.'); return; }
+    if (!integer(message.seq) || Number(message.seq) <= this.serverSequence) return;
     if (!snapshot(message.snapshot, this.hostId, this.ownId, this.roomCode)) { this.fail('Dane pokoju są niezgodne z tą wersją gry. Odśwież stronę i dołącz ponownie.'); return; }
     this.serverSequence = Number(message.seq); this.hostLastSeen = Date.now();
     this.acceptSnapshot(message.snapshot, typeof message.notice === 'string' ? message.notice.slice(0, 300) : undefined); this.complete();
@@ -321,11 +358,16 @@ export class MultiplayerClient implements MultiplayerSession {
     this.heartbeatTimer = setInterval(() => {
       if (this.epoch !== epoch) return;
       if (this.current.status === 'online') this.issue({ type: 'ping' });
-      if (!this.authority && this.hostConnection && Date.now() - this.hostLastSeen > STALE_MS) this.fail('Gospodarz nie odpowiada. Pokój zakończył działanie.');
+      if (this.current.status === 'online' && !this.authority && this.hostConnection && Date.now() - this.hostLastSeen > STALE_MS) this.fail('Gospodarz nie odpowiada. Pokój zakończył działanie.');
     }, 2000);
     this.watchTimer = setInterval(() => {
       if (this.epoch !== epoch || !this.authority) return;
-      for (const guest of [...this.guests.values()]) if (Date.now() - guest.lastSeen > (guest.joined ? STALE_MS : 7000)) this.drop(guest, 'Połączenie wygasło. Spróbuj dołączyć ponownie.');
+      const now = Date.now();
+      for (const guest of [...this.guests.values()]) {
+        const start = guest.joined ? guest.lastSeen : guest.openedAt ?? guest.startedAt;
+        const timeout = guest.joined ? STALE_MS : guest.openedAt === null ? CONNECTION_TIMEOUT_MS.rtc : CONNECTION_TIMEOUT_MS.admission;
+        if (now - start > timeout) this.drop(guest, 'Połączenie wygasło. Spróbuj dołączyć ponownie.');
+      }
       if (this.authority?.tick(Date.now())) this.broadcast();
     }, 500);
   }
@@ -361,12 +403,13 @@ export class MultiplayerClient implements MultiplayerSession {
     } catch { connection.close(); }
   }
   private publish(value: MultiplayerState) {
-    this.current = value;
+    const signaling = this.peer?.open ? 'online' : value.status === 'connecting' ? 'connecting' : this.peer ? 'reconnecting' : undefined;
+    this.current = { ...value, signaling, message: value.status === 'online' && signaling === 'reconnecting' ? SIGNALING_UNAVAILABLE_MESSAGE : value.message };
     for (const listener of this.listeners) listener(this.state);
   }
   private complete() {
     const pending = this.pending; this.pending = null;
-    if (pending) { clearTimeout(pending.timer); pending.resolve(); }
+    if (pending) { if (pending.timer !== null) clearTimeout(pending.timer); pending.resolve(); }
   }
   private fail(message: string) {
     this.clean(message); this.publish({ status: 'error', message, snapshot: null });
@@ -379,10 +422,11 @@ export class MultiplayerClient implements MultiplayerSession {
     if (this.reconnectTimer !== null) clearTimeout(this.reconnectTimer);
     this.pumpTimer = this.heartbeatTimer = this.watchTimer = null; this.reconnectTimer = null;
     const pending = this.pending; this.pending = null;
-    if (pending) { clearTimeout(pending.timer); pending.reject(new Error(reason)); }
+    if (pending) { if (pending.timer !== null) clearTimeout(pending.timer); pending.reject(new Error(reason)); }
     this.hostConnection?.close(); this.hostConnection = null;
     for (const guest of this.guests.values()) guest.connection.close();
     this.guests.clear(); this.peer?.destroy(); this.peer = null; this.authority = null;
     this.ownId = this.hostId = this.roomCode = ''; this.sequence = this.serverSequence = 0; this.queuedPose = null;
+    this.reconnectAttempt = 0;
   }
 }
