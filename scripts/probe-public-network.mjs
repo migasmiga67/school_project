@@ -85,7 +85,11 @@ async function run() {
     if (attempt === 24) throw new Error('Production build server did not become ready.');
     await delay(100);
   }
-  const executablePath = process.env.CHROMIUM_PATH || (existsSync('/usr/bin/chromium') ? '/usr/bin/chromium' : undefined);
+  report.stage = 'browser-launch';
+  // GitHub runners may expose a system Chromium launcher that needs Snap.
+  // CI uses the browser installed by Playwright unless explicitly overridden.
+  const executablePath = process.env.CHROMIUM_PATH || (!process.env.CI && existsSync('/usr/bin/chromium') ? '/usr/bin/chromium' : undefined);
+  report.browserSource = process.env.CHROMIUM_PATH ? 'explicit-override' : executablePath ? 'local-system' : 'playwright-managed';
   browser = await chromium.launch({ executablePath, headless: true, timeout: 15000, args: ['--no-sandbox', '--disable-dev-shm-usage', '--enable-unsafe-swiftshader'] });
   report.stage = 'host-signaling';
   const host = await openPlayer('host');
@@ -145,7 +149,8 @@ async function probeTlsFallback() {
 try {
   await bounded(run(), 78000, 'The public network diagnostic exceeded its bounded runtime.');
 } catch (error) {
-  report.failure = redact(error instanceof Error ? error.message : error).slice(0, 500);
+  report.failureDetails = redact(error instanceof Error ? error.message : error).slice(0, 12000);
+  report.failure = report.failureDetails.split('\n')[0].slice(0, 500);
   process.exitCode = 1;
   // Allocation alone is a diagnostic, never proof that full room joins work.
   try { await bounded(probeTlsFallback(), 15000, 'TLS allocation diagnostic timed out.'); } catch { report.tls443 = { attempted: true, relayAllocated: false, error: 'TLS diagnostic timed out.' }; }
@@ -161,6 +166,7 @@ try {
   const selected = report.pages.flatMap(page => page.ice.flatMap(connection => connection.selectedPairs)).map(pair => `${pair.localType}/${pair.protocol}${pair.relayProtocol ? '/' + pair.relayProtocol : ''}`);
   const message = report.success ? `Two real players connected through public PeerJS/TURN (${selected.join(', ')}).` : `${report.stage}: ${report.failure}`;
   mark(report.success ? 'notice' : 'error', 'Public room connection', message);
+  if (report.failureDetails) console.error(report.failureDetails);
   if (report.tls443?.attempted) mark('notice', 'Official PeerJS TURN TLS 443', report.tls443.relayAllocated ? 'A relay candidate was allocated successfully.' : 'No relay allocation was confirmed.');
   if (process.env.GITHUB_STEP_SUMMARY) await appendFile(process.env.GITHUB_STEP_SUMMARY, `## Public room network diagnostic\n\n${report.success ? 'PASS' : 'FAIL'}: ${message}\n\nThis probe used the public signaling service and forced public TURN relays, without a local signaling or relay override.\n${report.tls443?.attempted ? `\nOfficial TURN TLS 443 allocation: ${report.tls443.relayAllocated ? 'confirmed' : 'not confirmed'}.\n` : ''}`);
   try { if (browser) await bounded(browser.close(), 3000, 'Browser cleanup timed out.'); } catch { /* Runner cleanup also terminates browser children. */ }
