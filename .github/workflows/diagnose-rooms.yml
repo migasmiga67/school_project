@@ -1,0 +1,33 @@
+name: Diagnose public room connections
+on:
+  push:
+    branches: [diagnose-room-network]
+    paths:
+      - scripts/probe-public-network.mjs
+      - .github/workflows/diagnose-rooms.yml
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  public-network:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - run: npm run build
+      - run: npx playwright install --with-deps chromium
+      - name: Real public signaling and TURN connection
+        run: node scripts/probe-public-network.mjs
+      - name: Sanitized network diagnostic
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: public-network-diagnostic
+          path: public-network-diagnostic.json
+          retention-days: 7
+          if-no-files-found: ignore
