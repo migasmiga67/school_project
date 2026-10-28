@@ -162,6 +162,11 @@ test('pasażer jedzie samochodem znajomego i odzyskuje sterowanie po rozłączen
     await focusCity(host);
     await moveUntil(host, 'w', 'z', 63, false);
     await stopCar(host);
+    // Keep this stopped driver fixed while the other browser checks its seat.
+    // Bringing another headless page forward does not always hide this page,
+    // and active traffic/police can otherwise move the car away between F presses.
+    await host.keyboard.press('p');
+    await expect.poll(async () => (await snapshot(host)).paused).toBe(true);
     await expect.poll(async () => {
       const a = (await snapshot(host)).state.player, b = (await snapshot(guest)).state.player;
       return Math.hypot(a.x - b.x, a.z - b.z);
@@ -204,6 +209,20 @@ test('napad wymaga przygotowania obu ról i prywatnej sekwencji hakera', async (
     await walkToCasinoDoor(host);
     await openActivities(host);
     await expect(host.locator('#heist-interact')).toBeEnabled();
+    const prepare = host.locator('#heist-interact');
+    await prepare.scrollIntoViewIfNeeded();
+    await prepare.focus();
+    const prepareElement = await prepare.elementHandle();
+    expect(prepareElement).not.toBeNull();
+    const scrollBeforeTick = await host.locator('.activities-card').evaluate(element => element.scrollTop);
+    const heistClock = host.locator('#heist-panel .activity-countdown');
+    const beforeTick = await heistClock.innerText();
+    await expect(heistClock).not.toHaveText(beforeTick);
+    // A clock tick must not replace controls beneath the pointer or keyboard.
+    expect(await prepareElement!.evaluate(element => element.isConnected)).toBe(true);
+    await expect(prepare).toBeFocused();
+    expect(Math.abs(await host.locator('.activities-card').evaluate(element => element.scrollTop) - scrollBeforeTick)).toBeLessThan(1);
+    await prepareElement!.dispose();
     await host.locator('#heist-interact').click();
     await expect.poll(async () => (await room(host)).jobs.heist.gathered).toContain((await room(host)).youId);
     await walkToCasinoDoor(guest);

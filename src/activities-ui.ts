@@ -57,17 +57,27 @@ export class ActivitiesUI {
     if(!this.visible)return;
     const current=this.session.state,snapshot=current.status==='online'?current.snapshot:null;
     const heist=snapshot?.jobs.heist,race=snapshot?.jobs.race,self=snapshot?.members.find(member=>member.id===snapshot.youId);
-    // Poses arrive ten times per second. Only distance-based eligibility, whole
-    // seconds and actual job changes should replace interactive DOM elements.
+    // Poses arrive ten times per second. Clocks update text nodes separately:
+    // replacing the dialog on every second interrupts scrolling and clicking.
     const nearHeist=Boolean(self&&self.pose.interior===null&&Math.hypot(self.pose.x-CASINO.door.x,self.pose.z-CASINO.door.z)<=8);
     const nearPrepare=Boolean(self&&self.pose.interior===null&&Math.hypot(self.pose.x-CASINO.door.x,self.pose.z-CASINO.door.z)<=6);
-    const signature=JSON.stringify([current.status,current.message,snapshot?.code,snapshot?.members.map(member=>[member.id,member.name]),snapshot?.hostId,snapshot?.youId,snapshot?.challenge.status,Math.ceil((snapshot?.challenge.cooldownMs??0)/1000),
-      heist&&[heist.status,heist.run,clock(heist.remainingMs),Math.ceil(heist.cooldownMs/1000),heist.eligible,heist.role,heist.progress,heist.alarm,heist.sequence,heist.gathered,heist.message],
-      race&&[race.status,race.run,clock(race.remainingMs),Math.ceil(race.countdownMs/1000),Math.ceil(race.cooldownMs/1000),race.canReady,race.ready,race.participants,race.message],nearHeist,nearPrepare,self?.pose.mode,self?.pose.passengerOf]);
-    if(!force&&signature===this.signature)return;
-    this.signature=signature;this.render(snapshot,nearHeist,current.message);
+    const signature=JSON.stringify([current.status,current.message,snapshot?.code,snapshot?.members.map(member=>[member.id,member.name]),snapshot?.hostId,snapshot?.youId,snapshot?.challenge.status,Boolean(snapshot&&snapshot.challenge.cooldownMs>0),
+      heist&&[heist.status,heist.run,heist.cooldownMs>0,heist.eligible,heist.role,heist.progress,heist.alarm,heist.sequence,heist.gathered,heist.message],
+      race&&[race.status,race.run,race.cooldownMs>0,race.canReady,race.ready,race.participants,race.message],nearHeist,nearPrepare,self?.pose.mode,self?.pose.passengerOf]);
+    if(force||signature!==this.signature){this.signature=signature;this.render(snapshot,nearHeist,current.message);}
+    this.updateClockTexts(snapshot);
   }
   private query<T extends HTMLElement=HTMLElement>(selector:string){return this.root?.querySelector<T>(selector)??null;}
+  private updateClockTexts(snapshot:RoomSnapshot|null){
+    if(!snapshot)return;
+    const {heist,race}=snapshot.jobs,challenge=snapshot.challenge;
+    const write=(selector:string,value:string)=>{const node=this.query(selector);if(node&&node.textContent!==value)node.textContent=value;};
+    write('#heist-countdown',['gather','hack','escape'].includes(heist.status)?clock(heist.remainingMs):'+$800');
+    write('#race-countdown',race.status==='countdown'?String(Math.max(1,Math.ceil(race.countdownMs/1000))):['lobby','running'].includes(race.status)?clock(race.remainingMs):'$500 / $300 / $150 / $100');
+    write('#activity-crew',challenge.status==='active'?'Przerzut już trwa':challenge.cooldownMs>0?`Przerzut za ${Math.ceil(challenge.cooldownMs/1000)} s`:'Rozpocznij przerzut');
+    write('#heist-start',heist.cooldownMs>0?`Następny napad za ${Math.ceil(heist.cooldownMs/1000)} s`:'Rozpocznij napad');
+    write('#race-start',race.cooldownMs>0?`Następny wyścig za ${Math.ceil(race.cooldownMs/1000)} s`:'Przygotuj wyścig');
+  }
   private trapFocus(event:KeyboardEvent){
     const controls=[...(this.root?.querySelectorAll<HTMLElement>('button:not(:disabled),a[href],input:not(:disabled),summary')??[])];
     const first=controls[0],last=controls.at(-1);
@@ -98,10 +108,10 @@ export class ActivitiesUI {
     this.root.innerHTML=`<section class="activities-card"><header class="activities-header"><div><span class="activities-eyebrow">NEON COAST · WASZA NOC</span><h1 id="activities-title">Co robimy dalej?</h1></div><button class="activities-close" id="activities-close" aria-label="Zamknij zajęcia">×</button></header><p class="activities-description" id="activities-description">${safe(roomNote)}</p>
       <div class="activities-grid"><section class="activity-tile activity-garage"><span class="activities-eyebrow">TWÓJ SAMOCHÓD</span><h2>Garaż i tuning</h2><p>Kup auto, zmień lakier i popraw silnik, hamulce lub nitro. Warsztat czeka naprzeciwko kasyna.</p><button class="activity-button" id="activity-garage">Wyznacz trasę do garażu →</button></section>
       <section class="activity-tile"><span class="activities-eyebrow">KRÓTKIE ZLECENIE · 2–4 OSOBY</span><h2>Nocny przerzut</h2><p>Trzy punkty w 150 sekund. Dowolny członek ekipy może zaliczyć kolejny cel.</p><div class="activity-meta"><span>Wspólny postęp</span><strong>+$300 / osoba</strong></div><button class="activity-button" id="activity-crew" ${!canStart||Boolean(snapshot&&snapshot.challenge.cooldownMs>0)?'disabled':''}>${crewActive?'Przerzut już trwa':snapshot&&snapshot.challenge.cooldownMs>0?`Przerzut za ${Math.ceil(snapshot.challenge.cooldownMs/1000)} s`:'Rozpocznij przerzut'}</button></section></div>
-      <section class="activity-tile activity-heist" id="heist-panel"><div class="activity-title-row"><div><span class="activities-eyebrow">NAPAD KOOPERACYJNY · 2–4 OSOBY</span><h2>${safe(heist?heistTitles[heist.status]:'Skok na Sapphire')}</h2></div><strong class="activity-countdown">${heist&&['gather','hack','escape'].includes(heist.status)?clock(heist.remainingMs):'+$800'}</strong></div>
+      <section class="activity-tile activity-heist" id="heist-panel"><div class="activity-title-row"><div><span class="activities-eyebrow">NAPAD KOOPERACYJNY · 2–4 OSOBY</span><h2>${safe(heist?heistTitles[heist.status]:'Skok na Sapphire')}</h2></div><strong class="activity-countdown" id="heist-countdown">${heist&&['gather','hack','escape'].includes(heist.status)?clock(heist.remainingMs):'+$800'}</strong></div>
       ${heist?this.heistBody(snapshot!,heist,nearHeist):'<p>Zbierzcie ekipę, otwórzcie sejf i ucieknijcie razem do kryjówki. Kierowca i haker mają różne zadania.</p>'}
       <button class="activity-button" id="heist-start" ${!canStart||Boolean(heist&&heist.cooldownMs>0)?'disabled':''}>${heist&&heist.cooldownMs>0?`Następny napad za ${Math.ceil(heist.cooldownMs/1000)} s`:'Rozpocznij napad'}</button></section>
-      <section class="activity-tile activity-race" id="race-panel"><div class="activity-title-row"><div><span class="activities-eyebrow">WYŚCIG · 2–4 KIEROWCÓW</span><h2>${safe(race?raceTitles[race.status]:'Nocny sprint')}</h2></div><strong class="activity-countdown">${race?.status==='countdown'?String(Math.max(1,Math.ceil(race.countdownMs/1000))):race&&['lobby','running'].includes(race.status)?clock(race.remainingMs):'$500 / $300 / $150 / $100'}</strong></div>
+      <section class="activity-tile activity-race" id="race-panel"><div class="activity-title-row"><div><span class="activities-eyebrow">WYŚCIG · 2–4 KIEROWCÓW</span><h2>${safe(race?raceTitles[race.status]:'Nocny sprint')}</h2></div><strong class="activity-countdown" id="race-countdown">${race?.status==='countdown'?String(Math.max(1,Math.ceil(race.countdownMs/1000))):race&&['lobby','running'].includes(race.status)?clock(race.remainingMs):'$500 / $300 / $150 / $100'}</strong></div>
       ${race?this.raceBody(snapshot!,race):'<p>Przyjedźcie własnymi samochodami na start, zgłoście gotowość i walczcie o najlepszy czas na czterech punktach.</p>'}
       <button class="activity-button" id="race-start" ${!canStart||Boolean(race&&race.cooldownMs>0)?'disabled':''}>${race&&race.cooldownMs>0?`Następny wyścig za ${Math.ceil(race.cooldownMs/1000)} s`:'Przygotuj wyścig'}</button></section>
       ${notice?`<p class="activities-notice" role="status">${safe(notice)}</p>`:''}<footer class="activities-footer"><span>Zamknij panel, aby ruszyć do celu. Zegar zlecenia online nadal biegnie.</span><button class="activity-button activity-button-primary" id="activities-back">Wracam na ulice →</button></footer></section>`;
