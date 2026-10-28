@@ -1,6 +1,7 @@
 import { CASINO } from './casino-location';
 import { BUILDINGS, ROADS, type GameState, type Point } from './model';
 import type { OnlineMember } from './multiplayer-model';
+import { GARAGE_LOCATION } from './garage';
 
 export const TEAM_MAP_COLORS = ['#e0bb75', '#83c3d5', '#c390c0', '#8fc4a0'];
 export interface MinimapOptions {
@@ -11,6 +12,7 @@ export interface MinimapOptions {
   target?: Point | null;
   targetKind?: 'crew' | 'casino' | 'mission';
   time?: number;
+  cityEvent?: {target:Point}|null;
 }
 
 interface Projection { point: Point; axis: 'x' | 'z' }
@@ -149,6 +151,8 @@ export function renderMinimap(ctx: CanvasRenderingContext2D, state: GameState, o
   }
   const club = mapPoint(CASINO.door); ctx.fillStyle = '#d8b6ff'; ctx.beginPath(); ctx.arc(club.x, club.y, 5.5, 0, Math.PI * 2); ctx.fill();
   ctx.fillStyle = '#36234b'; ctx.font = 'bold 10px Arial'; ctx.textAlign = 'center'; ctx.textBaseline = 'middle'; ctx.fillText('♠', club.x, club.y + .5);
+  const shop=mapPoint(GARAGE_LOCATION);ctx.fillStyle='#78d7cd';ctx.fillRect(shop.x-5,shop.y-5,10,10);ctx.fillStyle='#153b3e';ctx.font='bold 9px Arial';ctx.fillText('G',shop.x,shop.y+.5);
+  if(options.cityEvent){const p=mapPoint(options.cityEvent.target);ctx.save();ctx.translate(p.x,p.y);ctx.rotate(Math.PI/4);ctx.fillStyle='#84dbff';ctx.fillRect(-3,-3,6,6);ctx.restore();}
   for (const car of state.vehicles) if (car.id !== state.player.vehicleId) {
     const p = mapPoint(car); ctx.fillStyle = '#d4e2d466'; ctx.fillRect(p.x - 1, p.y - 1, 2, 2);
   }

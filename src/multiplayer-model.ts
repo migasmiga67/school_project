@@ -1,8 +1,10 @@
 import type { PokerAction, PokerState } from './poker-model';
 import type { Point, VehicleKind } from './model';
+import type { GarageAction, GarageState } from './garage';
+import type { JobAction, JobsSnapshot } from './online-jobs';
 
 export const MAX_ROOM_PLAYERS = 4;
-export const ROOM_PROTOCOL = 2;
+export const ROOM_PROTOCOL = 3;
 export const ONLINE_BUY_IN = 200;
 export const ONLINE_TURN_MS = 30000;
 export const CREW_DURATION_MS = 150000;
@@ -19,10 +21,13 @@ export interface CrewChallenge {
 export interface OnlineVehicle {
   id: string; kind: VehicleKind; x: number; z: number; heading: number;
   color: number; speed: number; health: number;
+  tuning?: { engine: number; brakes: number; nitro: number }; label?: string;
 }
 export interface OnlinePose {
   x: number; z: number; heading: number; mode: 'drive' | 'foot';
   interior: 'casino' | null; seated: boolean; vehicle: OnlineVehicle | null;
+  /** Assigned by the host; a client cannot acquire a seat through a pose. */
+  passengerOf?: string | null;
 }
 export interface OnlineMember { id: string; name: string; slot: number; pose: OnlinePose }
 /** Poker is rotated so the recipient is seat zero. Unseen holes use rank 0 backs;
@@ -33,12 +38,18 @@ export interface RoomSnapshot {
   wallet: number; seated: boolean; poker: PokerState | null;
   tableVersion: number; turnDeadline: number | null;
   challenge: CrewChallenge;
+  garage: GarageState; jobs: JobsSnapshot; cityEventClaimed: boolean;
 }
 export type RoomCommand =
   | { type: 'pose'; pose: OnlinePose }
   | { type: 'sit' | 'stand' | 'deal' | 'ping' | 'challengeStart' }
   | { type: 'action'; action: PokerAction; version: number }
-  | { type: 'spend'; amount: number };
+  | { type: 'spend'; amount: number }
+  | { type: 'garage'; action: GarageAction }
+  | { type: 'job'; action: JobAction }
+  | { type: 'cityEventClaim'; eventId: string }
+  | { type: 'ride'; driverId: string }
+  | { type: 'exitRide' };
 export type RoomResult = { ok: true } | { ok: false; reason: string };
 export type RoomStatus = 'offline' | 'connecting' | 'online' | 'error';
 export interface MultiplayerState { status: RoomStatus; message: string; snapshot: RoomSnapshot | null }
@@ -56,4 +67,9 @@ export interface MultiplayerSession {
   action(action: PokerAction): void;
   spend(amount: number): void;
   startChallenge(): void;
+  garage(action: GarageAction): void;
+  job(action: JobAction): void;
+  claimCityEvent(): void;
+  ride(driverId: string): void;
+  exitRide(): void;
 }

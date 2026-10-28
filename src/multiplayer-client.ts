@@ -2,6 +2,9 @@ import { Peer, util, type DataConnection, type PeerOptions } from 'peerjs';
 import { RoomAuthority } from './room-authority';
 import { CREW_CHECKPOINTS, CREW_COOLDOWN_MS, CREW_DURATION_MS, CREW_REWARD, MAX_ROOM_PLAYERS, ROOM_PROTOCOL, type MultiplayerSession, type MultiplayerState, type OnlinePose, type RoomCommand, type RoomSnapshot } from './multiplayer-model';
 import type { PokerAction } from './poker-model';
+import type { GarageAction } from './garage';
+import type { JobAction } from './online-jobs';
+import { cityEventAt } from './city-life';
 
 const CONNECT_MS = 15000;
 const STALE_MS = 15000;
@@ -10,6 +13,9 @@ const alphabet = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
 const clone = <T>(value: T): T => structuredClone(value);
 const record = (value: unknown): value is Record<string, unknown> => Boolean(value && typeof value === 'object' && !Array.isArray(value));
 const integer = (value: unknown) => typeof value === 'number' && Number.isSafeInteger(value) && value >= 0;
+const finiteNumber = (value:unknown):value is number=>typeof value==='number'&&Number.isFinite(value);
+const pointOrNull = (value:unknown)=>value===null||record(value)&&finiteNumber(value.x)&&finiteNumber(value.z);
+const idValue = (value:unknown):value is string=>typeof value==='string'&&/^[A-Za-z0-9_-]{1,128}$/.test(value);
 
 function token(length: number) {
   const bytes = crypto.getRandomValues(new Uint8Array(length));
@@ -61,8 +67,12 @@ function packet(value: unknown): Record<string, unknown> | null {
 }
 function command(value: unknown): value is RoomCommand {
   if (!record(value)) return false;
-  if (['sit', 'stand', 'deal', 'ping', 'challengeStart'].includes(String(value.type))) return true;
+  if (['sit', 'stand', 'deal', 'ping', 'challengeStart', 'exitRide'].includes(String(value.type))) return true;
   if (value.type === 'pose') return record(value.pose);
+  if (value.type === 'ride') return typeof value.driverId==='string' && /^[A-Za-z0-9_-]{1,128}$/.test(value.driverId);
+  if (value.type === 'cityEventClaim') return typeof value.eventId==='string' && value.eventId.length<=80;
+  if (value.type === 'garage') return record(value.action) && ['buy','select','paint','upgrade'].includes(String(value.action.type));
+  if (value.type === 'job') return record(value.action) && ['heistStart','heistInteract','heistHack','raceStart','raceReady'].includes(String(value.action.kind)) && (value.action.kind!=='heistHack'||integer(value.action.symbol)&&Number(value.action.symbol)<=3);
   if (value.type === 'spend') return integer(value.amount);
   if (value.type === 'action') return integer(value.version) && record(value.action) && ['fold', 'check', 'call', 'raise', 'allIn'].includes(String(value.action.type));
   return false;
@@ -88,6 +98,29 @@ function snapshot(value: unknown, hostId: string, youId: string, code: string): 
     if(!target||!record(challenge.target)||challenge.target.x!==target.x||challenge.target.z!==target.z||challenge.cooldownMs!==0)return false;
   } else if(challenge.target!==null||challenge.remainingMs!==0||(challenge.status==='completed'&&challenge.checkpoint!==3)||(challenge.status==='idle'&&(challenge.run!==0||challenge.eligible||challenge.checkpoint!==0||challenge.cooldownMs!==0||challenge.contributors.length!==0)))return false;
   if(challenge.status!=='idle'&&Number(challenge.run)<1)return false;
+  if(typeof value.cityEventClaimed!=='boolean'||!record(value.garage)||!Array.isArray(value.garage.owned)||value.garage.owned.length<1||value.garage.owned.length>3||!value.garage.owned.every(id=>['stratus','sentinel','comet'].includes(String(id)))||!value.garage.owned.includes(value.garage.selected)||!record(value.garage.cars))return false;
+  for(const id of value.garage.owned){
+    const car=value.garage.cars[String(id)];
+    if(!record(car)||!integer(car.paint)||Number(car.paint)>0xffffff||!['engine','brakes','nitro'].every(key=>integer(car[key])&&Number(car[key])<=2))return false;
+  }
+  const jobs=value.jobs;
+  if(!record(jobs)||![null,'heist','race'].includes(jobs.active as null|string)||!record(jobs.heist)||!record(jobs.race))return false;
+  const heist=jobs.heist,race=jobs.race;
+  if(!['idle','gather','hack','escape','completed','failed'].includes(String(heist.status))||!['idle','lobby','countdown','running','completed','failed'].includes(String(race.status)))return false;
+  if(!integer(heist.run)||!integer(race.run)||!integer(heist.remainingMs)||!integer(heist.cooldownMs)||!integer(race.remainingMs)||!integer(race.countdownMs)||!integer(race.cooldownMs)||!Array.isArray(heist.sequence)||heist.sequence.length>3||!heist.sequence.every(symbol=>integer(symbol)&&Number(symbol)<=3)||!Array.isArray(race.participants)||race.participants.length>MAX_ROOM_PLAYERS||!Array.isArray(race.ready)||race.ready.length>MAX_ROOM_PLAYERS)return false;
+  if(typeof heist.eligible!=='boolean'||!['driver','hacker','lookout','spectator'].includes(String(heist.role))||!integer(heist.progress)||Number(heist.progress)>3||!integer(heist.alarm)||Number(heist.alarm)>3||!Array.isArray(heist.gathered)||heist.gathered.length>MAX_ROOM_PLAYERS||!heist.gathered.every(idValue)||!pointOrNull(heist.target)||typeof heist.message!=='string'||heist.message.length>600)return false;
+  if(heist.role!=='hacker'&&heist.sequence.length>0)return false;
+  if(![heist.driverId,heist.hackerId].every(id=>id===null||idValue(id)))return false;
+  if(typeof race.eligible!=='boolean'||typeof race.canReady!=='boolean'||!race.ready.every(idValue)||!pointOrNull(race.target)||!pointOrNull(race.grid)||typeof race.message!=='string'||race.message.length>600)return false;
+  for(const participant of race.participants){
+    if(!record(participant)||!idValue(participant.id)||typeof participant.name!=='string'||participant.name.length>18||!integer(participant.checkpoint)||Number(participant.checkpoint)>4||!['waiting','ready','racing','finished','dnf','spectator'].includes(String(participant.status))||!integer(participant.prize)||Number(participant.prize)>500)return false;
+    if(participant.finishedMs!==null&&!integer(participant.finishedMs)||participant.rank!==null&&(!integer(participant.rank)||Number(participant.rank)<1||Number(participant.rank)>4))return false;
+  }
+  for(const member of value.members){
+    const pose=(member as Record<string,unknown>).pose;
+    if(!record(pose)||!['x','z','heading'].every(key=>typeof pose[key]==='number'&&Number.isFinite(pose[key]))||!['drive','foot'].includes(String(pose.mode))||![null,'casino'].includes(pose.interior as null|string))return false;
+    if(pose.passengerOf!==undefined&&pose.passengerOf!==null&&(typeof pose.passengerOf!=='string'||!ids.has(pose.passengerOf)||pose.passengerOf===(member as Record<string,unknown>).id||pose.mode!=='foot'||pose.interior!==null||pose.vehicle!==null))return false;
+  }
   if (value.poker !== null) {
     const hand = value.poker;
     if (!record(hand) || !Array.isArray(hand.players) || hand.players.length !== 4 || !Array.isArray(hand.deck) || hand.deck.length !== 0 || hand.seed !== 0 || !Array.isArray(hand.board) || hand.board.length > 5) return false;
@@ -154,6 +187,11 @@ export class MultiplayerClient implements MultiplayerSession {
   }
   spend(amount: number) { this.issue({ type: 'spend', amount }); }
   startChallenge() { this.issue({ type: 'challengeStart' }); }
+  garage(action:GarageAction) { this.issue({type:'garage',action}); }
+  job(action:JobAction) { this.issue({type:'job',action}); }
+  claimCityEvent() { const event=this.current.snapshot&&cityEventAt(this.current.snapshot.worldTime);if(event)this.issue({type:'cityEventClaim',eventId:event.id}); }
+  ride(driverId:string) { this.issue({type:'ride',driverId}); }
+  exitRide() { this.issue({type:'exitRide'}); }
 
   private start(host: boolean, rawName: string, code: string): Promise<void> {
     this.clean('Poprzednie łączenie zostało anulowane.');
@@ -305,7 +343,7 @@ export class MultiplayerClient implements MultiplayerSession {
   }
   private acceptSnapshot(value: RoomSnapshot, notice?: string) {
     const previous = this.current.snapshot;
-    const changed = !previous || previous.tableVersion !== value.tableVersion || previous.wallet !== value.wallet || previous.seated !== value.seated || previous.challenge.status !== value.challenge.status || previous.challenge.checkpoint !== value.challenge.checkpoint;
+    const changed = !previous || previous.tableVersion !== value.tableVersion || previous.wallet !== value.wallet || previous.seated !== value.seated || previous.challenge.status !== value.challenge.status || previous.challenge.checkpoint !== value.challenge.checkpoint || JSON.stringify(previous.garage)!==JSON.stringify(value.garage) || previous.jobs.heist.status!==value.jobs.heist.status || previous.jobs.race.status!==value.jobs.race.status || previous.members.find(member=>member.id===previous.youId)?.pose.passengerOf!==value.members.find(member=>member.id===value.youId)?.pose.passengerOf;
     this.publish({ status: 'online', message: notice ?? (changed ? '' : this.current.message), snapshot: clone(value) });
   }
   private drop(guest: Guest, reason?: string) {

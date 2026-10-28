@@ -6,16 +6,18 @@ Oryginalny, niewielki sandbox 3D w przeglądarce, inspirowany miejskimi grami ak
 
 ## Zawartość
 
-- Pastelowe miasto o zachodzie słońca: 15 bloków zabudowy, park, plaża, molo, palmy, światła i ocean.
+- Miasto z cyklem dnia i nocy, deszczem, neonami i przechodniami: 15 bloków zabudowy, park, plaża, molo, palmy i ocean.
 - Auto sportowe i sedany, zaparkowane pojazdy i ruch uliczny; można wysiadać, chodzić, sprintować i przejmować auta.
 - Gaz, hamulec, jazda wstecz, ręczny, nitro i kolizje z zabudową oraz pojazdami.
 - Trzy typy zleceń: dostawa, wyścig przez punkty kontrolne, ucieczka przed policją.
 - Trzy poziomy pościgu, radiowozy, areszt i powrót na drogę.
-- Pokoje online do 4 osób: widoczni gracze i ich samochody, wspólny stół pokerowy i kooperacyjne zlecenie „Nocny przerzut”.
+- Garaż MOD SHOP: trzy modele własnego auta, lakierowanie oraz ulepszenia silnika, hamulców i nitro.
+- Pokoje online do 4 osób: wspólne przejazdy, stół pokerowy, „Nocny przerzut”, napad kooperacyjny i wyścigi między graczami.
+- Krótkie wydarzenia miejskie z nagrodami za dotarcie do celu.
 - Kasyno Sapphire Club z wejściem pieszo, wnętrzem 3D i stołem Texas Hold’em przeciwko trzem komputerowym graczom; rozdanie rozgrywa się przy stole w widocznej sali kasyna.
 - Poker: flop, turn, river, podbijanie, all-in, pule boczne i rozliczanie wygranych z wirtualną gotówką postaci.
 - Minimapka z GPS prowadzącym ulicami, numerowanymi znacznikami ekipy i legendą; znacznik celu w świecie, gotówka, stan auta, trzy kamery, pauza, syntetyczny dźwięk.
-- Gotówka, liczba ukończonych misji, rekord i ustawienie dźwięku zapisują się lokalnie. Po odświeżeniu rozpoczyna się nowa sesja miasta; pozycja i etap bieżącej misji nie są zapisywane.
+- Gotówka solo, zakupione auta, tuning, liczba ukończonych misji, rekord i ustawienie dźwięku zapisują się lokalnie. Po odświeżeniu rozpoczyna się nowa sesja miasta; pozycja i etap bieżącej misji nie są zapisywane.
 
 To mały samodzielny prototyp, a nie projekt o skali pełnej produkcji AAA. Nie zawiera kampanii fabularnej ani broni.
 
@@ -29,9 +31,12 @@ To mały samodzielny prototyp, a nie projekt o skali pełnej produkcji AAA. Nie 
 | Kółko myszy | przybliżanie i oddalanie |
 | Spacja | hamulec ręczny |
 | Shift | nitro / sprint |
-| E | wsiadanie i wysiadanie po zwolnieniu; wejście do kasyna, stół i wyjście |
+| E | wsiadanie i wysiadanie po zwolnieniu; kasyno, stół pokerowy i warsztat |
 | C | zmiana widoku: pościgowy, z góry, pierwsza osoba |
 | M | solo: kolejne zlecenie po zakończeniu aktualnego; online: gospodarz rozpoczyna „Nocny przerzut” |
+| G | trasa do garażu; przy warsztacie otwarcie panelu tuningu |
+| J | panel zajęć: garaż, przerzut, napad i wyścig |
+| F | online: wsiadanie jako pasażer lub wysiadanie po zatrzymaniu |
 | R | powrót na drogę i naprawa za opłatą |
 | P / Esc | pauza i zwolnienie kursora |
 | H / ? | pomoc |
@@ -39,6 +44,20 @@ To mały samodzielny prototyp, a nie projekt o skali pełnej produkcji AAA. Nie 
 Kliknij obraz miasta, aby przechwycić mysz. Esc zwalnia kursor i otwiera pauzę; po wznowieniu możesz ponownie kliknąć obraz. Możesz też trzymać prawy przycisk i przeciągać, zachowując dostęp do kursora. Pieszo W zawsze prowadzi w kierunku widoku, a A/D przesuwa w bok. W aucie obrót kamery służy rozglądaniu; skręt pozostaje na A/D.
 
 Złoty znacznik wskazuje cel. Przejmowanie obcych aut i kolizje przyciągają policję. Aby zgubić pościg, oddal się od radiowozów. Misja ucieczki wymaga także dotarcia do kryjówki.
+
+## Garaż i tuning
+
+**G** wyznacza trasę do MOD SHOP naprzeciwko kasyna; wejście jest przy **(-20, 74)**. Podejdź pieszo albo zatrzymaj własne auto przy bramie i użyj **E** lub ponownie **G**. Warsztat obsługuje własny samochód; podczas wspólnego zlecenia online trzeba najpierw dokończyć aktywność.
+
+Dostępne są **Stratus XS** (auto początkowe), **Sentinel GT za $900** i **Comet RS za $2000**. Comet zawiera pierwszy poziom silnika i nitro. Kupienie auta wybiera je do jazdy; posiadane modele można później przełączać bez kolejnego zakupu. Lakier kosztuje **$80**, a silnik, hamulce i nitro mają po **dwa poziomy ulepszeń**. Tuning zmienia osiągi samochodu, nie tylko opis w panelu.
+
+Garaż solo zapisuje się razem z lokalnym profilem. W pokoju online masz osobny garaż i portfel sesji; zakupy, tuning oraz nagrody online nie zmieniają garażu ani gotówki solo. Po opuszczeniu pokoju wraca własny profil. Garaż online nie jest przenoszony do kolejnego pokoju.
+
+## Żyjące miasto
+
+Pełna doba trwa **12 minut gry**. Zmieniają się oświetlenie, neony i pogoda; po chodnikach spacerują przechodnie. W pokoju online gracze korzystają ze wspólnego czasu miasta.
+
+Co **120 sekund** pojawia się wydarzenie dostępne przez **40 sekund**: zgubiona przesyłka, pomoc na poboczu albo pilna dostawa. Panel wydarzenia i minimapa pokazują cel. Dotrzyj do niego pieszo lub jako kierowca; nagroda **$150–$200** jest odbierana automatycznie w pobliżu, raz za dane wydarzenie w bieżącej sesji. Pasażer nie odbiera nagrody za samo przejechanie przez punkt. Online wypłatę rozlicza gospodarz do portfela pokoju.
 
 ## Kasyno i poker
 
@@ -54,15 +73,33 @@ Wyjście w trakcie rozdania wymaga potwierdzenia i oznacza pas. Niewykorzystane 
 
 Wybierz **Graj online** na ekranie startowym lub przycisk online w grze. Wpisz pseudonim i utwórz pokój albo dołącz kodem od znajomego. Gospodarz może skopiować link z zaproszeniem. Po połączeniu wybierz wejście do miasta. W pokoju mieszczą się maksymalnie **4 osoby**. Podczas łączenia **Anuluj łączenie**, zamknięcie panelu lub **Esc** przerywa próbę; możesz potem ponowić dołączanie. Zamknięcie panelu po udanym połączeniu pozostawia cię w pokoju.
 
-Pokoje służą wspólnej eksploracji miasta, zleceniu ekipy i grze w kasynie. Widać poruszające się postacie oraz prowadzone przez innych samochody. Na minimapie znajdziesz kolorowe, numerowane znaczniki znajomych i legendę z ich nazwami. Osoby przebywające w kasynie są oznaczone przy jego wejściu. GPS prowadzi trasą po ulicach do aktualnego celu. Lokalna pauza zatrzymuje twoją postać; pozostali mogą dalej grać. Osobiste zlecenia trybu solo wracają po opuszczeniu pokoju.
+Pokoje służą wspólnej eksploracji miasta, zleceniom ekipy i grze w kasynie. Widać poruszające się postacie oraz prowadzone przez innych samochody. Na minimapie znajdziesz kolorowe, numerowane znaczniki znajomych i legendę z ich nazwami. Osoby przebywające w kasynie są oznaczone przy jego wejściu. GPS prowadzi trasą po ulicach do aktualnego celu. Lokalna pauza zatrzymuje twoją postać; pozostali mogą dalej grać. Osobiste zlecenia trybu solo wracają po opuszczeniu pokoju.
+
+### Zajęcia ekipy
+
+Panel **J** zawiera napad, wyścig, przerzut i trasę do garażu. Wspólną aktywność rozpoczyna gospodarz przy co najmniej dwóch połączonych osobach, poza kasynem. Pokój rozgrywa jedną aktywność ekipy naraz. Zamknięcie panelu, lokalna pauza i pobyt w kasynie nie zatrzymują zegara rozpoczętego zlecenia.
 
 **Nocny przerzut:** gdy w pokoju są co najmniej dwie osoby, gospodarz poza kasynem rozpoczyna zlecenie przyciskiem na karcie misji lub klawiszem **M**. Ekipa ma **150 sekund** na zaliczenie **trzech punktów po kolei**. Przez każdy znacznik może przejść lub przejechać dowolny członek pokoju; wspólny cel i postęp widzą wszyscy. Lokalna pauza ani wejście do kasyna nie zatrzymują odliczania.
 
 Po ukończeniu każdy gracz obecny przy starcie i nadal połączony przy zakończeniu otrzymuje jednorazowo **$300** do portfela online. Osoby dołączające w trakcie mogą pomagać, a nagrodę otrzymają od kolejnego przerzutu. Po ukończeniu lub upływie czasu obowiązuje **20 sekund** przerwy przed ponownym startem.
 
+**Skok na Sapphire:** gospodarz jest kierowcą, drugi gracz hakerem, a pozostali zwiadowcami. Kierowca i haker spotykają się przy zewnętrznym wejściu kasyna i osobno wybierają **Potwierdź przygotowanie** w panelu **J**. Haker wysiada, podchodzi do drzwi i wprowadza trzy symbole pokazane tylko w swoim panelu. Trzy błędy blokują sejf. Cały napad ma limit **4 minut**.
+
+Po otwarciu sejfu uruchamia się alarm i pościg. Kierowca musi prowadzić samochód, a co najmniej dwie osoby z początkowej ekipy muszą dotrzeć do kryjówki przy **(-80, 0)**. Mogą podróżować razem. Sukces daje jednorazowo po **$800** uczestnikom pozostającym w pokoju od rozpoczęcia napadu. Późniejsze dołączenie nie uprawnia do nagrody tego napadu. Po zakończeniu lub porażce obowiązuje **20 sekund** przerwy.
+
+**Nocny sprint:** gospodarz przygotowuje wyścig w panelu **J**. Kierowcy mają minutę na podjechanie własnymi samochodami do startu przy **(0, 80)** i osobne zgłoszenie **Gotowy**. Potrzeba dwóch gotowych kierowców. Gra ustawia auta na polach startowych i odlicza **3 sekundy**. Trasa obejmuje **cztery punkty po kolei**, a na przejazd są **3 minuty**.
+
+Ranking pokazuje postęp, czas oraz nagrodę: **$500 / $300 / $150 / $100** według kolejności ukończenia. Wypłata trafia do portfela online raz po finiszu. Rozłączenie lub upływ czasu oznacza **DNF** — bez nagrody za nieukończony przejazd. Pasażerowie i osoby dołączające do pokoju już po przygotowaniu wyścigu mogą go obserwować; wystartują w kolejnym. Po zakończeniu obowiązuje **20 sekund** przerwy przed następnym wyścigiem.
+
+### Wspólne przejazdy
+
+Podejdź pieszo do zatrzymanego samochodu znajomego i naciśnij **F**. W aucie mogą jechać kierowca i maksymalnie trzej pasażerowie. Pasażer porusza się razem z kierowcą i nie steruje autem. **F** lub **E** pozwala wysiąść po zatrzymaniu; wyjście kierowcy z samochodu lub jego rozłączenie automatycznie zwalnia miejsca pasażerów.
+
+### Poker i portfel pokoju
+
 W kasynie podejdź do stołu i użyj **E**. Każdy gracz osobno zajmuje miejsce za **$200**. Gdy usiądą co najmniej dwie osoby, można rozdać karty. Przy stole online decyzje podejmują ludzie; gospodarz sprawdza kolejność akcji, rozlicza pule i przekazuje każdemu tylko jego prywatne karty. Na ruch jest **30 sekund**; po upływie czasu gracz czeka, jeśli może, albo pasuje.
 
-Online dostajesz osobny, sesyjny portfel **$1250**. Wpisowe i wygrane nie zmieniają lokalnego zapisu trybu solo. Odejście od stołu zwraca niewykorzystane żetony do portfela pokoju. Salda online i pokój nie są zapisywane po zakończeniu sesji.
+Online dostajesz osobny, sesyjny portfel **$1250**. Wpisowe, wygrane, zakupy w garażu i wypłaty z aktywności nie zmieniają lokalnego zapisu trybu solo. Odejście od stołu zwraca niewykorzystane żetony do portfela pokoju. Salda, garaż online, wyniki bieżących aktywności i pokój nie są zapisywane po zakończeniu sesji.
 
 Połączenia korzystają z WebRTC i sygnalizatora PeerJS. Gospodarz utrzymuje pokój w swojej przeglądarce — musi pozostawić stronę otwartą. Jego rozłączenie kończy sesję pozostałych osób. Publiczny sygnalizator i serwery ICE muszą być dostępne z sieci graczy. Dostępne są połączenia bezpośrednie oraz pośrednictwo TURN przez UDP lub TCP; całkowita blokada serwerów ICE w sieci może uniemożliwić dołączenie. Po błędzie można ponowić dołączanie lub utworzyć nowy pokój.
 
@@ -79,7 +116,7 @@ npm run build
 npm run test:e2e
 ```
 
-W środowisku chmurowym można użyć `npm ci --cache /workspace/.npm-cache`. `src/game.ts` zawiera logikę i fizykę, `src/world.ts` scenę Three.js, a `src/main.ts` interfejs i wejście. `src/casino-view.ts` buduje kasyno; `src/poker.ts` odpowiada za zasady i boty, a `src/poker-ui.ts` za interfejs stołu. `src/room-authority.ts` prowadzi pokój i wspólny stół, a `src/multiplayer-client.ts` obsługuje połączenia WebRTC.
+W środowisku chmurowym można użyć `npm ci --cache /workspace/.npm-cache`. `src/game.ts` zawiera logikę i fizykę, `src/world.ts` scenę Three.js, a `src/main.ts` interfejs i wejście. `src/garage.ts` rozlicza zakupy i tuning, `src/city-life.ts` czas, pogodę i wydarzenia, a `src/online-jobs.ts` napad i wyścigi. `src/casino-view.ts` buduje kasyno; `src/poker.ts` odpowiada za zasady i boty, a `src/poker-ui.ts` za interfejs stołu. `src/room-authority.ts` prowadzi pokój, portfele, przejazdy i wspólny stół; `src/multiplayer-client.ts` obsługuje połączenia WebRTC.
 
 Testy Playwright wymagają Chromium. Obsługiwany jest `CHROMIUM_PATH`, lokalne `/usr/bin/chromium` lub oficjalny browser z `npx playwright install chromium`. Domyślnie testowany jest **gotowy `dist` pod `/school_project/` na porcie 5185**. `NEON_BASE_URL` pozwala wskazać inny serwer. Grafika i audio powstają programowo; tryb solo nie wymaga zewnętrznych zasobów.
 

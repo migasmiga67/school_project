@@ -175,9 +175,12 @@ function collision(s: GameState, car: Vehicle, speed: number, events: GameEvent[
   events.push({ kind: 'damage', text: `Kolizja. Stan pojazdu −${amount}%.`, amount }); attention(s, 1, events);
 }
 function drive(s: GameState, car: Vehicle, input: Input, dt: number, events: GameEvent[]) {
-  const acceleration = input.throttle ? (input.boost ? 19 : 13) : input.brake ? (car.speed > .5 ? -23 : -10) : -Math.sign(car.speed) * Math.min(Math.abs(car.speed) / Math.max(dt, .0001), 3.6 + Math.abs(car.speed) * .12);
-  car.speed = clamp(car.speed + acceleration * dt, -9, input.boost ? 35 : 26);
-  if (input.handbrake) car.speed *= Math.exp(-dt * 3.5);
+  const tuning = car.tuning;
+  const tuningLevel = (value: number | undefined) => Number.isFinite(value) ? clamp(Math.floor(value!), 0, 2) : 0;
+  const engine = tuningLevel(tuning?.engine), brakes = tuningLevel(tuning?.brakes), nitro = tuningLevel(tuning?.nitro);
+  const acceleration = input.throttle ? (input.boost ? 19 + engine * 2 + nitro * 3 : 13 * (1 + engine * .18)) : input.brake ? (car.speed > .5 ? -23 * (1 + brakes * .25) : -10) : -Math.sign(car.speed) * Math.min(Math.abs(car.speed) / Math.max(dt, .0001), 3.6 + Math.abs(car.speed) * .12);
+  car.speed = clamp(car.speed + acceleration * dt, -9, input.boost ? 35 + engine * 2 + nitro * 3 : 26 + engine * 3);
+  if (input.handbrake) car.speed *= Math.exp(-dt * (3.5 + brakes * .6));
   const axis = Number(input.right) - Number(input.left);
   car.steer += (axis - car.steer) * Math.min(1, dt * 7);
   car.heading = angle(car.heading + car.steer * Math.min(Math.abs(car.speed) / 5, 1) * Math.sign(car.speed || 1) * dt * (input.handbrake ? 2.4 : 1.45) / (1 + Math.abs(car.speed) / 42));

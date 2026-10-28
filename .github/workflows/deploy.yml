@@ -27,7 +27,7 @@ jobs:
       - run: npm test
       - run: npm run build
       - run: npx playwright install --with-deps chromium
-      - name: City, casino and multiplayer browser tests
+      - name: City, garage, activities and multiplayer browser tests
         run: npm run test:e2e
       - name: Failure diagnostics
         if: failure()

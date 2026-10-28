@@ -1,11 +1,14 @@
 import { CASINO } from './casino-location';
-import { WORLD_BOUNDS } from './model';
+import { BUILDINGS, ROADS, WORLD_BOUNDS } from './model';
+import { createGarage, garageAction, garageVehicle, GARAGE_LOCATION, type GarageState } from './garage';
+import { OnlineJobs } from './online-jobs';
+import { cityEventAt } from './city-life';
 import { act, createPokerTable, dealHand, foldPokerSeat, legalActions } from './poker';
 import { CREW_CHECKPOINTS, CREW_COOLDOWN_MS, CREW_DURATION_MS, CREW_REWARD, MAX_ROOM_PLAYERS, ONLINE_BUY_IN, ONLINE_TURN_MS } from './multiplayer-model';
 import type { CrewChallenge, OnlineMember, OnlinePose, OnlineVehicle, RoomCommand, RoomResult, RoomSnapshot } from './multiplayer-model';
 import type { PokerAction, PokerSeat, PokerState } from './poker-model';
 
-interface Member { view: OnlineMember; wallet: number; lastSpend: number }
+interface Member { view: OnlineMember; wallet: number; lastSpend: number; garage: GarageState; claimedEvent: string | null }
 const yes: RoomResult = {ok:true};
 const no=(reason:string):RoomResult=>({ok:false,reason});
 const handActive=(s:PokerState)=>s.phase!=='waiting'&&s.phase!=='showdown';
@@ -34,10 +37,11 @@ export class RoomAuthority {
   private challengeReadyAt=0;
   private readonly challengeEligible=new Set<string>();
   private readonly contributors=new Set<string>();
+  private readonly jobs:OnlineJobs;
 
   constructor(code:string,hostId:string,name:string,seed?:number) {
     if(typeof code!=='string'||!/^[A-Z2-9]{8}$/i.test(code)||!validId(hostId)||!validName(nickname(name)))throw new Error('Niepoprawny kod pokoju lub pseudonim.');
-    this.code=code.toUpperCase();this.hostId=hostId;
+    this.code=code.toUpperCase();this.hostId=hostId;this.jobs=new OnlineJobs(hostId);
     this.table=createPokerTable(seed,ONLINE_BUY_IN);this.table.players=this.table.players.map((_,i)=>emptySeat(i));
     this.join(hostId,name);
   }
@@ -51,17 +55,18 @@ export class RoomAuthority {
     const slot=[0,1,2,3].find(index=>!occupied.has(index))!;
     const z=68-slot*7,color=[0xded8cb,0x8f78bf,0x63a9a2,0xe1a86b][slot];
     const pose:OnlinePose={x:0,z,heading:0,mode:'drive',interior:null,seated:false,vehicle:{id:'stratus',kind:'sport',x:0,z,heading:0,color,speed:0,health:100}};
-    this.people.set(id,{view:{id,name:clean,slot,pose},wallet:1250,lastSpend:-Infinity});
+    this.people.set(id,{view:{id,name:clean,slot,pose},wallet:1250,lastSpend:-Infinity,garage:createGarage(),claimedEvent:null});
     return yes;
   }
 
   leave(id:string):void {
     if(!this.people.has(id))return;
+    this.releasePassengers(id);
     this.stand(id);
     const car=this.people.get(id)?.view.pose.vehicle;
     if(car&&car.id!=='stratus')this.vehicles.set(car.id,{...car,speed:0});
     this.challengeEligible.delete(id);
-    this.people.delete(id);
+    this.people.delete(id);this.updateJobs();
   }
 
   command(id:string,command:RoomCommand,now=Date.now()):RoomResult {
@@ -71,6 +76,31 @@ export class RoomAuthority {
     if(!command||typeof command!=='object'||typeof command.type!=='string')return no('Niepoprawne polecenie pokoju.');
     switch(command.type) {
       case 'ping': return yes;
+      case 'ride': return this.ride(id,member,command.driverId);
+      case 'exitRide': { const result=this.exitRide(member);this.updateJobs();return result; }
+      case 'garage': {
+        if(this.jobs.busy||this.challengeStatus==='active')return no('Dokończ aktywność ekipy przed zmianą samochodu.');
+        const pose=member.view.pose;
+        if(pose.interior||pose.seated||pose.passengerOf||Math.hypot(pose.x-GARAGE_LOCATION.x,pose.z-GARAGE_LOCATION.z)>6||Math.abs(pose.vehicle?.speed??0)>1.5)return no('Podejdź do warsztatu lub zaparkuj przy jego bramie.');
+        const result=garageAction(member.garage,member.wallet,command.action);
+        if(!result.ok)return no(result.reason);
+        member.garage=result.garage;member.wallet=result.wallet;
+        if(pose.vehicle?.id==='stratus')Object.assign(pose.vehicle,garageVehicle(member.garage));
+        return yes;
+      }
+      case 'job': {
+        const action=command.action;
+        if(!action||typeof action!=='object'||!['heistStart','heistInteract','heistHack','raceStart','raceReady'].includes(action.kind))return no('Nieznana aktywność miasta.');
+        if(action.kind==='heistHack'&&(!Number.isInteger(action.symbol)||action.symbol<0||action.symbol>3))return no('Niepoprawny symbol terminala.');
+        if((action.kind==='heistStart'||action.kind==='raceStart')&&this.challengeStatus==='active')return no('Najpierw dokończcie Nocny przerzut.');
+        const result=this.jobs.command(id,action,this.members(),this.now);this.updateJobs();return result;
+      }
+      case 'cityEventClaim': {
+        const event=cityEventAt(this.worldTime()),pose=member.view.pose;
+        if(!event||command.eventId!==event.id||pose.interior||pose.seated||pose.passengerOf||Math.hypot(pose.x-event.target.x,pose.z-event.target.z)>5)return no('Podejdź do aktywnego wydarzenia w mieście.');
+        if(member.claimedEvent===event.id)return no('Nagroda za to wydarzenie została już odebrana.');
+        member.claimedEvent=event.id;member.wallet+=event.reward;return yes;
+      }
       case 'challengeStart': return this.startChallenge(id,member);
       case 'pose': return this.move(member,command.pose);
       case 'sit': return this.sit(id,member);
@@ -98,7 +128,7 @@ export class RoomAuthority {
     if(!finite(now)||now<0)return false;
     this.now=Math.max(this.now,now);
     if(this.epoch===null)this.epoch=this.now;
-    let changed=false;
+    let changed=this.updateJobs();
     if(this.challengeStatus==='active'&&this.now>=this.challengeDeadline) {
       this.challengeStatus='failed';this.challengeReadyAt=this.challengeDeadline+CREW_COOLDOWN_MS;changed=true;
     }
@@ -114,11 +144,12 @@ export class RoomAuthority {
     if(!member)throw new Error('Nie należysz do tego pokoju.');
     const seat=this.seats.indexOf(id);
     const poker=seat>=0?this.publicTable(seat):null;
-    return {code:this.code,hostId:this.hostId,youId:id,members:[...this.people.values()].map(person=>structuredClone(person.view)).sort((a,b)=>a.slot-b.slot),wallet:member.wallet,seated:seat>=0,poker,tableVersion:this.version,turnDeadline:this.deadline,vehicles:[...this.vehicles.values()].map(car=>({...car})),worldTime:this.epoch===null?0:(this.now-this.epoch)/1000,challenge:this.publicChallenge(id)};
+    return {code:this.code,hostId:this.hostId,youId:id,members:[...this.people.values()].map(person=>structuredClone(person.view)).sort((a,b)=>a.slot-b.slot),wallet:member.wallet,seated:seat>=0,poker,tableVersion:this.version,turnDeadline:this.deadline,vehicles:[...this.vehicles.values()].map(car=>({...car})),worldTime:this.epoch===null?0:(this.now-this.epoch)/1000,challenge:this.publicChallenge(id),garage:structuredClone(member.garage),jobs:this.jobs.snapshot(id,this.now),cityEventClaimed:member.claimedEvent===cityEventAt(this.worldTime())?.id};
   }
 
   private startChallenge(id:string,member:Member):RoomResult {
     if(id!==this.hostId)return no('Tylko gospodarz może rozpocząć Nocny przerzut.');
+    if(this.jobs.busy)return no('Najpierw dokończcie napad lub wyścig.');
     if(this.people.size<2)return no('Zaproś co najmniej jednego znajomego do wspólnego zlecenia.');
     if(member.view.pose.interior!==null||member.view.pose.seated)return no('Wyjdź z kasyna, aby rozpocząć zlecenie ekipy.');
     if(this.challengeStatus==='active')return no('Nocny przerzut już trwa. Jedźcie do wspólnego celu.');
@@ -134,7 +165,7 @@ export class RoomAuthority {
   }
 
   private reachCheckpoint(member:Member) {
-    if(this.challengeStatus!=='active'||member.view.pose.interior!==null||member.view.pose.seated)return;
+    if(this.challengeStatus!=='active'||member.view.pose.interior!==null||member.view.pose.seated||member.view.pose.passengerOf)return;
     const target=CREW_CHECKPOINTS[this.checkpoint],pose=member.view.pose;
     if(Math.hypot(pose.x-target.x,pose.z-target.z)>5)return;
     this.contributors.add(member.view.id);this.checkpoint++;
@@ -146,6 +177,69 @@ export class RoomAuthority {
     }
   }
 
+  private worldTime() { return this.epoch===null?0:(this.now-this.epoch)/1000; }
+  private members() { return [...this.people.values()].map(member=>member.view); }
+
+  private updateJobs():boolean {
+    const before=JSON.stringify(this.jobs.snapshot(this.hostId,this.now));
+    const result=this.jobs.update(this.members(),this.now);
+    for(const credit of result.credits) {
+      const member=this.people.get(credit.id);
+      if(member&&Number.isSafeInteger(credit.amount)&&credit.amount>0)member.wallet+=credit.amount;
+    }
+    // The ready grid is host owned, so neither a queued pose nor a slow client
+    // can turn the countdown into a rolling start.
+    for(const member of this.people.values()) {
+      const race=this.jobs.snapshot(member.view.id,this.now).race;
+      if(race.status!=='countdown'||!race.grid||member.view.pose.mode!=='drive'||member.view.pose.vehicle?.id!=='stratus')continue;
+      Object.assign(member.view.pose,race.grid,{heading:0});
+      Object.assign(member.view.pose.vehicle,race.grid,{heading:0,speed:0});
+      this.followPassengers(member.view.id);
+    }
+    return result.credits.length>0||before!==JSON.stringify(this.jobs.snapshot(this.hostId,this.now));
+  }
+
+  private ride(id:string,member:Member,driverId:string):RoomResult {
+    if(!validId(driverId)||driverId===id)return no('Wybierz samochód innego gracza.');
+    const driver=this.people.get(driverId),pose=member.view.pose,car=driver?.view.pose.vehicle;
+    if(pose.mode!=='foot'||pose.interior||pose.seated||pose.passengerOf)return no('Podejdź pieszo do samochodu znajomego.');
+    if(!driver||driver.view.pose.mode!=='drive'||driver.view.pose.interior||!car||car.health<=0||Math.abs(car.speed)>3||Math.hypot(pose.x-car.x,pose.z-car.z)>5.5)return no('Podejdź do zatrzymanego samochodu znajomego.');
+    if([...this.people.values()].filter(person=>person.view.pose.passengerOf===driverId).length>=3)return no('W samochodzie nie ma już wolnych miejsc.');
+    member.view.pose={x:car.x,z:car.z,heading:car.heading,mode:'foot',interior:null,seated:false,vehicle:null,passengerOf:driverId};
+    this.updateJobs();return yes;
+  }
+
+  private exitPoint(car:OnlineVehicle,slot:number) {
+    const safe=(point:{x:number;z:number})=>point.x>WORLD_BOUNDS.minX+.6&&point.x<WORLD_BOUNDS.maxX-.6&&point.z>WORLD_BOUNDS.minZ+.6&&point.z<WORLD_BOUNDS.maxZ-.6&&!BUILDINGS.some(building=>Math.abs(point.x-building.x)<building.halfX+.6&&Math.abs(point.z-building.z)<building.halfZ+.6);
+    const side=slot%2?1:-1;
+    const candidates=[side,-side].flatMap(direction=>[2.9+(slot>=2?1.2:0),5].map(offset=>({x:car.x+Math.cos(car.heading)*offset*direction,z:car.z+Math.sin(car.heading)*offset*direction})));
+    const exit=candidates.find(safe);
+    if(exit)return exit;
+    // A disconnect must always free the seat even if a corrupted car pose was
+    // surrounded by geometry; the nearest street intersection is a safe fallback.
+    return ROADS.flatMap(x=>ROADS.map(z=>({x,z}))).filter(safe).sort((a,b)=>Math.hypot(a.x-car.x,a.z-car.z)-Math.hypot(b.x-car.x,b.z-car.z))[0]??{x:0,z:80};
+  }
+
+  private exitRide(member:Member,forced=false):RoomResult {
+    const driverId=member.view.pose.passengerOf;
+    if(!driverId)return no('Nie jesteś pasażerem.');
+    const driver=this.people.get(driverId),car=driver?.view.pose.vehicle;
+    if(!forced&&car&&Math.abs(car.speed)>3)return no('Poczekaj, aż kierowca zatrzyma samochód.');
+    const position=car?this.exitPoint(car,member.view.slot):{x:member.view.pose.x,z:member.view.pose.z};
+    member.view.pose={...position,heading:member.view.pose.heading,mode:'foot',interior:null,seated:false,vehicle:null,passengerOf:null};
+    return yes;
+  }
+
+  private followPassengers(driverId:string) {
+    const driver=this.people.get(driverId),car=driver?.view.pose.vehicle;
+    if(!driver||driver.view.pose.mode!=='drive'||!car){this.releasePassengers(driverId);return;}
+    for(const member of this.people.values())if(member.view.pose.passengerOf===driverId)Object.assign(member.view.pose,{x:car.x,z:car.z,heading:car.heading});
+  }
+
+  private releasePassengers(driverId:string) {
+    for(const member of this.people.values())if(member.view.pose.passengerOf===driverId)this.exitRide(member,true);
+  }
+
   private validAction(value:unknown):value is PokerAction {
     if(!value||typeof value!=='object')return false;
     const action=value as Record<string,unknown>;
@@ -154,6 +248,9 @@ export class RoomAuthority {
 
   private move(member:Member,value:OnlinePose):RoomResult {
     if(!value||typeof value!=='object'||!finite(value.x)||!finite(value.z)||!finite(value.heading)||Math.abs(value.heading)>1e6||!['drive','foot'].includes(value.mode)||(value.interior!==null&&value.interior!=='casino'))return no('Niepoprawna pozycja gracza.');
+    // Pose pumps keep running while seated. The driver's accepted pose owns the
+    // passenger position; ignoring these updates avoids repeated error notices.
+    if(member.view.pose.passengerOf)return yes;
     const bounds=value.interior==='casino'?CASINO.bounds:WORLD_BOUNDS;
     if(value.x<bounds.minX||value.x>bounds.maxX||value.z<bounds.minZ||value.z>bounds.maxZ)return no('Pozycja znajduje się poza mapą.');
     const seated=this.seats.includes(member.view.id);
@@ -161,24 +258,30 @@ export class RoomAuthority {
     let vehicle:OnlinePose['vehicle']=null;
     if(value.mode==='drive') {
       const car=value.vehicle;
-      if(value.interior!==null||!car||typeof car!=='object'||typeof car.id!=='string'||!/^[A-Za-z0-9_-]{1,64}$/.test(car.id)||!['sport','sedan'].includes(car.kind)||![car.x,car.z,car.heading,car.color,car.speed,car.health].every(finite)||Math.hypot(car.x-value.x,car.z-value.z)>2||Math.abs(car.speed)>40||car.health<0||car.health>100||!Number.isSafeInteger(car.color)||car.color<0||car.color>0xffffff||Math.abs(car.heading)>1e6)return no('Niepoprawny pojazd gracza.');
+      if(value.interior!==null||!car||typeof car!=='object'||typeof car.id!=='string'||!/^[A-Za-z0-9_-]{1,64}$/.test(car.id)||!['sport','sedan'].includes(car.kind)||![car.x,car.z,car.heading,car.color,car.speed,car.health].every(finite)||Math.hypot(car.x-value.x,car.z-value.z)>2||Math.abs(car.speed)>50||car.health<0||car.health>100||!Number.isSafeInteger(car.color)||car.color<0||car.color>0xffffff||Math.abs(car.heading)>1e6)return no('Niepoprawny pojazd gracza.');
       if(car.id!=='stratus'&&!/^(parked-[1-4]|traffic-[0-7])$/.test(car.id))return no('Nieznany pojazd miasta.');
       if(car.x<WORLD_BOUNDS.minX||car.x>WORLD_BOUNDS.maxX||car.z<WORLD_BOUNDS.minZ||car.z>WORLD_BOUNDS.maxZ)return no('Pojazd znajduje się poza mapą.');
       if(car.id!=='stratus'&&[...this.people.values()].some(person=>person!==member&&person.view.pose.mode==='drive'&&person.view.pose.vehicle?.id===car.id))return no('Ten samochód prowadzi już inny gracz.');
       vehicle={id:car.id,kind:car.kind,x:car.x,z:car.z,heading:Math.atan2(Math.sin(car.heading),Math.cos(car.heading)),color:car.color,speed:car.speed,health:car.health};
+      if(car.id==='stratus')Object.assign(vehicle,garageVehicle(member.garage));
     } else if(value.vehicle!==null)return no('Pieszy nie może jednocześnie prowadzić pojazdu.');
     const previousCar=member.view.pose.vehicle;
+    if(previousCar&&(!vehicle||previousCar.id!==vehicle.id))this.releasePassengers(member.view.id);
     if(previousCar&&previousCar.id!=='stratus'&&previousCar.id!==vehicle?.id)this.vehicles.set(previousCar.id,{...previousCar,speed:0});
     if(vehicle&&vehicle.id!=='stratus')this.vehicles.set(vehicle.id,{...vehicle});
-    member.view.pose={x:value.x,z:value.z,heading:Math.atan2(Math.sin(value.heading),Math.cos(value.heading)),mode:value.mode,interior:value.interior,seated,vehicle};
-    this.reachCheckpoint(member);
+    const race=this.jobs.snapshot(member.view.id,this.now).race;
+    const grid=race.status==='countdown'&&race.grid&&vehicle?.id==='stratus'?race.grid:null;
+    if(grid&&vehicle)Object.assign(vehicle,grid,{heading:0,speed:0});
+    member.view.pose={x:grid?.x??value.x,z:grid?.z??value.z,heading:grid?0:Math.atan2(Math.sin(value.heading),Math.cos(value.heading)),mode:value.mode,interior:value.interior,seated,vehicle,passengerOf:null};
+    this.followPassengers(member.view.id);
+    this.reachCheckpoint(member);this.updateJobs();
     return yes;
   }
 
   private sit(id:string,member:Member):RoomResult {
     if(this.seats.includes(id))return no('Masz już miejsce przy stole.');
     const pose=member.view.pose;
-    if(pose.mode!=='foot'||pose.interior!=='casino'||Math.hypot(pose.x-CASINO.table.x,pose.z-CASINO.table.z)>5.5)return no('Podejdź pieszo do stołu w kasynie.');
+    if(pose.passengerOf||pose.mode!=='foot'||pose.interior!=='casino'||Math.hypot(pose.x-CASINO.table.x,pose.z-CASINO.table.z)>5.5)return no('Podejdź pieszo do stołu w kasynie.');
     if(member.wallet<ONLINE_BUY_IN)return no('Potrzebujesz $200, aby zająć miejsce.');
     const seat=this.seats.findIndex((owner,index)=>owner===null&&(!handActive(this.table)||this.table.players[index].contributed===0));
     if(seat<0)return no('Wszystkie miejsca są zajęte. Poczekaj na kolejne rozdanie.');

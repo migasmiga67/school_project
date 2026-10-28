@@ -29,6 +29,7 @@ interface RemoteVisual {
   paintColor: number;
   location: 'casino' | null;
   mode: 'drive' | 'foot';
+  passengerOf: string|null;
   initialized: boolean;
 }
 
@@ -210,7 +211,7 @@ export class RemotePlayersView {
     const labelTexture = this.nameTexture(member.name, slot);
     const label = new THREE.Sprite(new THREE.SpriteMaterial({ map: labelTexture, transparent: true, depthWrite: false }));
     label.scale.set(2.9, .635, 1); label.position.y = 2.65; root.add(label);
-    return { root, avatar, body, legs, arms, car, carBody, carDetails, paint, wheels, frontSteers, label, labelTexture, name: member.name, slot, heading: 0, wheelPhase: 0, phase: 0, kind: 'sport', paintColor: SLOT_COLORS[slot], location: member.pose.interior, mode: member.pose.mode, initialized: false };
+    return { root, avatar, body, legs, arms, car, carBody, carDetails, paint, wheels, frontSteers, label, labelTexture, name: member.name, slot, heading: 0, wheelPhase: 0, phase: 0, kind: 'sport', paintColor: SLOT_COLORS[slot], location: member.pose.interior, mode: member.pose.mode, passengerOf:member.pose.passengerOf??null, initialized: false };
   }
 
   private remove(id: string, visual: RemoteVisual) {
@@ -219,7 +220,7 @@ export class RemotePlayersView {
     this.visuals.delete(id);
   }
 
-  update(members: OnlineMember[], selfId: string, interior: 'casino' | null, dt: number) {
+  update(members: OnlineMember[], selfId: string, interior: 'casino' | null, dt: number, hideVehicleOf?:string) {
     if (this.destroyed) return;
     const step = Number.isFinite(dt) ? Math.min(.2, Math.max(0, dt)) : 0;
     const blend = 1 - Math.exp(-step * 14);
@@ -229,7 +230,9 @@ export class RemotePlayersView {
       present.add(member.id);
       let visual = this.visuals.get(member.id);
       if (!visual) { visual = this.create(member); this.visuals.set(member.id, visual); }
-      const pose = member.pose, driving = pose.mode === 'drive' && pose.vehicle !== null;
+      const pose = member.pose,riding=Boolean(pose.passengerOf),driver=riding?members.find(person=>person.id===pose.passengerOf):undefined;
+      const rideVehicle=driver?.pose.mode==='drive'?driver.pose.vehicle:null;
+      const driving = !riding&&pose.mode === 'drive' && pose.vehicle !== null;
       const visible = pose.interior === interior && !(pose.interior === 'casino' && pose.seated);
       visual.root.visible = visible;
       if (!visible) { visual.initialized = false; continue; }
@@ -244,21 +247,22 @@ export class RemotePlayersView {
         }
         visual.name = member.name; visual.slot = slot;
       }
-      const targetX = driving ? pose.vehicle!.x : pose.x, targetZ = driving ? pose.vehicle!.z : pose.z;
-      const heading = driving ? pose.vehicle!.heading : pose.heading;
-      const jump = !visual.initialized || visual.location !== pose.interior || visual.mode !== pose.mode || Math.hypot(targetX - visual.root.position.x, targetZ - visual.root.position.z) > 18;
+      const targetX = driving ? pose.vehicle!.x : rideVehicle?.x??pose.x, targetZ = driving ? pose.vehicle!.z : rideVehicle?.z??pose.z;
+      const heading = driving ? pose.vehicle!.heading : rideVehicle?.heading??pose.heading;
+      const jump = !visual.initialized || visual.location !== pose.interior || visual.mode !== pose.mode || visual.passengerOf!==(pose.passengerOf??null) || Math.hypot(targetX - visual.root.position.x, targetZ - visual.root.position.z) > 18;
       const previousX = visual.root.position.x, previousZ = visual.root.position.z, oldHeading = visual.heading;
-      if (jump) { visual.root.position.set(targetX, driving ? .05 : .1, targetZ); visual.heading = heading; }
+      if (jump) { visual.root.position.set(targetX, driving||riding ? .05 : .1, targetZ); visual.heading = heading; }
       else {
         visual.root.position.x += (targetX - visual.root.position.x) * blend;
         visual.root.position.z += (targetZ - visual.root.position.z) * blend;
         visual.heading = wrap(visual.heading + wrap(heading - visual.heading) * blend);
       }
-      visual.root.position.y = driving ? .05 : .1;
-      visual.initialized = true; visual.location = pose.interior; visual.mode = pose.mode;
-      visual.avatar.visible = !driving; visual.car.visible = driving;
+      visual.root.position.y = driving||riding ? .05 : .1;
+      visual.initialized = true; visual.location = pose.interior; visual.mode = pose.mode;visual.passengerOf=pose.passengerOf??null;
+      visual.avatar.visible = !driving&&!riding; visual.car.visible = driving&&member.id!==hideVehicleOf;
       visual.avatar.rotation.y = visual.car.rotation.y = -visual.heading;
-      visual.label.position.y = driving ? 2.8 : 2.65;
+      const seatSide=riding?(slot%2?1:-1)*1.4:0;
+      visual.label.position.set(Math.cos(heading)*seatSide,riding?3.65+Math.floor(slot/2)*.7:driving?2.8:2.65,Math.sin(heading)*seatSide);
       const travel = jump ? 0 : Math.hypot(visual.root.position.x - previousX, visual.root.position.z - previousZ);
       if (driving) {
         const vehicle = pose.vehicle!;
@@ -271,7 +275,7 @@ export class RemotePlayersView {
         visual.wheels.forEach(wheel => { wheel.rotation.x = visual.wheelPhase; });
         const turn = step > 0 && !jump ? THREE.MathUtils.clamp(wrap(visual.heading - oldHeading) / step * .3, -.35, .35) : 0;
         visual.frontSteers.forEach(steer => { steer.rotation.y = turn; });
-      } else {
+      } else if(!riding) {
         const moving = travel > .0003;
         if (moving) visual.phase += travel * 3.2;
         visual.legs.forEach((leg, index) => { leg.rotation.x = moving ? Math.sin(visual.phase + index * Math.PI) * .52 : 0; });
