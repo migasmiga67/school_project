@@ -26,6 +26,8 @@ jobs:
       - run: npm run typecheck
       - run: npm test
       - run: npm run build
+        env:
+          VITE_ICE_SERVERS: ${{ secrets.TURN_ICE_SERVERS }}
       - run: npx playwright install --with-deps chromium
       - name: City, garage, activities and multiplayer browser tests
         run: npm run test:e2e

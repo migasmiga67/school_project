@@ -101,7 +101,7 @@ W kasynie podejdź do stołu i użyj **E**. Każdy gracz osobno zajmuje miejsce 
 
 Online dostajesz osobny, sesyjny portfel **$1250**. Wpisowe, wygrane, zakupy w garażu i wypłaty z aktywności nie zmieniają lokalnego zapisu trybu solo. Odejście od stołu zwraca niewykorzystane żetony do portfela pokoju. Salda, garaż online, wyniki bieżących aktywności i pokój nie są zapisywane po zakończeniu sesji.
 
-Połączenia korzystają z WebRTC i sygnalizatora PeerJS. Gospodarz utrzymuje pokój w swojej przeglądarce — musi pozostawić stronę otwartą. Jego rozłączenie kończy sesję pozostałych osób. Publiczny sygnalizator i serwery ICE muszą być dostępne z sieci graczy. Dostępne są połączenia bezpośrednie oraz pośrednictwo TURN przez UDP lub TCP; całkowita blokada serwerów ICE w sieci może uniemożliwić dołączenie. Po błędzie można ponowić dołączanie lub utworzyć nowy pokój.
+Połączenia korzystają z WebRTC i sygnalizatora PeerJS. Gospodarz utrzymuje pokój w swojej przeglądarce — musi pozostawić stronę otwartą. Jego rozłączenie kończy sesję pozostałych osób. Publiczny sygnalizator i serwery ICE muszą być dostępne z sieci graczy. Bez konfiguracji TURN gra korzysta z połączeń bezpośrednich; mogą one nie działać między różnymi sieciami. Po dodaniu własnej konfiguracji klient korzysta z adresów i transportów podanych przez dostawcę TURN. Całkowita blokada tych serwerów w sieci może uniemożliwić dołączenie. Po błędzie można ponowić dołączanie lub utworzyć nowy pokój.
 
 Panel pokazuje osobno łączenie z serwerem pokojów, połączenie z gospodarzem i potwierdzenie wejścia. Wolniejsza negocjacja sieciowa nie zużywa już czasu przeznaczonego na potwierdzenie pokoju. Gdy gospodarz chwilowo traci serwer pokojów, działająca ekipa może grać dalej, a kod i zaproszenie wracają po automatycznym przywróceniu połączenia. Komunikat o innej wersji gry wymaga odświeżenia strony u obu osób i utworzenia nowego pokoju.
 
@@ -125,6 +125,34 @@ Testy Playwright wymagają Chromium. Obsługiwany jest `CHROMIUM_PATH`, lokalne 
 Testy multiplayer uruchamiają lokalny PeerServer na porcie **9000**, serwer TURN/TCP na **3478** (kontrola gotowości: **9002**) i dwie niezależne przeglądarki. Połączenia przechodzą przez prawdziwy serwer TURN, co sprawdza również sieci blokujące bezpośredni ruch UDP. Sprawdzają prawdziwe połączenia WebRTC, ruch graczy, rozdanie, prywatność kart, wypłaty i rozłączenie gospodarza. Nie zastępują weryfikacji publicznego sygnalizatora ani połączeń pomiędzy różnymi sieciami. Ustawienie serwera testowego jest wstrzykiwane wyłącznie na adresie loopback; gotowa strona korzysta z publicznej konfiguracji PeerJS.
 
 Regresja dołączania celowo opóźnia odpowiedź sieciową gospodarza o 18 sekund, zachowując prawdziwe połączenia WebRTC i TURN. Sprawdza, że host nie zamyka trwającej negocjacji oraz że po połączeniu gracze widzą swój ruch. Testy klienta osobno sprawdzają limity kolejnych etapów, anulowanie, niezgodną wersję i ponawianie sygnalizacji.
+
+### Połączenia między różnymi sieciami: TURN
+
+Publiczny sygnalizator PeerJS nadal działa, ale darmowe serwery TURN tej biblioteki zostały [wyłączone przez jej autorów](https://github.com/peers/peerjs/issues/1172). Nie wystarczy pozostawić historycznej konfiguracji `eu-0.turn.peerjs.com` i `us-0.turn.peerjs.com`. W tej grze nie są już używane jako domyślne serwery pośredniczące.
+
+Aby uruchomić niezawodne pośrednictwo dla własnej gry:
+
+1. Utwórz konto u dostawcy TURN, np. [Metered Open Relay](https://www.metered.ca/tools/openrelay/), albo przygotuj własny serwer coturn. Pobierz **konfigurację klienta ICE**: adresy `turn:`/`turns:`, `username` i `credential`.
+2. W repozytorium otwórz [Settings → Secrets and variables → Actions](https://github.com/migasmiga67/school_project/settings/secrets/actions). Dodaj **Repository secret** o nazwie **`TURN_ICE_SERVERS`**. Jako wartość wklej tablicę JSON od dostawcy, bez otaczających cudzysłowów z przykładu `.env`.
+3. Uruchom **Actions → Deploy Neon Coast → Run workflow → main**. Workflow przekazuje tę konfigurację do kompilacji. Nieprawidłowy JSON, adresy i brak danych klienta zatrzymują budowanie z komunikatem, który nie ujawnia wartości konfiguracji.
+4. Uruchom **Actions → Diagnose public room connections → Run workflow → main**. Ta osobna próba tworzy dwa testowe profile przeglądarki, korzysta z publicznej sygnalizacji i wymusza przejście przez skonfigurowany TURN. Sukces wymaga dwóch graczy w pokoju oraz rzeczywiście wybranych kandydatów relay. Wynik i oczyszczona diagnostyka są w podsumowaniu i artefakcie tego uruchomienia.
+5. Odśwież grę u obu osób i utwórz nowy pokój.
+
+Przykładowy **kształt** wartości sekretu; adres i dane trzeba zastąpić otrzymanymi od dostawcy:
+
+```json
+[
+  {
+    "urls": ["turns:turn.example.com:443?transport=tcp"],
+    "username": "YOUR_TURN_USERNAME",
+    "credential": "YOUR_TURN_CLIENT_PASSWORD"
+  }
+]
+```
+
+Są to dane **klienta TURN**, które przeglądarka musi otrzymać do połączenia. Nie wklejaj klucza administracyjnego API dostawcy. Wartości `VITE_` trafiają do publicznej kompilacji; GitHub Secret chroni je przed przypadkowym zapisaniem w repozytorium i logach, ale nie ukrywa ich przed klientem gry.
+
+Lokalnie skopiuj `.env.example` do `.env.local` w katalogu repozytorium i ustaw `VITE_ICE_SERVERS`. Pliki lokalnego środowiska są ignorowane przez Git. Pusta konfiguracja oznacza tryb bezpośredni, opisany w panelu Online. Nie potwierdza dostępności połączeń między różnymi sieciami.
 
 ### Własny sygnalizator
 

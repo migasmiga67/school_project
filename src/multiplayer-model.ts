@@ -56,6 +56,8 @@ export interface MultiplayerState {
   status: RoomStatus; message: string; snapshot: RoomSnapshot | null;
   /** Signaling can reconnect independently while existing RTC peers keep playing. */
   signaling?: 'connecting' | 'online' | 'reconnecting';
+  /** Capability of the last connection attempt; never contains ICE credentials. */
+  relayConfigured?: boolean;
 }
 /** UI contract: online play has its own host-maintained session wallet. */
 export interface MultiplayerSession {
