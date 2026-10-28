@@ -1,4 +1,4 @@
-import { Peer, util, type DataConnection, type PeerOptions } from 'peerjs';
+import { Peer, type DataConnection, type PeerOptions } from 'peerjs';
 import { RoomAuthority } from './room-authority';
 import { CREW_CHECKPOINTS, CREW_COOLDOWN_MS, CREW_DURATION_MS, CREW_REWARD, MAX_ROOM_PLAYERS, ROOM_PROTOCOL, type MultiplayerSession, type MultiplayerState, type OnlinePose, type RoomCommand, type RoomSnapshot } from './multiplayer-model';
 import type { PokerAction } from './poker-model';
@@ -6,6 +6,7 @@ import type { GarageAction } from './garage';
 import type { JobAction } from './online-jobs';
 import { cityEventAt } from './city-life';
 import { CONNECTION_PROGRESS, CONNECTION_TIMEOUT_MESSAGE, CONNECTION_TIMEOUT_MS, SIGNALING_UNAVAILABLE_MESSAGE, type ConnectionPhase } from './connection-lifecycle';
+import { buildIceConfiguration } from './ice-config';
 
 const STALE_MS = 15000;
 const MAX_PACKET = 32768;
@@ -26,14 +27,10 @@ function nickname(name: string) {
   if (!/^[\p{L}\p{N}_ -]{2,18}$/u.test(value)) throw new Error('Wpisz nick od 2 do 18 znaków: litery, cyfry, spacje, _ lub -.');
   return value;
 }
-function options(): PeerOptions {
-  // Keep PeerJS's public relays and add their TCP transports for networks that
-  // prohibit direct UDP. The relay still carries encrypted WebRTC data.
-  const config: RTCConfiguration = structuredClone(util.defaultConfig);
-  config.iceServers = config.iceServers?.map(server => {
-    const urls = typeof server.urls === 'string' ? [server.urls] : server.urls;
-    return { ...server, urls: [...urls, ...urls.filter(url => url.startsWith('turn:') && !url.includes('?')).map(url => `${url}?transport=tcp`)] };
-  });
+function options(): { peerOptions: PeerOptions; relayConfigured: boolean } {
+  // PeerJS's retired public TURN servers are not an application relay. Only a
+  // deliberately configured service may be advertised as available.
+  const { config } = buildIceConfiguration(import.meta.env.VITE_ICE_SERVERS);
   const result: PeerOptions = { debug: 0, config };
   const env = import.meta.env;
   if (env.VITE_PEER_HOST) {
@@ -52,7 +49,12 @@ function options(): PeerOptions {
       result.config = local.config ?? { iceServers: [] };
     }
   }
-  return result;
+  const finalConfig: RTCConfiguration | undefined = result.config;
+  const relayConfigured = Boolean(finalConfig?.iceServers?.some(server => {
+    const urls = typeof server.urls === 'string' ? [server.urls] : Array.isArray(server.urls) ? server.urls : [];
+    return urls.some(url => typeof url === 'string' && /^turns?:/i.test(url)) && typeof server.username === 'string' && Boolean(server.username.trim()) && typeof server.credential === 'string' && Boolean(server.credential.trim());
+  }));
+  return { peerOptions: result, relayConfigured };
 }
 function peerError(type: string) {
   if (type === 'peer-unavailable') return 'Nie znaleziono pokoju. Sprawdź kod i upewnij się, że gospodarz ma otwartą grę.';
@@ -160,6 +162,7 @@ export class MultiplayerClient implements MultiplayerSession {
   private watchTimer: ReturnType<typeof setInterval> | null = null;
   private reconnectTimer: ReturnType<typeof setTimeout> | null = null;
   private reconnectAttempt = 0;
+  private relayConfigured = false;
 
   get state() { return clone(this.current); }
   get isHost() { return this.authority !== null; }
@@ -197,10 +200,14 @@ export class MultiplayerClient implements MultiplayerSession {
   private start(host: boolean, rawName: string, code: string): Promise<void> {
     this.clean('Poprzednie łączenie zostało anulowane.');
     let name: string;
+    let peerOptions: PeerOptions;
+    this.relayConfigured = false;
     try {
       name = nickname(rawName);
       if (!/^[A-Z2-9]{8}$/.test(code)) throw new Error('Kod pokoju musi mieć 8 liter lub cyfr.');
       if (!globalThis.RTCPeerConnection) throw new Error('Ta przeglądarka nie obsługuje połączeń multiplayer.');
+      const configured = options();
+      peerOptions = configured.peerOptions; this.relayConfigured = configured.relayConfigured;
     } catch (error) {
       const message = error instanceof Error ? error.message : 'Nieprawidłowy nick lub kod pokoju.';
       this.publish({ status: 'error', message, snapshot: null });
@@ -214,7 +221,7 @@ export class MultiplayerClient implements MultiplayerSession {
       this.pending = { resolve, reject, timer: null, phase: 'signaling' };
       this.armConnectionPhase('signaling');
       try {
-        const peer = new Peer(this.ownId, options()); this.peer = peer;
+        const peer = new Peer(this.ownId, peerOptions); this.peer = peer;
         let opened = false;
         peer.on('open', () => {
           if (this.epoch !== epoch) return;
@@ -236,8 +243,15 @@ export class MultiplayerClient implements MultiplayerSession {
               this.send(connection, { type: 'hello', protocol: ROOM_PROTOCOL, name, seq: ++this.sequence });
             });
             connection.on('data', data => { if (this.epoch === epoch && this.hostConnection === connection) this.receiveHost(data); });
-            connection.on('close', () => { if (this.epoch === epoch) this.fail('Połączenie z gospodarzem zostało przerwane. Pokój zakończył działanie.'); });
-            connection.on('error', () => { if (this.epoch === epoch) this.fail('Nie udało się utrzymać połączenia z gospodarzem. Spróbuj dołączyć ponownie.'); });
+            connection.on('close', () => {
+              if (this.epoch !== epoch) return;
+              this.fail(this.pending?.phase === 'rtc' ? this.rtcFailure() : 'Połączenie z gospodarzem zostało przerwane. Pokój zakończył działanie.');
+            });
+            connection.on('error', error => {
+              if (this.epoch !== epoch) return;
+              const negotiating = this.current.status === 'connecting' && (error.type === 'negotiation-failed' || this.pending?.phase === 'rtc');
+              this.fail(negotiating ? this.rtcFailure() : 'Nie udało się utrzymać połączenia z gospodarzem. Spróbuj dołączyć ponownie.');
+            });
             this.startTimers(epoch);
           }
         });
@@ -263,6 +277,11 @@ export class MultiplayerClient implements MultiplayerSession {
       } catch { this.fail('Nie udało się uruchomić połączenia multiplayer w tej przeglądarce.'); }
     });
   }
+  private rtcFailure() {
+    return this.relayConfigured
+      ? 'Nie udało się zestawić połączenia między graczami. Sprawdź dostępność skonfigurowanego serwera TURN lub ograniczenia sieci.'
+      : 'Nie udało się zestawić połączenia między graczami. Gra nie ma skonfigurowanego serwera pośredniczącego TURN; niektóre sieci wymagają go do połączenia z gospodarzem.';
+  }
   private armConnectionPhase(phase: ConnectionPhase) {
     const pending = this.pending;
     if (!pending) return;
@@ -270,7 +289,7 @@ export class MultiplayerClient implements MultiplayerSession {
     pending.phase = phase;
     const epoch = this.epoch;
     pending.timer = setTimeout(() => {
-      if (this.epoch === epoch && this.pending === pending) this.fail(CONNECTION_TIMEOUT_MESSAGE[phase]);
+      if (this.epoch === epoch && this.pending === pending) this.fail(phase === 'rtc' ? this.rtcFailure() : CONNECTION_TIMEOUT_MESSAGE[phase]);
     }, CONNECTION_TIMEOUT_MS[phase]);
     this.publish({ status: 'connecting', message: CONNECTION_PROGRESS[phase], snapshot: null });
   }
@@ -404,7 +423,7 @@ export class MultiplayerClient implements MultiplayerSession {
   }
   private publish(value: MultiplayerState) {
     const signaling = this.peer?.open ? 'online' : value.status === 'connecting' ? 'connecting' : this.peer ? 'reconnecting' : undefined;
-    this.current = { ...value, signaling, message: value.status === 'online' && signaling === 'reconnecting' ? SIGNALING_UNAVAILABLE_MESSAGE : value.message };
+    this.current = { ...value, signaling, relayConfigured: this.relayConfigured, message: value.status === 'online' && signaling === 'reconnecting' ? SIGNALING_UNAVAILABLE_MESSAGE : value.message };
     for (const listener of this.listeners) listener(this.state);
   }
   private complete() {

@@ -29,7 +29,7 @@ const transport = vi.hoisted(() => {
     destroyed = false;
     reconnectCalls = 0;
     connections: Connection[] = [];
-    constructor(readonly id: string) { super(); Peer.instances.push(this); }
+    constructor(readonly id: string, readonly options?: { config?: RTCConfiguration; host?: string }) { super(); Peer.instances.push(this); }
     openSignaling() { this.open = true; this.disconnected = false; this.emit('open', this.id); }
     connect(id: string) { const connection = new Connection(id); this.connections.push(connection); return connection; }
     incoming(id = 'neonc-player-FRIEND') { const connection = new Connection(id); this.connections.push(connection); this.emit('connection', connection); return connection; }
@@ -39,7 +39,7 @@ const transport = vi.hoisted(() => {
   }
   return { Peer };
 });
-vi.mock('peerjs', () => ({ Peer: transport.Peer, util: { defaultConfig: { iceServers: [] } } }));
+vi.mock('peerjs', () => ({ Peer: transport.Peer }));
 
 const CODE = 'ABCDEFGH';
 const HOST = `neonc-${CODE}`;
@@ -67,10 +67,84 @@ function hello(sequence = 1) { return { type: 'hello', protocol: ROOM_PROTOCOL, 
 beforeEach(() => {
   clients = []; transport.Peer.instances = [];
   vi.useFakeTimers(); vi.setSystemTime(0);
+  vi.stubEnv('VITE_ICE_SERVERS', '');
   vi.stubGlobal('location', { hostname: 'example.test' });
   vi.stubGlobal('RTCPeerConnection', function () {});
 });
-afterEach(() => { for (const client of clients) client.leave(); vi.useRealTimers(); vi.unstubAllGlobals(); });
+afterEach(() => { for (const client of clients) client.leave(); vi.useRealTimers(); vi.unstubAllGlobals(); vi.unstubAllEnvs(); });
+
+describe('explicit relay configuration and safe diagnostics', () => {
+  const configured = [{ urls: 'turns:relay.example.invalid:443?transport=tcp', username: 'relay-unit-account', credential: 'unit:credential-not-for-public-status' }];
+
+  it('uses STUN without claiming a relay when the build has no TURN configuration', async () => {
+    const { client, peer } = await hosting();
+    expect(client.state.relayConfigured).toBe(false);
+    const urls = peer.options?.config?.iceServers?.flatMap(server => typeof server.urls === 'string' ? [server.urls] : server.urls) ?? [];
+    expect(urls.length).toBeGreaterThan(0);
+    expect(urls.every(url => /^stun:/i.test(url))).toBe(true);
+    expect(JSON.stringify(peer.options)).not.toContain('turn.peerjs.com');
+  });
+
+  it('publishes only the configured capability rather than relay credentials', async () => {
+    vi.stubEnv('VITE_ICE_SERVERS', JSON.stringify(configured));
+    const { client, peer } = await hosting();
+    expect(client.state.relayConfigured).toBe(true);
+    expect(peer.options?.config?.iceServers).toEqual(configured);
+    expect(JSON.stringify(client.state)).not.toContain(configured[0].username);
+    expect(JSON.stringify(client.state)).not.toContain(configured[0].credential);
+  });
+
+  it('recognizes the real local TURN override used by browser integration tests', async () => {
+    vi.stubGlobal('location', { hostname: '127.0.0.1' });
+    vi.stubGlobal('window', { __NEON_SIGNALING__: { host: '127.0.0.1', config: { iceTransportPolicy: 'relay', iceServers: [{ urls: 'turn:127.0.0.1:3478?transport=tcp', username: 'neon', credential: 'local-unit-relay' }] } } });
+    const { client, peer } = await hosting();
+    expect(client.state.relayConfigured).toBe(true);
+    expect(peer.options?.host).toBe('127.0.0.1');
+    expect(peer.options?.config?.iceTransportPolicy).toBe('relay');
+  });
+
+  it('reports the final STUN-only local override even when the build contains TURN', async () => {
+    vi.stubEnv('VITE_ICE_SERVERS', JSON.stringify(configured));
+    vi.stubGlobal('location', { hostname: 'localhost' });
+    vi.stubGlobal('window', { __NEON_SIGNALING__: { host: '127.0.0.1', config: { iceServers: [{ urls: 'stun:stun.example.invalid:3478' }] } } });
+    const { client } = await hosting();
+    expect(client.state.relayConfigured).toBe(false);
+  });
+
+  it('rejects invalid build configuration before opening a peer or a pending timer without exposing supplied credentials', async () => {
+    const secret = 'invalid-input-credential-that-must-stay-private';
+    vi.stubEnv('VITE_ICE_SERVERS', `{"urls":"turns:relay.example.invalid:443","credential":"${secret}"}`);
+    const client = new MultiplayerClient(); clients.push(client);
+    const result = await client.create('Gospodarz').then(() => null, error => error as Error);
+    expect(result).toBeInstanceOf(Error);
+    expect(client.state.status).toBe('error');
+    expect(transport.Peer.instances).toHaveLength(0);
+    expect(vi.getTimerCount()).toBe(0);
+    expect(result?.message).not.toContain(secret);
+    expect(JSON.stringify(client.state)).not.toContain(secret);
+  });
+
+  it('explains an initial typed negotiation failure without leaking the underlying transport error', async () => {
+    const { client, peer, result } = joining(); peer.openSignaling();
+    peer.connections[0].emit('error', { type: 'negotiation-failed', message: 'raw-transport-secret-must-not-be-published' });
+    expect((await result)?.message).toMatch(/nie ma skonfigurowanego serwera pośredniczącego TURN/);
+    expect(client.state.relayConfigured).toBe(false);
+    expect(client.state.message).not.toContain('raw-transport-secret');
+  });
+
+  it('identifies a configured relay when initial negotiation fails and keeps established-loss wording separate', async () => {
+    vi.stubEnv('VITE_ICE_SERVERS', JSON.stringify(configured));
+    const pending = joining(); pending.peer.openSignaling();
+    pending.peer.connections[0].emit('error', { type: 'negotiation-failed' });
+    expect((await pending.result)?.message).toMatch(/skonfigurowanego serwera TURN/);
+    expect(pending.client.state.relayConfigured).toBe(true);
+    const established = joining(); established.peer.openSignaling();
+    const connection = established.peer.connections[0]; connection.openChannel(); connection.receive(welcome(established.peer));
+    expect(await established.result).toBeNull();
+    connection.emit('error', { type: 'connection-closed' });
+    expect(established.client.state.message).toMatch(/utrzymać połączenia z gospodarzem/);
+  });
+});
 
 describe('connection phase deadlines', () => {
   it('permits delayed signaling and an 18-second ICE negotiation before a separate hello deadline', async () => {
@@ -103,7 +177,7 @@ describe('connection phase deadlines', () => {
     await vi.advanceTimersByTimeAsync(29999);
     expect(client.state.status).toBe('connecting');
     await vi.advanceTimersByTimeAsync(1);
-    expect((await result)?.message).toMatch(/zestawić połączenia z gospodarzem/);
+    expect((await result)?.message).toMatch(/zestawić połączenia między graczami/);
     expect(peer.connections[0].closed).toBe(true);
   });
 

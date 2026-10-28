@@ -18,8 +18,18 @@ jobs:
         with:
           node-version: 22
           cache: npm
+      - name: Check relay configuration
+        env:
+          TURN_ICE_SERVERS: ${{ secrets.TURN_ICE_SERVERS }}
+        run: |
+          if [ -z "$TURN_ICE_SERVERS" ]; then
+            echo "::error title=Missing room relay::Add the TURN_ICE_SERVERS repository secret with the client ICE configuration from your TURN provider."
+            exit 1
+          fi
       - run: npm ci
       - run: npm run build
+        env:
+          VITE_ICE_SERVERS: ${{ secrets.TURN_ICE_SERVERS }}
       - run: npx playwright install --with-deps chromium
       - name: Real public signaling and TURN connection
         run: node scripts/probe-public-network.mjs

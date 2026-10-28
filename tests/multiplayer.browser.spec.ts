@@ -148,7 +148,7 @@ test('pokój przyjmuje gracza, gdy prawdziwa odpowiedź WebRTC dociera po 18 sek
   const timers = new Set<ReturnType<typeof setTimeout>>();
   const answers: {
     heldAt: number; forwardedAt?: number; guestStatus?: string;
-    guestSignaling?: string; hostMembers?: number; progressMessage?: string; candidatesHeld: number; error?: string;
+    guestSignaling?: string; guestRelayConfigured?: boolean; hostMembers?: number; progressMessage?: string; candidatesHeld: number; error?: string;
   }[] = [];
   let hostPage: Page | null = null, guestPage: Page | null = null, pair: Pair | undefined;
   try {
@@ -180,6 +180,7 @@ test('pokój przyjmuje gracza, gdy prawdziwa odpowiedź WebRTC dociera po 18 sek
               try {
                 const [guest, host] = await Promise.all([snapshot(guestPage!), snapshot(hostPage!)]);
                 answer.guestStatus = guest.online.status; answer.guestSignaling = guest.online.signaling;
+                answer.guestRelayConfigured = guest.online.relayConfigured;
                 answer.hostMembers = host.online.snapshot?.members.length;
                 answer.progressMessage = await guestPage!.locator('#online-connection-message').evaluateAll(nodes => nodes[0]?.textContent ?? '');
               } catch (error) { answer.error = String(error); }
@@ -202,7 +203,7 @@ test('pokój przyjmuje gracza, gdy prawdziwa odpowiedź WebRTC dociera po 18 sek
     expect(answer.forwardedAt).toBeDefined();
     expect(answer.forwardedAt! - answer.heldAt).toBeGreaterThanOrEqual(delayMs);
     expect(answer.forwardedAt! - answer.heldAt).toBeLessThan(30000);
-    expect(answer).toMatchObject({ guestStatus: 'connecting', guestSignaling: 'online', hostMembers: 1 });
+    expect(answer).toMatchObject({ guestStatus: 'connecting', guestSignaling: 'online', guestRelayConfigured: true, hostMembers: 1 });
     expect(answer.progressMessage).toContain('gospodarzem');
     for (const page of [pair.host, pair.guest]) expect((await room(page)).members).toHaveLength(2);
 
@@ -383,6 +384,8 @@ test('anulowanie łączenia zamyka panel i pozwala ponowić próbę bez zmiany g
     await page.locator('#online-room').fill('ABCDEFGH');
     await page.locator('#online-join').click();
     await expect.poll(async () => (await snapshot(page)).online.status).toBe('connecting');
+    await expect(page.locator('#online-relay-status')).toBeVisible();
+    await expect(page.locator('#online-relay-status')).toContainText('połączenia bezpośredniego');
     await expect(page.locator('#online-cancel-connect')).toBeVisible();
     await page.keyboard.press('Escape');
     await expect(page.locator('#online-dialog')).toHaveCount(0);
