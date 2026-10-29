@@ -18,12 +18,16 @@ Oryginalny, niewielki sandbox 3D w przeglądarce, inspirowany miejskimi grami ak
 - Reputacja, trzy kontakty ze zleceniami, odblokowywany trzeci poziom tuningu, dwa mieszkania i wspólna baza ekipy z wnętrzami 3D.
 - Blackjack, ruletka europejska oraz turnieje Texas Hold’em ze znajomymi, z oddzielną pulą i rosnącymi ciemnymi.
 - Ruchomy konwój, odzyskiwanie wskazanego auta i rywalizacja kurierów o jedną nagrodę.
+- Motocykl Vortex R ze skokami na rampach, motorówka TideRunner z przystanią i odrębną fizyką oraz dwie próby czasowe.
+- Telefon: mapa miejsc, czat ekipy, zaproszenia do zleceń, zamawianie własnego auta i dostęp do nowych zajęć.
+- Garderoba z ubraniami, fryzurami i dodatkami widocznymi na postaciach 3D oraz trzy frakcje rywalizujące o dzielnice.
+- Pięć rozdziałów kampanii z dwiema decyzjami i trzema zakończeniami, dostępnych solo i wspólnie online.
 - Kasyno Sapphire Club z wejściem pieszo, wnętrzem 3D i stołem Texas Hold’em przeciwko trzem komputerowym graczom; rozdanie rozgrywa się przy stole w widocznej sali kasyna.
 - Poker: flop, turn, river, podbijanie, all-in, pule boczne i rozliczanie wygranych z wirtualną gotówką postaci.
 - Minimapka z GPS prowadzącym ulicami, numerowanymi znacznikami ekipy i legendą; znacznik celu w świecie, gotówka, stan auta, trzy kamery, pauza, syntetyczny dźwięk.
 - Gotówka solo, zakupione auta, tuning, reputacja, mieszkania, wyposażenie, parking, liczba ukończonych misji, rekord i ustawienie dźwięku zapisują się lokalnie. Po odświeżeniu rozpoczyna się nowa sesja miasta; pozycja i etap bieżącej misji nie są zapisywane.
 
-To mały samodzielny prototyp, a nie projekt o skali pełnej produkcji AAA. Nie zawiera kampanii fabularnej ani broni.
+To mały samodzielny prototyp, a nie projekt o skali pełnej produkcji AAA. Nie zawiera broni.
 
 ## Sterowanie
 
@@ -43,6 +47,10 @@ To mały samodzielny prototyp, a nie projekt o skali pełnej produkcji AAA. Nie 
 | L | kontakty, reputacja, mieszkania, wyposażenie i parking |
 | B | wydarzenia uliczne, dołączanie i GPS |
 | K | gra przy pobliskim stanowisku w kasynie |
+| T | telefon: mapa, czat, zaproszenia, dostawa auta i aplikacje |
+| V | garderoba postaci |
+| Z | frakcje, dzielnice i zlecenia |
+| Y | dziennik kampanii, decyzje i kolejny rozdział |
 | F | online: wsiadanie jako pasażer lub wysiadanie po zatrzymaniu |
 | R | powrót na drogę i naprawa za opłatą |
 | P / Esc | pauza i zwolnienie kursora |
@@ -145,6 +153,38 @@ Pierwsze duże wydarzenie pojawia się po **45 sekundach**, kolejne co **4 minut
 - **Rywalizacja kurierów, $450:** odbierz wspólną przesyłkę jako pierwszy, przejedź przez punkt kontrolny i potwierdź dostawę po zatrzymaniu.
 
 Zwycięzca otrzymuje także 80 reputacji. Znacznik porzuconego auta śledzi jego ostatnią pozycję. Te wydarzenia działają obok dotychczasowych krótkich okazji w mieście.
+
+## Motocykl i motorówka
+
+**Vortex R** czeka przy południowej alei, blisko **(4.5, 82)**. Podejdź i naciśnij **E**. Motocykl ma węższy promień kolizji, szybszy skręt i przechył. Oznaczone rampy przy Downtown i Ocean Drive pozwalają wykonywać rzeczywiste skoki; w powietrzu można przelecieć nad niskimi przeszkodami. Przed zsiadaniem zatrzymaj się i zaczekaj na lądowanie. Online może dołączyć jeden pasażer.
+
+Motorówka **TideRunner** jest przy PIER 09. Wyznacz przystań w telefonie, podejdź pieszo do wejścia na pomost przy **(96, 20)** i użyj **E**. Gra przenosi sternika do miejsca cumowania na wodzie. Łódź ma bezwładność i płynniejszy skręt; jej minimapa pokazuje zatokę, boje i przystań. Wysiadanie działa po zatrzymaniu przy pomoście. **R** sprowadza opuszczoną łódź do cumowania i przywraca gracza na drogę za zwykłą opłatą. Online do łodzi mogą dołączyć maksymalnie trzy osoby przez **F** przy wejściu na pomost; na morzu trzeba pozostać na pokładzie.
+
+Telefon → **Sport** otwiera próby czasowe. Motocykl ma cztery punkty na ulicach, **90 sekund** i nagrodę **$350**. Motorówka płynie przez cztery boje, ma **120 sekund** i nagrodę **$500**. Wsiądź we właściwy pojazd i wróć do startu przed zgłoszeniem próby. Opuszczenie pojazdu lub anulowanie przerywa przejazd; ukończony run wypłaca nagrodę tylko raz. Pojazdy są dostępne bez zakupu; jedna osoba prowadzi dany pojazd miasta.
+
+## Telefon i wygląd postaci
+
+**T** lub przycisk Telefon otwiera aplikacje: mapę miejsc, kontakty, garderobę, frakcje, dziennik fabuły i sport. Czat i zaproszenia są wspólne dla pokoju online. Wiadomości mają do 180 znaków, historia przechowuje ostatnie 40 wpisów. Zaproszenie wskazuje aktywność i listę gotowych osób; zaakceptowanie nie rozpoczyna napadu samoczynnie — gospodarz uruchamia go w panelu zajęć.
+
+Aplikacja **Auto** dostawia wybrany własny samochód za **$50**, najwyżej raz na minutę. Trzeba być pieszo na zewnątrz, bez pościgu i aktywnego zlecenia. Auto pojawia się na pobliskiej wolnej ulicy; samochód zabezpieczony na parkingu mieszkania należy najpierw odebrać w panelu domu.
+
+**V** otwiera garderobę. Dostępne są koszulki i kurtka, spodnie, kilka fryzur, okulary, czapka i odcienie skóry. Kupiony element od razu trafia na bohatera; posiadane rzeczy można później zmieniać bez opłaty. Barwy ekipy nakładają wspólny wzór i kolor. Zmiany są widoczne w mieście, mieszkaniach i u pozostałych graczy; kolory stroju widać również na motocykliście lub sterniku. Garderoba solo zapisuje się lokalnie; zakupy online dotyczą portfela i profilu bieżącego pokoju.
+
+## Frakcje i wpływy
+
+**Z** otwiera Tide Runners, Ember Syndicate i Circuit Collective. Gracze mogą wybierać różne frakcje w tym samym pokoju. Zlecenia zwiększają lojalność i wpływy w Downtown, dokach oraz North Heights:
+
+- **Kurier:** odbiór i dostawa po zatrzymaniu, $220 i 30 lojalności.
+- **Nadajnik:** od 30 lojalności, piesze przejęcie przez 6 sekund i przekazanie danych, $280.
+- **Kontrola dzielnicy:** od 60 lojalności, utrzymanie pozycji pieszo przez 10 sekund, $380. Obecność rywala przerywa kontrolę.
+
+Każda kontrolowana dzielnica zwiększa wypłatę za zlecenia frakcji o 3%. Od 60 lojalności daje też $40 dochodu na minutę obecnemu graczowi. Flagi w mieście pokazują aktualnego lidera. Wpływy i lojalność solo zapisują się lokalnie; online dzielnice są wspólne dla pokoju, bez globalnej rywalizacji między różnymi pokojami.
+
+## Kampania: Cena wybrzeża
+
+**Y** otwiera pięciorozdziałową historię Novy, Milo i Very. Cele wymagają spotkań pieszo, odbiorów i dostaw pojazdem oraz utrzymania zatrzymanej pozycji. Dwie decyzje — los archiwum i lojalność wobec ekipy — prowadzą do trzech zakończeń. Dziennik pokazuje instrukcję, czas, postęp i trasę do aktualnego celu.
+
+Solo zapisują się ukończone rozdziały i podjęte decyzje; przerwany rozdział zaczyna się ponownie. Online gospodarz rozpoczyna rozdziały i podejmuje decyzje, a początkowa ekipa może wspólnie zaliczać cele i otrzymuje nagrody. Pełna pierwsza kampania daje **$1700 i 380 reputacji** na uprawnionego gracza. Powtórna rozgrywka pozwala sprawdzić inne zakończenie; zaliczone nagrody nie są wypłacane ponownie. Aktywny rozdział można przerwać w dzienniku. Wspólne zlecenia, próby czasowe i zadania frakcji rozgrywa się kolejno, aby ich cele się nie nakładały.
 
 ## Rozwój i testy
 

@@ -6,9 +6,14 @@ import type { CasinoGameAction, CasinoGamesSnapshot } from './casino-games';
 import type { TournamentAction, TournamentSnapshot } from './poker-tournament';
 import type { CityEventAction, CityEventsSnapshot } from './city-events';
 import type { CareerAction, CareerEffect, CareerState, CrewBaseAction, CrewBaseState, HomeId } from './career';
+import type { AppearanceAction, AppearanceState } from './appearance';
+import type { PhoneAction, PhoneSnapshot } from './phone';
+import type { FactionAction, FactionsSnapshot, FactionId } from './factions';
+import type { CampaignAction, CampaignSnapshot } from './campaign';
+import type { MobilityTrialAction, MobilityTrialSnapshot } from './mobility';
 
 export const MAX_ROOM_PLAYERS = 4;
-export const ROOM_PROTOCOL = 4;
+export const ROOM_PROTOCOL = 5;
 export const ONLINE_BUY_IN = 200;
 export const ONLINE_TURN_MS = 30000;
 export const CREW_DURATION_MS = 150000;
@@ -26,6 +31,7 @@ export interface OnlineVehicle {
   id: string; kind: VehicleKind; x: number; z: number; heading: number;
   color: number; speed: number; health: number;
   tuning?: { engine: number; brakes: number; nitro: number }; label?: string;
+  airHeight?: number; lean?: number;
 }
 export interface OnlinePose {
   x: number; z: number; heading: number; mode: 'drive' | 'foot';
@@ -37,7 +43,8 @@ export interface OnlinePose {
 }
 export type HomeAction = {kind:'enter';home:HomeId|'crew'}|{kind:'exit'};
 export interface OnlineCareerEffect { version:number; effect:CareerEffect|null; home:HomeId|null }
-export interface OnlineMember { id: string; name: string; slot: number; pose: OnlinePose }
+export interface OnlineDeliveryEffect { version:number; target:(Point&{heading:number})|null }
+export interface OnlineMember { id: string; name: string; slot: number; pose: OnlinePose; appearance?:AppearanceState; factionId?:FactionId|null }
 /** Poker is rotated so the recipient is seat zero. Unseen holes use rank 0 backs;
  * the deck and shuffle seed never leave the room host. */
 export interface RoomSnapshot {
@@ -49,6 +56,8 @@ export interface RoomSnapshot {
   garage: GarageState; jobs: JobsSnapshot; cityEventClaimed: boolean;
   career: CareerState; crewBase: CrewBaseState; careerEffect: OnlineCareerEffect;
   casinoGames: CasinoGamesSnapshot; tournament: TournamentSnapshot; cityActivities: CityEventsSnapshot;
+  appearance:AppearanceState; phone:PhoneSnapshot; deliveryEffect:OnlineDeliveryEffect;
+  factions:FactionsSnapshot; campaign:CampaignSnapshot; mobilityTrial:MobilityTrialSnapshot;
 }
 export type RoomCommand =
   | { type: 'pose'; pose: OnlinePose }
@@ -63,6 +72,11 @@ export type RoomCommand =
   | { type: 'casinoGame'; action: CasinoGameAction }
   | { type: 'tournament'; action: TournamentAction }
   | { type: 'cityActivity'; action: CityEventAction }
+  | { type: 'appearance'; action: AppearanceAction }
+  | { type: 'phone'; action: PhoneAction }
+  | { type: 'faction'; action: FactionAction }
+  | { type: 'campaign'; action: CampaignAction }
+  | { type: 'mobilityTrial'; action: MobilityTrialAction }
   | { type: 'cityEventClaim'; eventId: string }
   | { type: 'ride'; driverId: string }
   | { type: 'exitRide' };
@@ -97,6 +111,11 @@ export interface MultiplayerSession {
   casinoGame(action: CasinoGameAction): void;
   tournament(action: TournamentAction): void;
   cityActivity(action: CityEventAction): void;
+  appearance(action:AppearanceAction):void;
+  phone(action:PhoneAction):void;
+  faction(action:FactionAction):void;
+  campaign(action:CampaignAction):void;
+  mobilityTrial(action:MobilityTrialAction):void;
   claimCityEvent(): void;
   ride(driverId: string): void;
   exitRide(): void;

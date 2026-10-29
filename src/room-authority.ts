@@ -7,13 +7,18 @@ import { CityEvents } from './city-events';
 import { CasinoGames } from './casino-games';
 import { CASINO_GAMES } from './casino-games-location';
 import { PokerTournament } from './poker-tournament';
+import { appearanceAction, createAppearance, type AppearanceState } from './appearance';
+import { HostPhone } from './phone';
+import { Factions } from './factions';
+import { CampaignController } from './campaign';
+import { MobilityTrials, WATER_BOUNDS, DOCK } from './mobility';
 import { awardReputation, careerAction, createCareer, createCrewBase, crewBaseAction, homeStreetExit, CREW_BASE, HOME_ROOM, HOMES, type CareerState, type CrewBaseState } from './career';
 import { act, createPokerTable, dealHand, foldPokerSeat, legalActions } from './poker';
 import { CREW_CHECKPOINTS, CREW_COOLDOWN_MS, CREW_DURATION_MS, CREW_REWARD, MAX_ROOM_PLAYERS, ONLINE_BUY_IN, ONLINE_TURN_MS } from './multiplayer-model';
-import type { CrewChallenge, HomeAction, OnlineCareerEffect, OnlineMember, OnlinePose, OnlineVehicle, RoomCommand, RoomResult, RoomSnapshot } from './multiplayer-model';
+import type { CrewChallenge, HomeAction, OnlineCareerEffect, OnlineDeliveryEffect, OnlineMember, OnlinePose, OnlineVehicle, RoomCommand, RoomResult, RoomSnapshot } from './multiplayer-model';
 import type { PokerAction, PokerSeat, PokerState } from './poker-model';
 
-interface Member { view: OnlineMember; wallet: number; lastSpend: number; garage: GarageState; claimedEvent: string | null; career:CareerState; careerEffect:OnlineCareerEffect; casinoGames:CasinoGames; homeReturn:OnlinePose|null }
+interface Member { view: OnlineMember; wallet: number; lastSpend: number; garage: GarageState; claimedEvent: string | null; career:CareerState; careerEffect:OnlineCareerEffect; casinoGames:CasinoGames; homeReturn:OnlinePose|null; appearance:AppearanceState; deliveryEffect:OnlineDeliveryEffect }
 const yes: RoomResult = {ok:true};
 const no=(reason:string):RoomResult=>({ok:false,reason});
 const handActive=(s:PokerState)=>s.phase!=='waiting'&&s.phase!=='showdown';
@@ -46,10 +51,14 @@ export class RoomAuthority {
   private readonly cityActivities=new CityEvents();
   private readonly tournament:PokerTournament;
   private crewBase:CrewBaseState=createCrewBase();
+  private readonly phone:HostPhone;
+  private readonly factions=new Factions();
+  private readonly campaign:CampaignController;
+  private readonly mobility=new MobilityTrials();
 
   constructor(code:string,hostId:string,name:string,seed?:number) {
     if(typeof code!=='string'||!/^[A-Z2-9]{8}$/i.test(code)||!validId(hostId)||!validName(nickname(name)))throw new Error('Niepoprawny kod pokoju lub pseudonim.');
-    this.code=code.toUpperCase();this.hostId=hostId;this.jobs=new OnlineJobs(hostId);this.tournament=new PokerTournament(hostId,seed);
+    this.code=code.toUpperCase();this.hostId=hostId;this.jobs=new OnlineJobs(hostId);this.tournament=new PokerTournament(hostId,seed);this.phone=new HostPhone(hostId);this.campaign=new CampaignController(hostId);
     this.table=createPokerTable(seed,ONLINE_BUY_IN);this.table.players=this.table.players.map((_,i)=>emptySeat(i));
     this.join(hostId,name);
   }
@@ -63,7 +72,8 @@ export class RoomAuthority {
     const slot=[0,1,2,3].find(index=>!occupied.has(index))!;
     const z=68-slot*7,color=[0xded8cb,0x8f78bf,0x63a9a2,0xe1a86b][slot];
     const pose:OnlinePose={x:0,z,heading:0,mode:'drive',interior:null,seated:false,vehicle:{id:'stratus',kind:'sport',x:0,z,heading:0,color,speed:0,health:100}};
-    this.people.set(id,{view:{id,name:clean,slot,pose},wallet:1250,lastSpend:-Infinity,garage:createGarage(),claimedEvent:null,career:createCareer(),careerEffect:{version:0,effect:null,home:null},casinoGames:new CasinoGames(),homeReturn:null});
+    const appearance=createAppearance();
+    this.people.set(id,{view:{id,name:clean,slot,pose,appearance:structuredClone(appearance)},wallet:1250,lastSpend:-Infinity,garage:createGarage(),claimedEvent:null,career:createCareer(),careerEffect:{version:0,effect:null,home:null},casinoGames:new CasinoGames(),homeReturn:null,appearance,deliveryEffect:{version:0,target:null}});
     return yes;
   }
 
@@ -72,7 +82,7 @@ export class RoomAuthority {
     this.releasePassengers(id);
     this.stand(id);
     const car=this.people.get(id)?.view.pose.vehicle;
-    if(car&&car.id!=='stratus')this.vehicles.set(car.id,{...car,speed:0});
+    if(car&&car.id!=='stratus')this.vehicles.set(car.id,{...car,...(car.kind==='boat'?DOCK.mooring:{}),speed:0});
     this.challengeEligible.delete(id);
     this.people.delete(id);this.updateJobs();this.updateExpansions();
   }
@@ -97,6 +107,30 @@ export class RoomAuthority {
         if(pose.vehicle?.id==='stratus')Object.assign(pose.vehicle,garageVehicle(member.garage));
         return yes;
       }
+      case 'appearance': {
+        const result=appearanceAction(member.appearance,member.wallet,command.action);
+        if(!result.ok)return no(result.reason);
+        member.appearance=result.appearance;member.wallet=result.wallet;member.view.appearance=structuredClone(result.appearance);return yes;
+      }
+      case 'phone': {
+        const busy=this.jobs.busy||this.challengeStatus==='active'||this.tournament.contains(id)||this.campaign.snapshot(id).status==='active'||this.mobility.snapshot(id).status==='running'||this.factions.snapshot(id).job.status==='active';
+        const result=this.phone.command(id,command.action,this.members(),member.wallet,this.now,{stored:Boolean(member.career.storedCars[member.garage.selected]),busy,occupiedByOther:false});
+        if(!result.ok)return no(result.reason);member.wallet=result.wallet;
+        if(result.delivery)member.deliveryEffect={version:member.deliveryEffect.version+1,target:{...result.delivery}};
+        return yes;
+      }
+      case 'faction': {
+        if(command.action?.kind==='start'&&(this.jobs.busy||this.challengeStatus==='active'||this.tournament.contains(id)||this.campaign.snapshot(id).status==='active'||this.mobility.snapshot(id).status==='running'))return no('Najpierw dokończ bieżące zlecenie lub próbę czasową.');
+        const result=this.factions.command(id,command.action,this.members(),this.now);this.updateExpansions();return result;
+      }
+      case 'campaign': {
+        if(command.action&&['start','continue','retry','restart'].includes(command.action.kind)&&(this.jobs.busy||this.challengeStatus==='active'||[...this.people.keys()].some(personId=>this.tournament.contains(personId)||this.mobility.snapshot(personId).status==='running'||this.factions.snapshot(personId).job.status==='active')))return no('Najpierw zakończcie bieżące aktywności ekipy.');
+        const result=this.campaign.command(id,command.action,this.members(),this.now);this.updateExpansions();return result;
+      }
+      case 'mobilityTrial': {
+        if(command.action?.kind==='start'&&(this.jobs.busy||this.challengeStatus==='active'||this.tournament.contains(id)||this.campaign.snapshot(id).status==='active'||this.factions.snapshot(id).job.status==='active'))return no('Najpierw dokończ bieżące zlecenie.');
+        const result=this.mobility.command(id,command.action,this.members(),this.now);this.updateExpansions();return result;
+      }
       case 'job': {
         const action=command.action;
         const planningRooms:{member:Member;pose:OnlinePose;homeReturn:OnlinePose|null}[]=[];
@@ -104,6 +138,7 @@ export class RoomAuthority {
         if(action.kind==='heistStart'&&action.variant!==undefined&&!['sapphire','bank'].includes(action.variant))return no('Nieznany plan napadu.');
         if(action.kind==='heistHack'&&(!Number.isInteger(action.symbol)||action.symbol<0||action.symbol>3))return no('Niepoprawny symbol terminala.');
         if((action.kind==='heistStart'||action.kind==='raceStart')&&this.challengeStatus==='active')return no('Najpierw dokończcie Nocny przerzut.');
+        if((action.kind==='heistStart'||action.kind==='raceStart')&&this.campaign.snapshot(id).status==='active')return no('Najpierw dokończcie rozdział kampanii.');
         if((action.kind==='heistStart'||action.kind==='raceStart')&&member.view.pose.homeId){
           if(id!==this.hostId||member.view.pose.homeId!=='crew'||Math.hypot(member.view.pose.x-HOME_ROOM.planning.x,member.view.pose.z-HOME_ROOM.planning.z)>3)return no('Plan napadu otwórz przy stole w bazie ekipy albo wyjdź na ulicę.');
           if(this.jobs.busy)return no('Najpierw dokończcie bieżące zlecenie ekipy.');
@@ -213,12 +248,13 @@ export class RoomAuthority {
     if(!member)throw new Error('Nie należysz do tego pokoju.');
     const seat=this.seats.indexOf(id);
     const poker=seat>=0?this.publicTable(seat):null;
-    return {code:this.code,hostId:this.hostId,youId:id,members:[...this.people.values()].map(person=>structuredClone(person.view)).sort((a,b)=>a.slot-b.slot),wallet:member.wallet,seated:seat>=0,poker,tableVersion:this.version,turnDeadline:this.deadline,vehicles:[...this.vehicles.values()].map(car=>({...car})),worldTime:this.epoch===null?0:(this.now-this.epoch)/1000,challenge:this.publicChallenge(id),garage:structuredClone(member.garage),jobs:this.jobs.snapshot(id,this.now),cityEventClaimed:member.claimedEvent===cityEventAt(this.worldTime())?.id,career:structuredClone({...member.career,awarded:[]}),crewBase:structuredClone(this.crewBase),careerEffect:structuredClone(member.careerEffect),casinoGames:member.casinoGames.snapshot(),tournament:this.tournament.snapshot(id),cityActivities:this.cityActivities.snapshot(id)};
+    return {code:this.code,hostId:this.hostId,youId:id,members:[...this.people.values()].map(person=>({...structuredClone(person.view),appearance:structuredClone(person.appearance),factionId:this.factions.snapshot(person.view.id).profile.faction})).sort((a,b)=>a.slot-b.slot),wallet:member.wallet,seated:seat>=0,poker,tableVersion:this.version,turnDeadline:this.deadline,vehicles:[...this.vehicles.values()].map(car=>({...car})),worldTime:this.epoch===null?0:(this.now-this.epoch)/1000,challenge:this.publicChallenge(id),garage:structuredClone(member.garage),jobs:this.jobs.snapshot(id,this.now),cityEventClaimed:member.claimedEvent===cityEventAt(this.worldTime())?.id,career:structuredClone({...member.career,awarded:[]}),crewBase:structuredClone(this.crewBase),careerEffect:structuredClone(member.careerEffect),casinoGames:member.casinoGames.snapshot(),tournament:this.tournament.snapshot(id),cityActivities:this.cityActivities.snapshot(id),appearance:structuredClone(member.appearance),phone:this.phone.snapshot(id),deliveryEffect:structuredClone(member.deliveryEffect),factions:this.factions.snapshot(id),campaign:this.campaign.snapshot(id),mobilityTrial:this.mobility.snapshot(id)};
   }
 
   private startChallenge(id:string,member:Member):RoomResult {
     if(id!==this.hostId)return no('Tylko gospodarz może rozpocząć Nocny przerzut.');
     if(this.jobs.busy)return no('Najpierw dokończcie napad lub wyścig.');
+    if(this.campaign.snapshot(id).status==='active')return no('Najpierw dokończcie rozdział kampanii.');
     if(this.people.size<2)return no('Zaproś co najmniej jednego znajomego do wspólnego zlecenia.');
     if(member.view.pose.interior!==null||member.view.pose.homeId||member.view.pose.seated)return no('Wyjdź z wnętrza, aby rozpocząć zlecenie ekipy.');
     if(this.challengeStatus==='active')return no('Nocny przerzut już trwa. Jedźcie do wspólnego celu.');
@@ -251,9 +287,20 @@ export class RoomAuthority {
 
   /** Controllers own clocks and outcomes; only this boundary changes session wallets. */
   private updateExpansions():boolean {
+    const previousCampaign=this.campaign.snapshot(this.hostId),previousPhone=this.phone.snapshot(this.hostId);
+    const beforeFuture=JSON.stringify([previousCampaign.status,previousCampaign.chapter,previousCampaign.objective,previousCampaign.holdMs,previousPhone.invites.map(invite=>[invite.id,invite.status,invite.accepted])]);
+    const members=this.members();
+    this.phone.update(members,this.now);this.factions.update(members,this.now);this.campaign.update(members,this.now);this.mobility.update(members,this.now);
+    const futureCredits=[...this.factions.drainCredits(),...this.campaign.drainCredits(),...this.mobility.drainCredits().map(credit=>({...credit,reputation:40}))];
+    for(const credit of futureCredits){
+      const member=this.people.get(credit.id);
+      if(member&&Number.isSafeInteger(credit.amount)&&credit.amount>0){member.wallet+=credit.amount;if(credit.reputation>0)member.career=awardReputation(member.career,credit.sourceId,credit.reputation);}
+    }
+    const nextCampaign=this.campaign.snapshot(this.hostId),nextPhone=this.phone.snapshot(this.hostId);
+    const afterFuture=JSON.stringify([nextCampaign.status,nextCampaign.chapter,nextCampaign.objective,nextCampaign.holdMs,nextPhone.invites.map(invite=>[invite.id,invite.status,invite.accepted])]);
     const before=this.tournament.snapshot(this.hostId).version;
     const tournament=this.tournament.update(this.members(),this.now);
-    let changed=tournament.credits.length>0;
+    let changed=tournament.credits.length>0||futureCredits.length>0||beforeFuture!==afterFuture;
     for(const credit of tournament.credits){
       const member=this.people.get(credit.id);
       if(member&&Number.isSafeInteger(credit.amount)&&credit.amount>0)member.wallet+=credit.amount;
@@ -336,13 +383,16 @@ export class RoomAuthority {
     if(!validId(driverId)||driverId===id)return no('Wybierz samochód innego gracza.');
     const driver=this.people.get(driverId),pose=member.view.pose,car=driver?.view.pose.vehicle;
     if(pose.mode!=='foot'||pose.interior||pose.homeId||pose.seated||pose.passengerOf)return no('Podejdź pieszo do samochodu znajomego.');
-    if(!driver||driver.view.pose.mode!=='drive'||driver.view.pose.interior||driver.view.pose.homeId||!car||car.health<=0||Math.abs(car.speed)>3||Math.hypot(pose.x-car.x,pose.z-car.z)>5.5)return no('Podejdź do zatrzymanego samochodu znajomego.');
-    if([...this.people.values()].filter(person=>person.view.pose.passengerOf===driverId).length>=3)return no('W samochodzie nie ma już wolnych miejsc.');
+    const atDock=car?.kind==='boat'&&Math.hypot(pose.x-DOCK.land.x,pose.z-DOCK.land.z)<=3.5&&Math.hypot(car.x-DOCK.mooring.x,car.z-DOCK.mooring.z)<=DOCK.radius;
+    if(!driver||driver.view.pose.mode!=='drive'||driver.view.pose.interior||driver.view.pose.homeId||!car||car.health<=0||Math.abs(car.speed)>3||!atDock&&Math.hypot(pose.x-car.x,pose.z-car.z)>5.5)return no('Podejdź do zatrzymanego pojazdu znajomego albo do przystani.');
+    const capacity=car.kind==='bike'?1:3;
+    if([...this.people.values()].filter(person=>person.view.pose.passengerOf===driverId).length>=capacity)return no('W pojeździe nie ma już wolnych miejsc.');
     member.view.pose={x:car.x,z:car.z,heading:car.heading,mode:'foot',interior:null,seated:false,vehicle:null,passengerOf:driverId};
     this.updateJobs();return yes;
   }
 
   private exitPoint(car:OnlineVehicle,slot:number) {
+    if(car.kind==='boat')return{...DOCK.land};
     const safe=(point:{x:number;z:number})=>point.x>WORLD_BOUNDS.minX+.6&&point.x<WORLD_BOUNDS.maxX-.6&&point.z>WORLD_BOUNDS.minZ+.6&&point.z<WORLD_BOUNDS.maxZ-.6&&!BUILDINGS.some(building=>Math.abs(point.x-building.x)<building.halfX+.6&&Math.abs(point.z-building.z)<building.halfZ+.6);
     const side=slot%2?1:-1;
     const candidates=[side,-side].flatMap(direction=>[2.9+(slot>=2?1.2:0),5].map(offset=>({x:car.x+Math.cos(car.heading)*offset*direction,z:car.z+Math.sin(car.heading)*offset*direction})));
@@ -357,6 +407,7 @@ export class RoomAuthority {
     const driverId=member.view.pose.passengerOf;
     if(!driverId)return no('Nie jesteś pasażerem.');
     const driver=this.people.get(driverId),car=driver?.view.pose.vehicle;
+    if(!forced&&car?.kind==='boat'&&Math.hypot(car.x-DOCK.mooring.x,car.z-DOCK.mooring.z)>DOCK.radius)return no('Motorówką trzeba najpierw wrócić do przystani.');
     if(!forced&&car&&Math.abs(car.speed)>3)return no('Poczekaj, aż kierowca zatrzyma samochód.');
     const position=car?this.exitPoint(car,member.view.slot):{x:member.view.pose.x,z:member.view.pose.z};
     member.view.pose={...position,heading:member.view.pose.heading,mode:'foot',interior:null,seated:false,vehicle:null,passengerOf:null};
@@ -390,24 +441,30 @@ export class RoomAuthority {
     // from the previous space while a client receives the authoritative change.
     if((value.homeId??null)!==homeId)return yes;
     if(homeId&&(value.interior!==null||value.mode!=='foot'))return no('W mieszkaniu można poruszać się tylko pieszo.');
-    const bounds=homeId?HOME_ROOM.bounds:value.interior==='casino'?CASINO.bounds:WORLD_BOUNDS;
+    const boating=value.mode==='drive'&&value.vehicle?.kind==='boat';
+    const bounds=homeId?HOME_ROOM.bounds:value.interior==='casino'?CASINO.bounds:boating?WATER_BOUNDS:WORLD_BOUNDS;
     if(value.x<bounds.minX||value.x>bounds.maxX||value.z<bounds.minZ||value.z>bounds.maxZ)return no('Pozycja znajduje się poza mapą.');
     const seated=this.seats.includes(member.view.id)||(this.tournament.snapshot(member.view.id).status==='playing'&&this.tournament.contains(member.view.id));
     if(seated&&(value.interior!=='casino'||value.mode!=='foot'||Math.hypot(value.x-member.view.pose.x,value.z-member.view.pose.z)>.5))return no('Wstań od stołu, zanim ruszysz dalej.');
     let vehicle:OnlinePose['vehicle']=null;
     if(value.mode==='drive') {
       const car=value.vehicle;
-      if(value.interior!==null||!car||typeof car!=='object'||typeof car.id!=='string'||!/^[A-Za-z0-9_-]{1,64}$/.test(car.id)||!['sport','sedan'].includes(car.kind)||![car.x,car.z,car.heading,car.color,car.speed,car.health].every(finite)||Math.hypot(car.x-value.x,car.z-value.z)>2||Math.abs(car.speed)>50||car.health<0||car.health>100||!Number.isSafeInteger(car.color)||car.color<0||car.color>0xffffff||Math.abs(car.heading)>1e6)return no('Niepoprawny pojazd gracza.');
-      if(car.id!=='stratus'&&!/^(parked-[1-4]|traffic-[0-7])$/.test(car.id))return no('Nieznany pojazd miasta.');
-      if(car.x<WORLD_BOUNDS.minX||car.x>WORLD_BOUNDS.maxX||car.z<WORLD_BOUNDS.minZ||car.z>WORLD_BOUNDS.maxZ)return no('Pojazd znajduje się poza mapą.');
+      if(value.interior!==null||!car||typeof car!=='object'||typeof car.id!=='string'||!/^[A-Za-z0-9_-]{1,64}$/.test(car.id)||!['sport','sedan','bike','boat'].includes(car.kind)||![car.x,car.z,car.heading,car.color,car.speed,car.health].every(finite)||Math.hypot(car.x-value.x,car.z-value.z)>2||Math.abs(car.speed)>50||car.health<0||car.health>100||!Number.isSafeInteger(car.color)||car.color<0||car.color>0xffffff||Math.abs(car.heading)>1e6)return no('Niepoprawny pojazd gracza.');
+      if(car.id!=='stratus'&&!/^(parked-[1-4]|traffic-[0-7]|bike-1|boat-1)$/.test(car.id))return no('Nieznany pojazd miasta.');
+      if((car.kind==='boat')!==(car.id==='boat-1')||(car.kind==='bike')!==(car.id==='bike-1'))return no('Typ pojazdu nie pasuje do modelu miasta.');
+      const carBounds=car.kind==='boat'?WATER_BOUNDS:WORLD_BOUNDS;
+      if(car.x<carBounds.minX||car.x>carBounds.maxX||car.z<carBounds.minZ||car.z>carBounds.maxZ)return no('Pojazd znajduje się poza mapą.');
+      if(car.kind==='boat'&&member.view.pose.vehicle?.id!=='boat-1'&&(member.view.pose.mode!=='foot'||member.view.pose.interior||member.view.pose.homeId||Math.hypot(member.view.pose.x-DOCK.land.x,member.view.pose.z-DOCK.land.z)>6.5||Math.hypot(car.x-DOCK.mooring.x,car.z-DOCK.mooring.z)>DOCK.radius+2))return no('Podejdź do przystani, aby wejść do motorówki.');
+      if(car.airHeight!==undefined&&(!finite(car.airHeight)||car.airHeight<0||car.airHeight>15)||car.lean!==undefined&&(!finite(car.lean)||Math.abs(car.lean)>1.5))return no('Niepoprawny stan ruchu pojazdu.');
       if(car.id!=='stratus'&&[...this.people.values()].some(person=>person!==member&&person.view.pose.mode==='drive'&&person.view.pose.vehicle?.id===car.id))return no('Ten samochód prowadzi już inny gracz.');
       vehicle={id:car.id,kind:car.kind,x:car.x,z:car.z,heading:Math.atan2(Math.sin(car.heading),Math.cos(car.heading)),color:car.color,speed:car.speed,health:car.health};
+      if(car.kind==='bike'){vehicle.airHeight=car.airHeight??0;vehicle.lean=car.lean??0;}
       if(car.id==='stratus')Object.assign(vehicle,garageVehicle(member.garage));
       if(car.id==='stratus'&&member.career.storedCars[member.garage.selected])return no('Odbierz własny samochód z mieszkania, zanim ruszysz.');
     } else if(value.vehicle!==null)return no('Pieszy nie może jednocześnie prowadzić pojazdu.');
     const previousCar=member.view.pose.vehicle;
     if(previousCar&&(!vehicle||previousCar.id!==vehicle.id))this.releasePassengers(member.view.id);
-    if(previousCar&&previousCar.id!=='stratus'&&previousCar.id!==vehicle?.id)this.vehicles.set(previousCar.id,{...previousCar,speed:0});
+    if(previousCar&&previousCar.id!=='stratus'&&previousCar.id!==vehicle?.id)this.vehicles.set(previousCar.id,{...previousCar,...(previousCar.kind==='boat'?DOCK.mooring:{}),speed:0});
     if(vehicle&&vehicle.id!=='stratus')this.vehicles.set(vehicle.id,{...vehicle});
     const race=this.jobs.snapshot(member.view.id,this.now).race;
     const grid=race.status==='countdown'&&race.grid&&vehicle?.id==='stratus'?race.grid:null;

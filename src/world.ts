@@ -10,6 +10,9 @@ import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
 import { BUILDINGS, ROADS, type GameState, type Vehicle } from './model';
 import { PoliceView } from './police-view';
 import { expansionLandmarks } from './expansion-landmarks';
+import { AvatarView } from './avatar-view';
+import type { AppearanceState } from './appearance';
+import { MobilityView } from './mobility-view';
 
 type LitMaterial = THREE.MeshStandardMaterial | THREE.MeshLambertMaterial;
 
@@ -38,6 +41,8 @@ export class CityView {
   private readonly hero = new THREE.Group();
   private readonly heroLegs: THREE.Mesh[] = [];
   private readonly heroArms: THREE.Mesh[] = [];
+  private readonly customAvatar:AvatarView;
+  private readonly mobilityVisuals:MobilityView;
   private readonly palms: THREE.Group[] = [];
   private readonly marker = new THREE.Group();
   private readonly markerRing: THREE.Mesh;
@@ -107,6 +112,8 @@ export class CityView {
     this.skyline();
     if (this.softwareRendering) this.batchStaticGeometry();
     this.avatar();
+    for(const child of this.hero.children)child.visible=false;
+    this.customAvatar=new AvatarView(this.softwareRendering);this.hero.add(this.customAvatar.group);
     this.markerRing = this.mesh(new THREE.TorusGeometry(3.7, 0.12, 6, 40), this.material(0xffd875, { emissive: 0xffbc4b, emissiveIntensity: 1.1 }), this.marker, 0, 0.22, 0);
     this.markerRing.rotation.x = -Math.PI / 2;
     const beam = new THREE.Mesh(new THREE.CylinderGeometry(1.6, 3.6, 24, 24, 1, true), new THREE.MeshBasicMaterial({ color: 0xffdc8b, transparent: true, opacity: 0.10, side: THREE.DoubleSide, depthWrite: false }));
@@ -130,6 +137,7 @@ export class CityView {
     this.scene.add(this.living.group);
     this.policeVisuals = new PoliceView(this.softwareRendering);
     this.scene.add(this.policeVisuals.group);const landmarks=expansionLandmarks();this.scene.add(landmarks);this.cityObjects.push(landmarks);
+    this.mobilityVisuals=new MobilityView();this.scene.add(this.mobilityVisuals.group);
     this.homeScene.background = new THREE.Color(0x121c2b);
     this.homeScene.add(new THREE.HemisphereLight(0xcde9ff,0x41334b,2.3));
     this.scene.updateMatrixWorld(true);
@@ -435,6 +443,7 @@ export class CityView {
     if(group){this.homeScene.add(group,this.hero,this.remote.group);}else this.scene.add(this.hero,this.remote.group);
   }
   addCityObject(group:THREE.Group){this.scene.add(group);}
+  setAppearance(appearance:AppearanceState,crewColor?:number){this.customAvatar.setAppearance(appearance,crewColor);this.mobilityVisuals.setAppearance(appearance,crewColor);}
   get remotePlayers() { return this.remote.visibleCount; }
   get cityLifeSnapshot() { return this.living.snapshot; }
   setOnline(members: OnlineMember[], selfId: string) {
@@ -460,6 +469,7 @@ export class CityView {
     const environment=getCityEnvironment(citySeconds);
     this.living.update(citySeconds,state.player,inside,dt);
     this.policeVisuals.update(state,dt);this.policeVisuals.group.visible=!inside;
+    this.mobilityVisuals.update(state,dt,this.remoteCars,cameraMode===2?state.player.vehicleId??undefined:undefined);this.mobilityVisuals.group.visible=!inside;
     if(inside){
       this.hemisphere.intensity=2.25;this.hemisphere.color.setHex(0xd6ebf8);this.hemisphere.groundColor.setHex(0x8a666c);
       this.sunlight.intensity=3.2;this.sunlight.color.setHex(0xffd1a1);
@@ -476,6 +486,7 @@ export class CityView {
     this.casino.update(this.visualTime);
     const alive = new Set<string>();
     for (const vehicle of [...state.vehicles, ...state.police]) {
+      if(vehicle.kind==='bike'||vehicle.kind==='boat')continue;
       alive.add(vehicle.id); let visual = this.cars.get(vehicle.id);
       if(visual&&visual.kind!==vehicle.kind){this.disposeCar(visual);this.cars.delete(vehicle.id);visual=undefined;}
       if (!visual) { visual = this.car(vehicle); this.cars.set(vehicle.id, visual); }
@@ -492,7 +503,7 @@ export class CityView {
     const p = state.player,riding=Boolean(p.passengerOf),inCar=p.mode==='drive'||riding;
     if((p.passengerOf??null)!==this.lastPassengerOf){this.lastPassengerOf=p.passengerOf??null;this.initialized=false;}
     this.motion = this.lastPlayer ? Math.hypot(p.x - this.lastPlayer.x, p.z - this.lastPlayer.z) : 0; this.lastPlayer = {x:p.x,z:p.z}; this.hero.visible = !this.seated && !riding && p.mode === 'foot' && cameraMode !== 2; this.hero.position.set(p.x, 0.1, p.z); this.hero.rotation.y = -p.heading;
-    const walking = this.motion > 0.003; this.heroLegs.forEach((leg, index) => { leg.rotation.x = walking ? Math.sin(state.time * 10 + index * Math.PI) * 0.45 : 0; }); this.heroArms.forEach((arm, index) => { arm.rotation.x = walking ? Math.sin(state.time * 10 + index * Math.PI) * -0.3 : 0; });
+    const walking = this.motion > 0.003;this.customAvatar.update(walking,this.visualTime); this.heroLegs.forEach((leg, index) => { leg.rotation.x = walking ? Math.sin(state.time * 10 + index * Math.PI) * 0.45 : 0; }); this.heroArms.forEach((arm, index) => { arm.rotation.x = walking ? Math.sin(state.time * 10 + index * Math.PI) * -0.3 : 0; });
     if(crewTarget!==this.crewMarker){
       this.crewMarker=crewTarget;
       this.marker.traverse(object=>{
@@ -509,6 +520,7 @@ export class CityView {
     const forward = new THREE.Vector3(Math.sin(heading), 0, -Math.cos(heading));
     const zoom = pose?.zoom ?? 1;
     const pitch = pose?.pitch ?? (cameraMode === 1 ? 1 : cameraMode === 2 ? .02 : .38);
+    const ridingVehicle=state.vehicles.find(vehicle=>vehicle.id===p.vehicleId),airHeight=ridingVehicle?.airHeight??0;
     let destination: THREE.Vector3; let lookAt: THREE.Vector3;
     if (inside && this.seated) {
       destination = new THREE.Vector3(0, 2.8, 3.2);
@@ -517,13 +529,13 @@ export class CityView {
       lookAt = destination.clone().add(new THREE.Vector3(Math.sin(headYaw) * Math.cos(headPitch), -Math.sin(headPitch), -Math.cos(headYaw) * Math.cos(headPitch)).multiplyScalar(10));
     } else if (cameraMode === 2) {
       const vehicleForward = new THREE.Vector3(Math.sin(p.heading), 0, -Math.cos(p.heading));
-      destination = new THREE.Vector3(p.x, inCar ? 1.45 : 1.75, p.z);
+      destination = new THREE.Vector3(p.x, (inCar ? 1.45 : 1.75)+airHeight, p.z);
       if(inCar)destination.addScaledVector(vehicleForward, .6);
       if(riding)destination.add(new THREE.Vector3(Math.cos(p.heading),0,Math.sin(p.heading)).multiplyScalar(.48));
       lookAt = destination.clone().addScaledVector(forward, 25);lookAt.y -= Math.tan(pitch) * 25;
     } else {
       const distance = (cameraMode === 1 ? (inside ? 7 : 32) : inCar ? 12 : inside ? 4 : 7) * zoom;
-      const pivot = new THREE.Vector3(p.x, 1.6, p.z);
+      const pivot = new THREE.Vector3(p.x, 1.6+airHeight, p.z);
       destination = pivot.clone().addScaledVector(forward, -Math.cos(pitch) * distance);
       destination.y += Math.sin(pitch) * distance;
       lookAt = pivot.clone().addScaledVector(forward, cameraMode === 1 ? 0 : inCar ? 4 : 1.4);
@@ -551,6 +563,7 @@ export class CityView {
     this.visualTime+=dt;const p=state.player,yaw=pose?.yaw??p.heading,pitch=pose?.pitch??.35,zoom=pose?.zoom??1;
     this.hero.visible=cameraMode!==2;this.hero.position.set(p.x,.1,p.z);this.hero.rotation.y=-p.heading;
     const moved=this.lastPlayer?Math.hypot(p.x-this.lastPlayer.x,p.z-this.lastPlayer.z)>.001:false;this.lastPlayer={x:p.x,z:p.z};
+    this.customAvatar.update(moved,this.visualTime);
     this.heroLegs.forEach((leg,i)=>leg.rotation.x=moved?Math.sin(this.visualTime*10+i*Math.PI)*.45:0);
     this.heroArms.forEach((arm,i)=>arm.rotation.x=moved?-Math.sin(this.visualTime*10+i*Math.PI)*.3:0);
     const forward=new THREE.Vector3(Math.sin(yaw),0,-Math.cos(yaw));const pivot=new THREE.Vector3(p.x,1.5,p.z);

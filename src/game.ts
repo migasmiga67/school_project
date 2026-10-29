@@ -1,5 +1,6 @@
 import { BUILDINGS, ROADS, WORLD_BOUNDS } from './model';
 import { CASINO } from './casino-location';
+import { BIKE_LOCATION, DOCK, advanceBikeFlight, advanceBoat, canBoardDockBoat, canDisembarkBoat, resetMobilityMotion } from './mobility';
 import type { GameEvent, GameState, Input, Point, Vehicle, PursuitState, Roadblock } from './model';
 
 const START: Point = { x: 0, z: 68 };
@@ -50,6 +51,8 @@ export function createGame(): GameState {
     vehicle('parked-2', 'sport', 75, 6, Math.PI / 2, 0xe88a67, true),
     vehicle('parked-3', 'sedan', -75, -44, 0, 0xcdbd7d, true),
     vehicle('parked-4', 'sport', 4.5, -65, 0, 0x8d7cba, true),
+    {...vehicle('bike-1','bike',BIKE_LOCATION.x,BIKE_LOCATION.z,0,0x67cabc,true,true),label:'Vortex R · MOTOCYKL'},
+    {...vehicle('boat-1','boat',DOCK.mooring.x,DOCK.mooring.z,Math.PI/2,0xf0dfbd,true,true),label:'TideRunner · MOTORÓWKA'},
   ];
   for (let i = 0; i < 8; i++) {
     const p = loopPose(trafficLoops[i % 2], i % 2 ? i * 31 + 45 : i * 59 + 50);
@@ -86,7 +89,7 @@ export function synchronizeOnlineTraffic(s: GameState, seconds: number) {
 }
 export function nearestVehicle(s: GameState): Vehicle | undefined {
   if (s.interior) return undefined;
-  return s.vehicles.filter(v => v.kind !== 'police' && v.health > 0 && length(v, s.player) <= 4).sort((a, b) => length(a, s.player) - length(b, s.player))[0];
+  return s.vehicles.filter(v => v.kind !== 'police' && v.health > 0 && (v.kind==='boat'?canBoardDockBoat(s.player,v):length(v, s.player) <= 4)).sort((a, b) => (a.kind==='boat'?1:length(a,s.player))-(b.kind==='boat'?1:length(b,s.player)))[0];
 }
 /** Contextual E prompt has the same priority as the actual interaction. */
 export function casinoAction(s: GameState): 'enter' | 'exit' | 'poker' | null {
@@ -130,6 +133,9 @@ function attention(s: GameState, amount: number, events: GameEvent[]) {
   if (old < s.wanted) events.push({ kind: 'wanted', text: `Poziom pościgu: ${s.wanted}. Zgub patrol i ukryj się poza jego zasięgiem.` });
 }
 function recover(s: GameState, events: GameEvent[], arrested = false) {
+  const previous=activeVehicle(s);
+  if(previous?.kind==='boat'){resetMobilityMotion(previous);Object.assign(previous,DOCK.mooring,{speed:0,health:100,parked:true,heading:Math.PI/2});}
+  else if(previous?.kind==='bike'){resetMobilityMotion(previous);previous.speed=0;previous.parked=true;}
   let car = s.vehicles.find(v => v.id === 'stratus');
   if (!car) { car = vehicle('stratus', 'sport', START.x, START.z, 0, 0xded8cb, true, true); s.vehicles.push(car); }
   Object.assign(car, START, { heading: 0, speed: 0, health: 100, parked: true, owned: true, steer: 0 });
@@ -148,8 +154,16 @@ function recover(s: GameState, events: GameEvent[], arrested = false) {
 function interact(s: GameState, events: GameEvent[]) {
   const car = activeVehicle(s);
   if (car) {
+    if(car.kind==='boat'){
+      if(Math.abs(car.speed)>3){events.push({kind:'info',text:'Zatrzymaj motorówkę przy pomoście, aby bezpiecznie wysiąść.'});return;}
+      if(!canDisembarkBoat(car)){events.push({kind:'info',text:'Wróć do pomostu przy boi (124, 26). Wysiadanie jest możliwe tylko przy przystani.'});return;}
+      resetMobilityMotion(car);car.speed=0;car.parked=true;Object.assign(s.player,DOCK.land,{heading:-Math.PI/2,mode:'foot',vehicleId:null});
+      events.push({kind:'info',text:'Wysiadłeś na przystani. E przy wejściu na pomost pozwala ponownie wsiąść.'});return;
+    }
+    if(car.kind==='bike'&&(car.airHeight??0)>.35){events.push({kind:'info',text:'Poczekaj na lądowanie motocykla, zanim zsiądziesz.'});return;}
     if (Math.abs(car.speed) > 4) { events.push({ kind: 'info', text: 'Zatrzymaj samochód, aby bezpiecznie wysiąść.' }); return; }
-    const side = [{ x: Math.cos(car.heading) * 2.6, z: Math.sin(car.heading) * 2.6 }, { x: -Math.cos(car.heading) * 2.6, z: -Math.sin(car.heading) * 2.6 }];
+    const offset=car.kind==='bike'?1.65:2.6;
+    const side = [{ x: Math.cos(car.heading) * offset, z: Math.sin(car.heading) * offset }, { x: -Math.cos(car.heading) * offset, z: -Math.sin(car.heading) * offset }];
     const exit = side.map(p => ({ x: car.x + p.x, z: car.z + p.z })).find(p => !blocked(p, .5) && p.x > WORLD_BOUNDS.minX && p.x < WORLD_BOUNDS.maxX && p.z > WORLD_BOUNDS.minZ && p.z < WORLD_BOUNDS.maxZ);
     if (!exit) { events.push({ kind: 'info', text: 'Brak miejsca przy drzwiach. Zaparkuj na otwartej przestrzeni.' }); return; }
     car.speed = 0; car.parked = true; Object.assign(s.player, exit, { mode: 'foot', vehicleId: null });
@@ -174,7 +188,10 @@ function interact(s: GameState, events: GameEvent[]) {
     const target = nearestVehicle(s);
     if (!target) { events.push({ kind: 'info', text: 'Podejdź bliżej samochodu, aby do niego wsiąść.' }); return; }
     target.parked = true; target.speed = 0;
+    if(target.kind==='boat'||target.kind==='bike')resetMobilityMotion(target);
     Object.assign(s.player, { x: target.x, z: target.z, heading: target.heading, mode: 'drive', vehicleId: target.id });
+    if(target.kind==='boat'){events.push({kind:'info',text:'Za sterem TideRunnera. WASD — silnik i ster, Shift — pełna moc. Wysiądziesz po powrocie do pomostu.'});return;}
+    if(target.kind==='bike'){events.push({kind:'info',text:'Vortex R: szybki skręt, wąskie przejazdy i rampy przy ulicach. Shift — przyspieszenie, E — zsiądź po zatrzymaniu.'});return;}
     if (!target.owned) { attention(s, 1, events); target.owned = true; events.push({ kind: 'info', text: 'Przejąłeś samochód. Patrol otrzymał zgłoszenie.' }); }
     else events.push({ kind: 'info', text: 'Za kierownicą. W — gaz, S — hamulec / wsteczny, Spacja — hamulec ręczny.' });
   }
@@ -185,22 +202,26 @@ function collision(s: GameState, car: Vehicle, speed: number, events: GameEvent[
   events.push({ kind: 'damage', text: `Kolizja. Stan pojazdu −${amount}%.`, amount }); attention(s, 1, events);
 }
 function drive(s: GameState, car: Vehicle, input: Input, dt: number, events: GameEvent[]) {
+  if(car.kind==='boat'){advanceBoat(car,input,dt);Object.assign(s.player,{x:car.x,z:car.z,heading:car.heading});return;}
+  const bike=car.kind==='bike';
   const tuning = car.tuning;
   const tuningLevel = (value: number | undefined) => Number.isFinite(value) ? clamp(Math.floor(value!), 0, 3) : 0;
   const engine = tuningLevel(tuning?.engine), brakes = tuningLevel(tuning?.brakes), nitro = tuningLevel(tuning?.nitro);
-  const acceleration = input.throttle ? (input.boost ? 19 + engine * 2 + nitro * 3 : 13 * (1 + engine * .18)) : input.brake ? (car.speed > .5 ? -23 * (1 + brakes * .25) : -10) : -Math.sign(car.speed) * Math.min(Math.abs(car.speed) / Math.max(dt, .0001), 3.6 + Math.abs(car.speed) * .12);
-  car.speed = clamp(car.speed + acceleration * dt, -9, input.boost ? 35 + engine * 2 + nitro * 3 : 26 + engine * 3);
+  const acceleration = input.throttle ? (bike?(input.boost?23:18):(input.boost ? 19 + engine * 2 + nitro * 3 : 13 * (1 + engine * .18))) : input.brake ? (car.speed > .5 ? (bike?-28:-23 * (1 + brakes * .25)) : -10) : -Math.sign(car.speed) * Math.min(Math.abs(car.speed) / Math.max(dt, .0001), (bike?2.6:3.6) + Math.abs(car.speed) * .12);
+  car.speed = clamp(car.speed + acceleration * dt, bike?-5:-9, bike?(input.boost?42:34):(input.boost ? 35 + engine * 2 + nitro * 3 : 26 + engine * 3));
   if (input.handbrake) car.speed *= Math.exp(-dt * (3.5 + brakes * .6));
   const axis = Number(input.right) - Number(input.left);
-  car.steer += (axis - car.steer) * Math.min(1, dt * 7);
-  car.heading = angle(car.heading + car.steer * Math.min(Math.abs(car.speed) / 5, 1) * Math.sign(car.speed || 1) * dt * (input.handbrake ? 2.4 : 1.45) / (1 + Math.abs(car.speed) / 42));
+  car.steer += (axis - car.steer) * Math.min(1, dt * (bike?10:7));
+  car.heading = angle(car.heading + car.steer * Math.min(Math.abs(car.speed) / 5, 1) * Math.sign(car.speed || 1) * dt * (bike?(input.handbrake?3.1:2.15):(input.handbrake ? 2.4 : 1.45)) / (1 + Math.abs(car.speed) / 42));
   const speed = car.speed;
   const previous={x:car.x,z:car.z};
-  if (move(car, Math.sin(car.heading) * speed * dt, -Math.cos(car.heading) * speed * dt, 1.5)) { collision(s, car, speed, events); car.speed *= -.18; }
-  if(roadblockHit(s,car,1.5)){
+  const radius=bike ? .68 : 1.5;
+  if (move(car, Math.sin(car.heading) * speed * dt, -Math.cos(car.heading) * speed * dt, radius)) { collision(s, car, speed, events); car.speed *= -.18; }
+  if((car.airHeight??0)<1.65&&roadblockHit(s,car,radius)){
     Object.assign(car,previous);collision(s,car,speed,events);car.speed*=-.24;
   }
   car.wheelPhase += car.speed * dt * 1.6;
+  if(bike){const flight=advanceBikeFlight(car,dt);if(flight.launched)events.push({kind:'info',text:'Skok! Motocykl może przelecieć nad niską blokadą i ruchem ulicznym.'});}
   Object.assign(s.player, { x: car.x, z: car.z, heading: car.heading });
 }
 function walk(s: GameState, input: Input, dt: number) {
@@ -224,13 +245,13 @@ function walk(s: GameState, input: Input, dt: number) {
 function traffic(s: GameState, dt: number, events: GameEvent[]) {
   const rt = runtime(s), playerCar = activeVehicle(s);
   for (const car of s.vehicles) {
-    if (car === playerCar || car.parked || car.health <= 0) continue;
+    if (car === playerCar || car.parked || car.health <= 0 || car.kind==='boat'||car.kind==='bike') continue;
     const index = Number(car.id.split('-').at(-1)); if (!Number.isFinite(index)) continue;
     const speed = 8 + index % 4;
     const old = rt.traffic.get(car.id) ?? (index % 2 ? index * 31 + 45 : index * 59 + 50);
     const next = old + speed * dt; rt.traffic.set(car.id, next);
     const p = loopPose(trafficLoops[index % 2], next); Object.assign(car, p, { speed }); car.wheelPhase += speed * dt;
-    if (playerCar && length(car, playerCar) < 3.05) {
+    if (playerCar && playerCar.kind!=='boat'&&(playerCar.airHeight??0)<1.7&&length(car, playerCar) < (playerCar.kind==='bike'?2.2:3.05)) {
       const impact = Math.abs(playerCar.speed - car.speed) + 5;
       collision(s, playerCar, impact, events); playerCar.speed *= -.2; car.speed = 0; car.parked = true;
       const dist = length(car, playerCar) || 1;
@@ -239,8 +260,8 @@ function traffic(s: GameState, dt: number, events: GameEvent[]) {
     }
   }
   // Parked vehicles are physical obstacles too, including abandoned traffic.
-  if (playerCar && Math.abs(playerCar.speed) > .2) for (const car of s.vehicles) {
-    if (car === playerCar || !car.parked || length(car, playerCar) >= 2.8) continue;
+  if (playerCar && playerCar.kind!=='boat'&&(playerCar.airHeight??0)<1.7&&Math.abs(playerCar.speed) > .2) for (const car of s.vehicles) {
+    if (car === playerCar || car.kind==='boat'||!car.parked || length(car, playerCar) >= (car.kind==='bike'||playerCar.kind==='bike'?2.2:2.8)) continue;
     collision(s, playerCar, Math.abs(playerCar.speed) + 3, events); playerCar.speed *= -.2;
     const d = length(car, playerCar) || 1;
     move(playerCar, (playerCar.x - car.x) / d * .4, (playerCar.z - car.z) / d * .4, 1.5);

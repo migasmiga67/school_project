@@ -2,6 +2,8 @@ import * as THREE from 'three';
 import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
 import type { OnlineMember } from './multiplayer-model';
 import type { VehicleKind } from './model';
+import { appearanceColors, type AppearanceState } from './appearance';
+import { createMobilityVehicle } from './mobility-view';
 
 type LitMaterial = THREE.MeshLambertMaterial | THREE.MeshStandardMaterial;
 interface BodyPart { size: [number, number, number]; at: [number, number, number]; color: number; rotation?: [number, number, number] }
@@ -16,6 +18,9 @@ interface RemoteVisual {
   carBody: THREE.Mesh;
   carDetails: THREE.Mesh;
   paint: LitMaterial;
+  pants: LitMaterial;
+  appearanceKey: string;
+  mobility?: ReturnType<typeof createMobilityVehicle>;
   wheels: THREE.Mesh[];
   frontSteers: THREE.Group[];
   label: THREE.Sprite;
@@ -44,11 +49,10 @@ export class RemotePlayersView {
   private readonly visuals = new Map<string, RemoteVisual>();
   private readonly geometries = new Set<THREE.BufferGeometry>();
   private readonly materials = new Set<THREE.Material>();
-  private readonly avatarBodies = new Map<number, THREE.BufferGeometry>();
-  private readonly armShapes = new Map<number, THREE.BufferGeometry>();
+  private readonly avatarBodies = new Map<string, THREE.BufferGeometry>();
+  private readonly armShapes = new Map<string, THREE.BufferGeometry>();
   private readonly carShapes = new Map<VehicleKind, CarShape>();
   private readonly colored: LitMaterial;
-  private readonly trousers: LitMaterial;
   private readonly wheelShape: THREE.BufferGeometry;
   private readonly legShape: THREE.BufferGeometry;
   private count = 0;
@@ -57,7 +61,6 @@ export class RemotePlayersView {
   constructor(private readonly software: boolean) {
     this.group.name = 'Other online players';
     this.colored = this.material(0xffffff, true);
-    this.trousers = this.material(0x2c3b48);
     this.legShape = this.track(new THREE.BoxGeometry(.25, .7, .28));
     this.legShape.translate(0, -.35, 0);
     this.wheelShape = this.wheelGeometry();
@@ -101,30 +104,36 @@ export class RemotePlayersView {
     return this.track(merged);
   }
 
-  private avatarGeometry(slot: number) {
-    let body = this.avatarBodies.get(slot);
+  private avatarColors(slot:number,appearance?:AppearanceState){return appearance?appearanceColors(appearance):{shirt:SLOT_COLORS[slot],pants:0x2c3b48,skin:SKIN_COLORS[slot],hair:0x2a2b2d,accessory:0x20313b,hairstyle:'short',accessoryStyle:'none',crewOutfit:false};}
+  private avatarGeometry(slot: number,appearance?:AppearanceState) {
+    const colors=this.avatarColors(slot,appearance),key=JSON.stringify(colors);
+    let body = this.avatarBodies.get(key);
     if (!body) {
-      const shirt = SLOT_COLORS[slot], skin = SKIN_COLORS[slot];
-      body = this.boxes([
+      const shirt = colors.shirt, skin = colors.skin;
+      const parts:BodyPart[]=[
         { size: [.61, .71, .36], at: [0, 1.17, 0], color: shirt },
         { size: [.18, .16, .2], at: [0, 1.58, 0], color: skin },
         { size: [.41, .42, .37], at: [0, 1.77, -.015], color: skin },
-        { size: [.43, .15, .39], at: [0, 2, 0], color: 0x2a2b2d },
-        { size: [.42, .22, .1], at: [0, 1.87, .15], color: 0x2a2b2d },
         { size: [.07, .055, .025], at: [-.09, 1.81, -.21], color: 0x202b32 },
         { size: [.07, .055, .025], at: [.09, 1.81, -.21], color: 0x202b32 },
-      ]);
-      this.avatarBodies.set(slot, body);
+      ];
+      if(colors.hairstyle==='buzz')parts.push({size:[.42,.065,.38],at:[0,1.96,-.015],color:colors.hair});
+      else {parts.push({size:[.43,.15,.39],at:[0,2,0],color:colors.hair},{size:[.42,colors.hairstyle==='long'?.45:.22,.1],at:[0,colors.hairstyle==='long'?1.8:1.87,.15],color:colors.hair});if(colors.hairstyle==='long')for(const side of[-1,1])parts.push({size:[.08,.36,.3],at:[side*.22,1.82,.015],color:colors.hair});}
+      if(colors.accessoryStyle==='glasses')parts.push({size:[.38,.1,.04],at:[0,1.82,-.225],color:colors.accessory});
+      if(colors.accessoryStyle==='cap')parts.push({size:[.47,.16,.43],at:[0,2.045,0],color:colors.accessory},{size:[.48,.045,.24],at:[0,1.99,-.27],color:colors.accessory});
+      if(colors.crewOutfit)parts.push({size:[.12,.44,.02],at:[.17,1.17,-.19],color:0xdcece2,rotation:[0,0,.2]});
+      body = this.boxes(parts);
+      this.avatarBodies.set(key, body);
     }
-    let arm = this.armShapes.get(slot);
+    let arm = this.armShapes.get(key);
     if (!arm) {
       arm = this.boxes([
-        { size: [.2, .35, .26], at: [0, -.175, 0], color: SLOT_COLORS[slot] },
-        { size: [.18, .32, .24], at: [0, -.49, 0], color: SKIN_COLORS[slot] },
+        { size: [.2, .35, .26], at: [0, -.175, 0], color: colors.shirt },
+        { size: [.18, .32, .24], at: [0, -.49, 0], color: colors.skin },
       ]);
-      this.armShapes.set(slot, arm);
+      this.armShapes.set(key, arm);
     }
-    return { body, arm };
+    return { body, arm,key,colors };
   }
 
   private wheelGeometry() {
@@ -190,13 +199,14 @@ export class RemotePlayersView {
   }
 
   private create(member: OnlineMember): RemoteVisual {
-    const slot = safeSlot(member.slot), shape = this.avatarGeometry(slot);
+    const slot = safeSlot(member.slot), shape = this.avatarGeometry(slot,member.appearance);
     const root = new THREE.Group(); root.name = `Online player ${member.id}`; this.group.add(root);
     const avatar = new THREE.Group(); root.add(avatar);
     const body = this.mesh(shape.body, this.colored, avatar);
+    const pants=this.material(shape.colors.pants);
     const legs: THREE.Group[] = [], arms: THREE.Group[] = [];
     for (const side of [-1, 1]) {
-      const leg = new THREE.Group(); leg.position.set(side * .17, .8, 0); avatar.add(leg); this.mesh(this.legShape, this.trousers, leg); legs.push(leg);
+      const leg = new THREE.Group(); leg.position.set(side * .17, .8, 0); avatar.add(leg); this.mesh(this.legShape, pants, leg); legs.push(leg);
       const arm = new THREE.Group(); arm.position.set(side * .43, 1.48, 0); avatar.add(arm); this.mesh(shape.arm, this.colored, arm); arms.push(arm);
     }
     const car = new THREE.Group(); root.add(car);
@@ -211,12 +221,13 @@ export class RemotePlayersView {
     const labelTexture = this.nameTexture(member.name, slot);
     const label = new THREE.Sprite(new THREE.SpriteMaterial({ map: labelTexture, transparent: true, depthWrite: false }));
     label.scale.set(2.9, .635, 1); label.position.y = 2.65; root.add(label);
-    return { root, avatar, body, legs, arms, car, carBody, carDetails, paint, wheels, frontSteers, label, labelTexture, name: member.name, slot, heading: 0, wheelPhase: 0, phase: 0, kind: 'sport', paintColor: SLOT_COLORS[slot], location: member.pose.interior, mode: member.pose.mode, passengerOf:member.pose.passengerOf??null, initialized: false };
+    return { root, avatar, body, legs, arms, car, carBody, carDetails, paint,pants,appearanceKey:shape.key, wheels, frontSteers, label, labelTexture, name: member.name, slot, heading: 0, wheelPhase: 0, phase: 0, kind: 'sport', paintColor: SLOT_COLORS[slot], location: member.pose.interior, mode: member.pose.mode, passengerOf:member.pose.passengerOf??null, initialized: false };
   }
 
   private remove(id: string, visual: RemoteVisual) {
     visual.root.removeFromParent(); visual.labelTexture.dispose(); visual.label.material.dispose();
     visual.paint.dispose(); this.materials.delete(visual.paint);
+    visual.pants.dispose();this.materials.delete(visual.pants);this.removeMobility(visual);
     this.visuals.delete(id);
   }
 
@@ -238,11 +249,13 @@ export class RemotePlayersView {
       if (!visible) { visual.initialized = false; continue; }
       this.count++;
       const slot = safeSlot(member.slot);
+      const avatarShape=this.avatarGeometry(slot,member.appearance);
+      if(avatarShape.key!==visual.appearanceKey){visual.body.geometry=avatarShape.body;visual.arms.forEach(arm=>{(arm.children[0]as THREE.Mesh).geometry=avatarShape.arm;});visual.pants.color.setHex(avatarShape.colors.pants);visual.appearanceKey=avatarShape.key;}
       if (member.name !== visual.name || slot !== visual.slot) {
         visual.labelTexture.dispose(); visual.labelTexture = this.nameTexture(member.name, slot);
         visual.label.material.map = visual.labelTexture; visual.label.material.needsUpdate = true;
         if (slot !== visual.slot) {
-          const shape = this.avatarGeometry(slot); visual.body.geometry = shape.body;
+          const shape = this.avatarGeometry(slot,member.appearance); visual.body.geometry = shape.body;
           visual.arms.forEach(arm => { (arm.children[0] as THREE.Mesh).geometry = shape.arm; });
         }
         visual.name = member.name; visual.slot = slot;
@@ -267,14 +280,26 @@ export class RemotePlayersView {
       if (driving) {
         const vehicle = pose.vehicle!;
         if (vehicle.kind !== visual.kind) {
-          const shape = this.carGeometry(vehicle.kind); visual.carBody.geometry = shape.paint; visual.carDetails.geometry = shape.details; visual.kind = vehicle.kind;
+          this.removeMobility(visual);
+          const special=vehicle.kind==='bike'||vehicle.kind==='boat';
+          visual.carBody.visible=visual.carDetails.visible=!special;visual.wheels.forEach(wheel=>wheel.visible=!special);
+          if(vehicle.kind==='bike'||vehicle.kind==='boat'){visual.mobility=createMobilityVehicle(vehicle.kind,vehicle.color);visual.car.add(visual.mobility.group);}
+          else {const shape = this.carGeometry(vehicle.kind); visual.carBody.geometry = shape.paint; visual.carDetails.geometry = shape.details;}
+          visual.kind = vehicle.kind;
         }
         const color = Number.isFinite(vehicle.color) ? (vehicle.color >>> 0) & 0xffffff : SLOT_COLORS[slot];
         if (color !== visual.paintColor) { visual.paint.color.setHex(color); visual.paintColor = color; }
+        if(visual.mobility){
+          visual.mobility.paint.color.setHex(color);
+          visual.mobility.rider.traverse((object:THREE.Object3D)=>{if(!(object instanceof THREE.Mesh))return;const slot=object.userData.appearanceSlot as 'shirt'|'pants'|'skin'|'hair'|undefined;if(!slot)return;for(const material of Array.isArray(object.material)?object.material:[object.material])if('color'in material)(material as LitMaterial).color.setHex(avatarShape.colors[slot]);});
+          visual.mobility.group.position.y=vehicle.kind==='bike'?Math.max(0,Math.min(6,(vehicle as {airHeight?:number}).airHeight??0)):0;
+          visual.mobility.wheels.forEach(wheel=>wheel.rotation.x=visual.wheelPhase);
+        }
         visual.wheelPhase += vehicle.speed * step / .42;
         visual.wheels.forEach(wheel => { wheel.rotation.x = visual.wheelPhase; });
         const turn = step > 0 && !jump ? THREE.MathUtils.clamp(wrap(visual.heading - oldHeading) / step * .3, -.35, .35) : 0;
         visual.frontSteers.forEach(steer => { steer.rotation.y = turn; });
+        if(visual.mobility){visual.mobility.frontWheels.forEach(steer=>steer.rotation.y=turn);visual.mobility.group.rotation.z=vehicle.kind==='bike'?-turn*.8:0;}
       } else if(!riding) {
         const moving = travel > .0003;
         if (moving) visual.phase += travel * 3.2;
@@ -292,4 +317,5 @@ export class RemotePlayersView {
     this.geometries.forEach(geometry => geometry.dispose()); this.materials.forEach(material => material.dispose());
     this.geometries.clear(); this.materials.clear(); this.group.removeFromParent(); this.count = 0;
   }
+  private removeMobility(visual:RemoteVisual){if(!visual.mobility)return;const geometries=new Set<THREE.BufferGeometry>(),materials=new Set<THREE.Material>();visual.mobility.group.traverse((object:THREE.Object3D)=>{if(object instanceof THREE.Mesh){geometries.add(object.geometry);for(const material of Array.isArray(object.material)?object.material:[object.material])materials.add(material);}});geometries.forEach(item=>item.dispose());materials.forEach(item=>item.dispose());visual.mobility.group.removeFromParent();visual.mobility=undefined;}
 }

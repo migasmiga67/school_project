@@ -44,6 +44,7 @@ export class CityExpansion {
  private route:Point|null=null;
  private routeLabel='';
  private eventRoute=false;
+ private contractRoute=false;
  private lastContractCheck=0;
  private lastInside=false;
  private lastEventId:string|null=null;
@@ -91,13 +92,15 @@ export class CityExpansion {
  get isHost(){const room=this.ctx.getRoom().snapshot;return Boolean(room&&room.youId===room.hostId);}
  get career(){return this.ctx.getRoom().snapshot?.career??this.soloCareer;}
  get savedCareer(){return this.soloCareer;}
+ get hasExplicitRoute(){return Boolean(this.route||this.eventRoute);}
+ awardSolo(source:string,reputation:number){if(!this.online){this.soloCareer=awardReputation(this.soloCareer,source,reputation);}}
  get homeId():VisitHomeId|null {const room=this.ctx.getRoom().snapshot;if(this.online&&room){const value=room.members.find(member=>member.id===room.youId)?.pose.homeId;return visitHome(value)?value:null;}return this.soloHome;}
  get cityActivity(){return this.ctx.getRoom().snapshot?.cityActivities??this.events.snapshot(SOLO);}
  get active(){return this.careerUI.active||this.casinoUI.active||this.eventsUI.active;}
  get snapshot(){return{career:structuredClone(this.career),home:this.homeId,careerOpen:this.careerUI.active,casinoOpen:this.casinoUI.active,casinoStation:this.casinoUI.activeStation,casinoGames:this.ctx.getRoom().snapshot?.casinoGames??this.casino.snapshot(),cityActivities:this.cityActivity,eventsOpen:this.eventsUI.active};}
- get target():Point|undefined {if(this.homeId)return undefined;if(this.eventRoute)return this.cityActivity.target??undefined;return this.route??careerTarget(this.career)??undefined;}
- clearRoute(){this.route=null;this.eventRoute=false;}
- private navigate(target:Point,label:string,eventRoute=false){this.eventRoute=eventRoute;this.ctx.onRoute();this.route={...target};this.routeLabel=label;this.ctx.onMessage(`GPS: ${label}.`);}
+ get target():Point|undefined {if(this.homeId)return undefined;if(this.eventRoute)return this.cityActivity.target??undefined;if(this.route&&this.contractRoute)return careerTarget(this.career)??undefined;return this.route??careerTarget(this.career)??undefined;}
+ clearRoute(){this.route=null;this.eventRoute=false;this.contractRoute=false;}
+ private navigate(target:Point,label:string,eventRoute=false){this.eventRoute=eventRoute;const current=careerTarget(this.career);this.contractRoute=Boolean(!eventRoute&&current&&Math.hypot(target.x-current.x,target.z-current.z)<.01);this.ctx.onRoute();this.route={...target};this.routeLabel=label;this.ctx.onMessage(`GPS: ${label}.`);}
  openCareer(){if(!this.active)this.careerUI.open();}
  openEvents(){if(!this.active)this.eventsUI.open();}
  openCasino(station?:CasinoStation){

@@ -8,12 +8,19 @@ import type { CareerAction, CrewBaseAction } from './career';
 import type { CasinoGameAction } from './casino-games';
 import type { TournamentAction } from './poker-tournament';
 import type { CityEventAction } from './city-events';
+import type { AppearanceAction } from './appearance';
+import { APPEARANCE_ITEMS, APPEARANCE_SLOTS } from './appearance';
+import type { PhoneAction } from './phone';
+import type { FactionAction } from './factions';
+import type { CampaignAction } from './campaign';
+import type { MobilityTrialAction } from './mobility';
 import { cityEventAt } from './city-life';
 import { CONNECTION_PROGRESS, CONNECTION_TIMEOUT_MESSAGE, CONNECTION_TIMEOUT_MS, SIGNALING_UNAVAILABLE_MESSAGE, type ConnectionPhase } from './connection-lifecycle';
 import { buildIceConfiguration } from './ice-config';
 
 const STALE_MS = 15000;
-const MAX_PACKET = 32768;
+// Four-player snapshots include bounded chat, campaign and territory views.
+const MAX_PACKET = 65536;
 const alphabet = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
 const clone = <T>(value: T): T => structuredClone(value);
 const record = (value: unknown): value is Record<string, unknown> => Boolean(value && typeof value === 'object' && !Array.isArray(value));
@@ -24,6 +31,42 @@ const idValue = (value:unknown):value is string=>typeof value==='string'&&/^[A-Z
 const shortText=(value:unknown,max=600):value is string=>typeof value==='string'&&value.length<=max;
 const boundedInteger=(value:unknown,max:number)=>integer(value)&&Number(value)<=max;
 const cardArray=(value:unknown,max:number)=>Array.isArray(value)&&value.length<=max&&value.every(card=>record(card)&&boundedInteger(card.rank,14)&&[0,2,3,4,5,6,7,8,9,10,11,12,13,14].includes(Number(card.rank))&&['♠','♥','♦','♣'].includes(String(card.suit)));
+const nonnegative=(value:unknown)=>finiteNumber(value)&&value>=0;
+function appearanceView(value:unknown):boolean {
+  if(!record(value)||!Array.isArray(value.owned)||value.owned.length>APPEARANCE_ITEMS.length||new Set(value.owned).size!==value.owned.length||!value.owned.every(id=>typeof id==='string'&&APPEARANCE_ITEMS.some(item=>item.id===id))||!record(value.selected)||typeof value.crewOutfit!=='boolean')return false;
+  const selected=value.selected,owned=value.owned;
+  return APPEARANCE_SLOTS.every(slot=>owned.includes(selected[slot])&&APPEARANCE_ITEMS.some(item=>item.id===selected[slot]&&item.slot===slot));
+}
+function futureViews(value:Record<string,unknown>):boolean {
+  if(!appearanceView(value.appearance))return false;
+  const phone=value.phone,delivery=value.deliveryEffect;
+  if(!record(phone)||!Array.isArray(phone.messages)||phone.messages.length>40||!Array.isArray(phone.invites)||phone.invites.length>8||!nonnegative(phone.deliveryCooldownMs))return false;
+  for(const message of phone.messages)if(!record(message)||!idValue(message.id)||!idValue(message.senderId)||!shortText(message.senderName,18)||!shortText(message.text,180)||!nonnegative(message.sentAt)||typeof message.system!=='boolean')return false;
+  for(const invite of phone.invites){
+    if(!record(invite)||!idValue(invite.id)||!idValue(invite.senderId)||!shortText(invite.senderName,18)||!['heist','bank','race','challenge'].includes(String(invite.activity))||!['open','ready','cancelled','expired'].includes(String(invite.status))||!nonnegative(invite.createdAt)||!nonnegative(invite.expiresAt)||!Array.isArray(invite.accepted)||invite.accepted.length>4||!invite.accepted.every(idValue)||!Array.isArray(invite.declined)||invite.declined.length>4||!invite.declined.every(idValue))return false;
+  }
+  if(!record(delivery)||!integer(delivery.version)||!pointOrNull(delivery.target)||delivery.target!==null&&(!record(delivery.target)||!finiteNumber(delivery.target.heading)))return false;
+  const factions=value.factions;
+  if(!record(factions)||!record(factions.profile)||!Array.isArray(factions.districts)||factions.districts.length!==3||!Array.isArray(factions.members)||factions.members.length>4||!record(factions.job))return false;
+  const profile=factions.profile,job=factions.job;
+  if(![null,'tide','ember','circuit'].includes(profile.faction as null|string)||!boundedInteger(profile.loyalty,10000)||!['completedJobs','serial','incomeSerial'].every(key=>integer(profile[key]))||!['bonusPercent','incomePerMinute','nextIncomeMs','switchCooldownMs'].every(key=>nonnegative(factions[key])))return false;
+  const districtIds=new Set<string>();
+  for(const district of factions.districts){
+    if(!record(district)||!['downtown','harbor','heights'].includes(String(district.id))||districtIds.has(String(district.id))||!shortText(district.name,80)||!pointOrNull(district.center)||district.center===null||!record(district.influence)||!['tide','ember','circuit'].every(key=>boundedInteger((district.influence as Record<string,unknown>)[key],100))||![null,'tide','ember','circuit'].includes(district.controller as null|string)||typeof district.contested!=='boolean')return false;
+    districtIds.add(String(district.id));
+  }
+  for(const member of factions.members)if(!record(member)||!idValue(member.id)||!shortText(member.name,18)||![null,'tide','ember','circuit'].includes(member.faction as null|string))return false;
+  if(!['idle','active','completed','failed'].includes(String(job.status))||!integer(job.run)||![null,'courier','transmitter','capture'].includes(job.kind as null|string)||![null,'downtown','harbor','heights'].includes(job.district as null|string)||![null,'pickup','delivery','channel','escape','control'].includes(job.stage as null|string)||!pointOrNull(job.target)||!boundedInteger(job.progress,100)||!['holding','contested','canInteract'].every(key=>typeof job[key]==='boolean')||!['remainingMs','cooldownMs','reward'].every(key=>nonnegative(job[key]))||!shortText(job.message))return false;
+  const campaign=value.campaign;
+  if(!record(campaign)||!['idle','active','interlude','choice','completed','failed'].includes(String(campaign.status))||!boundedInteger(campaign.chapter,4)||campaign.total!==5||!['title','contact','summary','instruction','message'].every(key=>shortText(campaign[key],1200))||!Array.isArray(campaign.dialogue)||campaign.dialogue.length>10||!campaign.dialogue.every(line=>shortText(line,1000))||!Array.isArray(campaign.journal)||campaign.journal.length!==5||!boundedInteger(campaign.objective,8)||!boundedInteger(campaign.objectiveCount,8)||!pointOrNull(campaign.target))return false;
+  if(!['remainingMs','holdMs','holdRequiredMs','reward','reputation'].every(key=>nonnegative(campaign[key]))||!['rewardAvailable','eligible','canHostControl'].every(key=>typeof campaign[key]==='boolean')||!Array.isArray(campaign.participants)||campaign.participants.length>4||!Array.isArray(campaign.choices)||campaign.choices.length>2||![null,'truth','loyalty'].includes(campaign.decision as null|string)||![null,'publish','bargain'].includes(campaign.truth as null|string)||![null,'crew','self'].includes(campaign.loyalty as null|string)||![null,'dawn','crown','horizon'].includes(campaign.ending as null|string))return false;
+  for(const entry of campaign.journal)if(!record(entry)||!boundedInteger(entry.chapter,4)||!shortText(entry.title,120)||typeof entry.completed!=='boolean')return false;
+  for(const person of campaign.participants)if(!record(person)||!idValue(person.id)||!shortText(person.name,18))return false;
+  for(const choice of campaign.choices)if(!record(choice)||!['publish','bargain','crew','self'].includes(String(choice.id))||!shortText(choice.title,120)||!shortText(choice.description,600))return false;
+  if(campaign.endingTitle!==null&&!shortText(campaign.endingTitle,200)||campaign.endingText!==null&&!shortText(campaign.endingText,1200))return false;
+  const trial=value.mobilityTrial;
+  return record(trial)&&['idle','running','completed','failed'].includes(String(trial.status))&&[null,'bike','boat'].includes(trial.course as null|string)&&integer(trial.run)&&boundedInteger(trial.checkpoint,4)&&trial.total===4&&nonnegative(trial.remainingMs)&&nonnegative(trial.cooldownMs)&&pointOrNull(trial.target)&&boundedInteger(trial.reward,500)&&(trial.bestMs===null||nonnegative(trial.bestMs))&&(trial.lastTimeMs===null||nonnegative(trial.lastTimeMs))&&shortText(trial.message);
+}
 function publicHand(value:unknown):boolean {
   if(value===null)return true;
   if(!record(value)||!Array.isArray(value.players)||value.players.length!==4||!Array.isArray(value.deck)||value.deck.length!==0||value.seed!==0||!cardArray(value.board,5))return false;
@@ -94,6 +137,11 @@ function command(value: unknown): value is RoomCommand {
   if (value.type === 'casinoGame') return record(value.action) && integer(value.action.version) && ['blackjackDeal','blackjackHit','blackjackStand','blackjackDouble','blackjackForfeit','rouletteSpin'].includes(String(value.action.kind));
   if (value.type === 'tournament') return record(value.action) && ['open','join','start','next','withdraw','action'].includes(String(value.action.kind));
   if (value.type === 'cityActivity') return record(value.action) && ['join','interact','abandon'].includes(String(value.action.kind)) && typeof value.action.eventId==='string' && value.action.eventId.length<=100;
+  if(value.type==='appearance')return record(value.action)&&['buy','equip','crew'].includes(String(value.action.type));
+  if(value.type==='phone')return record(value.action)&&['chat','invite','acceptInvite','declineInvite','cancelInvite','requestCar'].includes(String(value.action.kind));
+  if(value.type==='faction')return record(value.action)&&['join','start','interact','cancel'].includes(String(value.action.kind));
+  if(value.type==='campaign')return record(value.action)&&['start','continue','retry','restart','choice','abandon'].includes(String(value.action.kind));
+  if(value.type==='mobilityTrial')return record(value.action)&&['start','cancel'].includes(String(value.action.kind));
   if (value.type === 'job') return record(value.action) && ['heistStart','heistInteract','heistHack','heistRecon','heistBreach','heistAbort','raceStart','raceReady'].includes(String(value.action.kind)) && (value.action.kind!=='heistHack'||integer(value.action.symbol)&&Number(value.action.symbol)<=3) && (value.action.kind!=='heistStart'||value.action.variant===undefined||['sapphire','bank'].includes(String(value.action.variant)));
   if (value.type === 'spend') return integer(value.amount);
   if (value.type === 'action') return integer(value.version) && record(value.action) && ['fold', 'check', 'call', 'raise', 'allIn'].includes(String(value.action.type));
@@ -102,7 +150,7 @@ function command(value: unknown): value is RoomCommand {
 function snapshot(value: unknown, hostId: string, youId: string, code: string): value is RoomSnapshot {
   if (!record(value) || value.hostId !== hostId || value.youId !== youId || value.code !== code || !integer(value.wallet) || !integer(value.tableVersion) || typeof value.seated !== 'boolean') return false;
   if (typeof value.worldTime !== 'number' || !Number.isFinite(value.worldTime) || value.worldTime < 0 || !Array.isArray(value.vehicles) || value.vehicles.length > 64) return false;
-  for (const vehicle of value.vehicles) if (!record(vehicle) || typeof vehicle.id !== 'string' || !['sport', 'sedan', 'police'].includes(String(vehicle.kind)) || !['x', 'z', 'heading', 'speed', 'health', 'color'].every(key => typeof vehicle[key] === 'number' && Number.isFinite(vehicle[key]))) return false;
+  for (const vehicle of value.vehicles) if (!record(vehicle) || typeof vehicle.id !== 'string' || !['sport', 'sedan', 'police','bike','boat'].includes(String(vehicle.kind)) || !['x', 'z', 'heading', 'speed', 'health', 'color'].every(key => typeof vehicle[key] === 'number' && Number.isFinite(vehicle[key]))) return false;
   if (value.turnDeadline !== null && (typeof value.turnDeadline !== 'number' || !Number.isFinite(value.turnDeadline))) return false;
   if (!Array.isArray(value.members) || value.members.length < 1 || value.members.length > MAX_ROOM_PLAYERS) return false;
   const ids = new Set<string>();
@@ -157,12 +205,15 @@ function snapshot(value: unknown, hostId: string, youId: string, code: string): 
     if(participant.finishedMs!==null&&!integer(participant.finishedMs)||participant.rank!==null&&(!integer(participant.rank)||Number(participant.rank)<1||Number(participant.rank)>4))return false;
   }
   for(const member of value.members){
+    const metadata=member as Record<string,unknown>;
+    if(metadata.appearance!==undefined&&!appearanceView(metadata.appearance)||metadata.factionId!==undefined&&![null,'tide','ember','circuit'].includes(metadata.factionId as null|string))return false;
     const pose=(member as Record<string,unknown>).pose;
     if(!record(pose)||!['x','z','heading'].every(key=>typeof pose[key]==='number'&&Number.isFinite(pose[key]))||!['drive','foot'].includes(String(pose.mode))||![null,'casino'].includes(pose.interior as null|string))return false;
     if(pose.homeId!==undefined&&pose.homeId!==null&&!['canal','loft','crew'].includes(String(pose.homeId)))return false;
     if(pose.passengerOf!==undefined&&pose.passengerOf!==null&&(typeof pose.passengerOf!=='string'||!ids.has(pose.passengerOf)||pose.passengerOf===(member as Record<string,unknown>).id||pose.mode!=='foot'||pose.interior!==null||pose.vehicle!==null))return false;
   }
   if(!publicHand(value.poker))return false;
+  if(!futureViews(value))return false;
   return true;
 }
 
@@ -232,6 +283,11 @@ export class MultiplayerClient implements MultiplayerSession {
   casinoGame(action:CasinoGameAction) { this.issue({type:'casinoGame',action}); }
   tournament(action:TournamentAction) { this.issue({type:'tournament',action}); }
   cityActivity(action:CityEventAction) { this.issue({type:'cityActivity',action}); }
+  appearance(action:AppearanceAction) { this.issue({type:'appearance',action}); }
+  phone(action:PhoneAction) { this.issue({type:'phone',action}); }
+  faction(action:FactionAction) { this.issue({type:'faction',action}); }
+  campaign(action:CampaignAction) { this.issue({type:'campaign',action}); }
+  mobilityTrial(action:MobilityTrialAction) { this.issue({type:'mobilityTrial',action}); }
   claimCityEvent() { const event=this.current.snapshot&&cityEventAt(this.current.snapshot.worldTime);if(event)this.issue({type:'cityEventClaim',eventId:event.id}); }
   ride(driverId:string) { this.issue({type:'ride',driverId}); }
   exitRide() { this.issue({type:'exitRide'}); }
@@ -443,8 +499,9 @@ export class MultiplayerClient implements MultiplayerSession {
   }
   private acceptSnapshot(value: RoomSnapshot, notice?: string) {
     const previous = this.current.snapshot;
+    const futureSignature=(snapshot:RoomSnapshot)=>JSON.stringify([snapshot.appearance,snapshot.deliveryEffect.version,snapshot.phone.messages.at(-1)?.id,snapshot.phone.messages.length,snapshot.phone.invites.map(invite=>[invite.id,invite.status,invite.accepted,invite.declined]),snapshot.factions.profile,snapshot.factions.districts,snapshot.factions.job.status,snapshot.factions.job.stage,snapshot.factions.job.progress,snapshot.campaign.status,snapshot.campaign.chapter,snapshot.campaign.objective,snapshot.campaign.truth,snapshot.campaign.loyalty,snapshot.mobilityTrial.status,snapshot.mobilityTrial.checkpoint,snapshot.mobilityTrial.run]);
     const changed = !previous || previous.tableVersion !== value.tableVersion || previous.wallet !== value.wallet || previous.seated !== value.seated || previous.challenge.status !== value.challenge.status || previous.challenge.checkpoint !== value.challenge.checkpoint || JSON.stringify(previous.garage)!==JSON.stringify(value.garage) || previous.jobs.heist.status!==value.jobs.heist.status || previous.jobs.race.status!==value.jobs.race.status || previous.members.find(member=>member.id===previous.youId)?.pose.passengerOf!==value.members.find(member=>member.id===value.youId)?.pose.passengerOf || JSON.stringify(previous.career)!==JSON.stringify(value.career) || JSON.stringify(previous.crewBase)!==JSON.stringify(value.crewBase) || previous.careerEffect.version!==value.careerEffect.version || previous.casinoGames.version!==value.casinoGames.version || previous.tournament.version!==value.tournament.version || previous.cityActivities.id!==value.cityActivities.id || previous.cityActivities.status!==value.cityActivities.status || previous.cityActivities.stage!==value.cityActivities.stage || previous.cityActivities.holderId!==value.cityActivities.holderId || previous.members.find(member=>member.id===previous.youId)?.pose.homeId!==value.members.find(member=>member.id===value.youId)?.pose.homeId;
-    this.publish({ status: 'online', message: notice ?? (changed ? '' : this.current.message), snapshot: clone(value) });
+    this.publish({ status: 'online', message: notice ?? (changed || !previous || futureSignature(previous)!==futureSignature(value) ? '' : this.current.message), snapshot: clone(value) });
   }
   private drop(guest: Guest, reason?: string) {
     if (this.guests.get(guest.connection.peer) !== guest) return;

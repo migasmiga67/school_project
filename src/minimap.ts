@@ -3,6 +3,7 @@ import { BUILDINGS, ROADS, type GameState, type Point } from './model';
 import type { OnlineMember } from './multiplayer-model';
 import { GARAGE_LOCATION } from './garage';
 import { HOMES, CREW_BASE } from './career';
+import { DOCK, WATER_BOUNDS } from './mobility';
 
 export const TEAM_MAP_COLORS = ['#e0bb75', '#83c3d5', '#c390c0', '#8fc4a0'];
 export interface MinimapOptions {
@@ -123,6 +124,18 @@ export function renderMinimap(ctx: CanvasRenderingContext2D, state: GameState, o
   ctx.beginPath(); ctx.rect(0, 0, 224, 200); ctx.clip();
   if (state.interior === 'casino') {
     const remotePlayers = indoorMap(ctx, state, others); ctx.restore(); return { remotePlayers, route: [] };
+  }
+  const vessel=state.vehicles.find(vehicle=>vehicle.id===state.player.vehicleId)??options.onlineMembers.find(member=>member.id===state.player.passengerOf)?.pose.vehicle;
+  if(vessel?.kind==='boat'){
+    const project=(p:Point)=>({x:12+(p.x-WATER_BOUNDS.minX)/(WATER_BOUNDS.maxX-WATER_BOUNDS.minX)*200,y:12+(p.z-WATER_BOUNDS.minZ)/(WATER_BOUNDS.maxZ-WATER_BOUNDS.minZ)*176});
+    ctx.fillStyle='#224f62';ctx.fillRect(0,0,224,200);ctx.strokeStyle='#52839055';ctx.lineWidth=1;
+    for(let y=10;y<200;y+=20){ctx.beginPath();ctx.moveTo(0,y);ctx.lineTo(224,y);ctx.stroke();}
+    const raw=options.target===undefined?state.mission.waypoint:options.target,target=raw?(raw.x<WATER_BOUNDS.minX?DOCK.mooring:raw):null;
+    const route=target?[{x:state.player.x,z:state.player.z},{...target}]:[];
+    if(target){const a=project(state.player),b=project(target);ctx.strokeStyle='#ffe0a1';ctx.lineWidth=2;ctx.beginPath();ctx.moveTo(a.x,a.y);ctx.lineTo(b.x,b.y);ctx.stroke();ctx.fillStyle='#ffe0a1';ctx.beginPath();ctx.arc(b.x,b.y,5,0,Math.PI*2);ctx.fill();}
+    const dock=project(DOCK.mooring);ctx.fillStyle='#dfc58e';ctx.fillRect(dock.x-4,dock.y-4,8,8);ctx.font='9px Arial';ctx.fillText('PRZYSTAŃ',dock.x+8,dock.y+3);
+    for(const member of others)if(member.pose.x>=WATER_BOUNDS.minX&&!member.pose.interior&&!member.pose.homeId)teammate(ctx,project(member.pose),member);
+    arrow(ctx,project(state.player),state.player.heading);ctx.restore();return{remotePlayers:others.length,route};
   }
   ctx.fillStyle = '#1b3239'; ctx.fillRect(0, 0, 224, 200); ctx.fillStyle = '#417d8b'; ctx.fillRect(201, 0, 23, 200); ctx.fillStyle = '#b39f76'; ctx.fillRect(196, 0, 7, 200);
   ctx.strokeStyle = '#6b8585'; ctx.lineWidth = 8;
