@@ -1,6 +1,7 @@
 import { expect, test, type Page } from '@playwright/test';
 import type { GameState } from '../src/model';
 import type { PokerState } from '../src/poker-model';
+import type { CasinoGamesSnapshot } from '../src/casino-games';
 
 type Snapshot = {
   state: GameState;
@@ -9,6 +10,7 @@ type Snapshot = {
   casino: { pokerOpen: boolean; poker: PokerState | null; reserve: number };
   camera: { yaw: number; pitch: number; zoom: number; locked: boolean };
   rendering: { view: 'city' | 'casino' | 'poker'; frames: number; calls: number };
+  expansion: {casinoOpen:boolean;casinoStation:string|null;casinoGames:CasinoGamesSnapshot};
 };
 
 async function snapshot(page: Page): Promise<Snapshot> {
@@ -199,4 +201,43 @@ test('odświeżenie stołu zwraca niewykorzystane żetony dokładnie raz', async
   await page.locator('#start-game').click();
   expect((await snapshot(page)).state.money).toBe(expectedWallet);
   expect((await snapshot(page)).casino.reserve).toBe(0);
+});
+
+test('blackjack i ruletka działają przy osobnych stołach w widocznym kasynie',async({page},testInfo)=>{
+ test.setTimeout(120000);
+ const errors:string[]=[];page.on('pageerror',error=>errors.push(error.message));
+ await page.goto('./');await expect(page.locator('#world canvas')).toBeVisible();await page.locator('#start-game').click();
+ await page.keyboard.press('e');await expect.poll(async()=>(await snapshot(page)).state.player.mode).toBe('foot');
+ await walkUntil(page,'s','z',75,true);await walkUntil(page,'d','x',18.5,true);await walkUntil(page,'w','z',74.5,false);
+ await page.keyboard.press('e');await expect.poll(async()=>(await snapshot(page)).state.interior).toBe('casino');
+ // Normal walking from the entrance reaches the left-hand blackjack station.
+ await walkUntil(page,'a','x',-6.8,false);await walkUntil(page,'w','z',3.2,false);await page.keyboard.press('e');
+ await expect(page.locator('#casino-games-dialog')).toBeVisible();await expect(page.locator('#casino-games-title')).toHaveText(/BLACKJACK/);
+ await expectCasinoView(page,'casino');
+ await page.locator('#casino-bet').fill('100');const before=(await snapshot(page)).state.money;
+ await page.locator('#blackjack-deal').click();
+ await expect.poll(async()=>(await snapshot(page)).expansion.casinoGames.version).toBeGreaterThan(0);
+ let hand=(await snapshot(page)).expansion.casinoGames.blackjack;
+ if(hand.status==='playing'){
+  expect((await snapshot(page)).state.money).toBe(before-100);expect(hand.dealer[1].rank).toBe(0);
+  await page.locator('#blackjack-stand').click();
+ }
+ await expect.poll(async()=>(await snapshot(page)).expansion.casinoGames.blackjack.status).toBe('settled');
+ hand=(await snapshot(page)).expansion.casinoGames.blackjack;
+ expect((await snapshot(page)).state.money).toBe(before-100+hand.payout);expect(hand.dealer.every(card=>card.rank>0)).toBe(true);
+ await page.screenshot({path:testInfo.outputPath('blackjack-casino.png'),fullPage:true});
+ await page.locator('#casino-games-close').click();await expect.poll(async()=>(await snapshot(page)).paused).toBe(false);
+ // Cross the open south side, clear of the physical poker table collider.
+ await walkUntil(page,'d','x',6.8,true);await page.keyboard.press('e');
+ await expect(page.locator('#casino-games-title')).toHaveText(/RULETKA/);
+ await page.locator('#casino-bet').fill('20');await page.locator('#roulette-choice').selectOption('straight');await page.locator('#roulette-number').fill('0');
+ const prior=(await snapshot(page)).state.money,version=(await snapshot(page)).expansion.casinoGames.version;
+ await page.locator('#roulette-spin').click();await expect.poll(async()=>(await snapshot(page)).expansion.casinoGames.version).toBeGreaterThan(version);
+ const spin=(await snapshot(page)).expansion.casinoGames.roulette;
+ expect(spin.number).toBeGreaterThanOrEqual(0);expect(spin.number).toBeLessThanOrEqual(36);expect((await snapshot(page)).state.money).toBe(prior-20+spin.payout);expect(spin.payout).toBe(spin.number===0?720:0);
+ await page.setViewportSize({width:390,height:844});await expect(page.locator('#roulette-spin')).toBeInViewport();
+ expect(await page.locator('.casino-games-panel').evaluate(element=>element.scrollWidth<=element.clientWidth)).toBe(true);
+ await page.screenshot({path:testInfo.outputPath('roulette-mobile.png'),fullPage:true});
+ await page.keyboard.press('Escape');await expect(page.locator('#casino-games-dialog')).toHaveCount(0);await expect.poll(async()=>(await snapshot(page)).paused).toBe(false);
+ expect(errors).toEqual([]);
 });

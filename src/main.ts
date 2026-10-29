@@ -18,9 +18,11 @@ import { cityEventAt, getCityEnvironment } from './city-life';
 import './crew.css';
 import './mobile-hud.css';
 import './expansion.css';
+import { CityExpansion } from './expansion-controller';
 
 const $=<T extends HTMLElement=HTMLElement>(selector:string)=>document.querySelector<T>(selector)!;
 const SAVE_KEY='neon-coast-profile-v1';
+let expansion:CityExpansion|undefined,loadedCareer:unknown;
 let muted=true, cameraMode=0, profileMoney=1250, recordWins=0, bestRace:number|null=null;
 let saveAvailable=true;
 let casinoReserve=0,escrowOpen=false,casinoNavigation=false,recoveredCasino=0;
@@ -32,7 +34,7 @@ let soloGarage=createGarage(),garageNavigation=false,panelWasPaused=false,cityCl
 const soloCityClaims=new Set<string>();
 try {
  const raw=localStorage.getItem(SAVE_KEY);
- if(raw){const data=JSON.parse(raw);if(typeof data.muted==='boolean')muted=data.muted;if(Number.isFinite(data.money)&&data.money>=0&&data.money<1e8)profileMoney=data.money;if(Number.isSafeInteger(data.wins)&&data.wins>=0)recordWins=data.wins;if(typeof data.bestRace==='number'&&data.bestRace>0)bestRace=data.bestRace;if(Number.isSafeInteger(data.pokerReserve)&&data.pokerReserve>=0&&data.pokerReserve<1e8)recoveredCasino=data.pokerReserve;soloGarage=parseGarage(data.garage);}
+  if(raw){const data=JSON.parse(raw);if(typeof data.muted==='boolean')muted=data.muted;if(Number.isFinite(data.money)&&data.money>=0&&data.money<1e8)profileMoney=data.money;if(Number.isSafeInteger(data.wins)&&data.wins>=0)recordWins=data.wins;if(typeof data.bestRace==='number'&&data.bestRace>0)bestRace=data.bestRace;if(Number.isSafeInteger(data.pokerReserve)&&data.pokerReserve>=0&&data.pokerReserve<1e8)recoveredCasino=data.pokerReserve;soloGarage=parseGarage(data.garage);loadedCareer=data.career;}
 }catch{saveAvailable=false;}
 let state=createGame();state.money=profileMoney+recoveredCasino;state.missionsWon=recordWins;state.bestRace=bestRace;applyGarage(state,soloGarage);
 const held=new Set<string>();
@@ -72,13 +74,22 @@ function panelOpen(){panelWasPaused=paused;paused=true;held.clear();pulse={inter
 function panelClose(){paused=panelWasPaused;held.clear();oldFrame=performance.now();}
 const garageUI=new GarageUI($('#garage-host'),{
  getGarage:()=>onlineState.snapshot?.garage??soloGarage,getWallet:()=>state.money,onAction:handleGarageAction,isOnline:()=>onlineState.status==='online',
+ getReputation:()=>expansion?.career.reputation??0,
  onOpen:panelOpen,onClose:panelClose,onMessage:notify,
 });
 const activitiesUI=new ActivitiesUI($('#activities-host'),room,{
  onOpen:panelOpen,onClose:panelClose,onGarageRoute:routeGarage,onStartCrew:startCrewChallenge,onMessage:notify,
+ onCareer:()=>expansion?.openCareer(),onCityEvents:()=>expansion?.openEvents(),onCasinoGames:()=>expansion?.openCasino(),
 });
-function nearGarage(){return !state.interior&&!state.player.passengerOf&&Math.hypot(state.player.x-GARAGE_LOCATION.x,state.player.z-GARAGE_LOCATION.z)<=(state.player.mode==='drive'?6:3);}
-function routeGarage(){garageNavigation=true;casinoNavigation=false;notify('GPS: MOD SHOP. Podejdź do wejścia lub zatrzymaj własne auto i naciśnij E.');updateHUD();}
+expansion=new CityExpansion({
+ getState:()=>state,getRoom:()=>onlineState,session:room,view,getGarage:()=>onlineState.snapshot?.garage??soloGarage,
+ selectCar:id=>{if(!onlineState.snapshot){soloGarage.selected=id;applyGarage(state,soloGarage);}},getPose:currentPose,getTime:worldSeconds,getPaused:()=>paused,getStarted:()=>started,
+ onOpen:panelOpen,onClose:panelClose,onMessage:notify,onSave:persist,
+ onRoute:()=>{casinoNavigation=false;garageNavigation=false;eventNavigationId='';},onPlanning:()=>activitiesUI.open(),
+ onInterior:()=>{held.clear();pulse={interact:false,nextMission:false,reset:false};cameraMode=0;orbit.setMode(0,state.player.heading);},
+},loadedCareer);
+function nearGarage(){return !expansion?.homeId&&!state.interior&&!state.player.passengerOf&&Math.hypot(state.player.x-GARAGE_LOCATION.x,state.player.z-GARAGE_LOCATION.z)<=(state.player.mode==='drive'?6:3);}
+function routeGarage(){expansion?.clearRoute();garageNavigation=true;casinoNavigation=false;notify('GPS: MOD SHOP. Podejdź do wejścia lub zatrzymaj własne auto i naciśnij E.');updateHUD();}
 function openGarage(){
  if(!nearGarage()){routeGarage();return;}
  if(Math.abs(activeVehicle(state)?.speed??0)>1.5){notify('Zatrzymaj auto przed wjazdem do warsztatu.');return;}
@@ -93,8 +104,9 @@ function deliverSelectedCar(){
 }
 function handleGarageAction(action:GarageAction){
  if(!nearGarage()){garageUI.report('Podejdź do warsztatu, aby zmienić samochód.');return;}
+ if(action.type==='select'&&expansion?.career.storedCars[action.car]){garageUI.report('Odbierz ten model z parkingu przy mieszkaniu, zanim go wybierzesz.');return;}
  if(onlineState.status==='online'){room.garage(action);return;}
- const result=garageAction(soloGarage,state.money,action);
+ const result=garageAction(soloGarage,state.money,action,expansion?.career.reputation??0);
  if(!result.ok){garageUI.report(result.reason);return;}
  const changed=result.garage.selected!==soloGarage.selected;
  soloGarage=result.garage;state.money=result.wallet;applyGarage(state,soloGarage);if(changed)deliverSelectedCar();
@@ -102,7 +114,7 @@ function handleGarageAction(action:GarageAction){
 }
 function currentPose():OnlinePose {
  const car=activeVehicle(state);
- return {x:state.player.x,z:state.player.z,heading:state.player.heading,mode:state.player.mode,interior:state.interior,seated:poker.onlineMode&&poker.active,passengerOf:state.player.passengerOf??null,vehicle:car?{id:car.id,kind:car.kind,x:car.x,z:car.z,heading:car.heading,color:car.color,speed:car.speed,health:car.health,tuning:car.tuning,label:car.label}:null};
+ return {x:state.player.x,z:state.player.z,heading:state.player.heading,mode:state.player.mode,interior:state.interior,homeId:expansion?.homeId??null,seated:poker.onlineMode&&poker.active,passengerOf:state.player.passengerOf??null,vehicle:car?{id:car.id,kind:car.kind,x:car.x,z:car.z,heading:car.heading,color:car.color,speed:car.speed,health:car.health,tuning:car.tuning,label:car.label}:null};
 }
 function handleOnlineState(next:MultiplayerState) {
  const previous=onlineState;onlineState=next;
@@ -121,6 +133,7 @@ function handleOnlineState(next:MultiplayerState) {
   applyGarage(state,snapshot.garage);
   if(previous.snapshot?.garage.selected&&previous.snapshot.garage.selected!==snapshot.garage.selected)deliverSelectedCar();
   const self=snapshot.members.find(member=>member.id===snapshot.youId)!;
+  if(self.pose.seated&&snapshot.tournament.status==='playing'&&snapshot.tournament.participants.some(person=>person.id===snapshot.youId&&person.status==='playing'))Object.assign(state.player,{x:self.pose.x,z:self.pose.z,heading:self.pose.heading,mode:'foot',vehicleId:null});
   if(self.pose.passengerOf){Object.assign(state.player,{x:self.pose.x,z:self.pose.z,heading:self.pose.heading,mode:'foot',vehicleId:null,passengerOf:self.pose.passengerOf});}
   else if(state.player.passengerOf){Object.assign(state.player,{x:self.pose.x,z:self.pose.z,heading:self.pose.heading,mode:'foot',vehicleId:null,passengerOf:null});}
   const race=snapshot.jobs.race;
@@ -128,7 +141,7 @@ function handleOnlineState(next:MultiplayerState) {
   const oldJobs=previous.snapshot?.jobs;
   if(snapshot.jobs.active&&oldJobs?.active!==snapshot.jobs.active){garageNavigation=false;casinoNavigation=false;eventNavigationId='';notify(snapshot.jobs.active==='heist'?'Skok na Sapphire: sprawdź swoją rolę w panelu aktywności.':'Wyścig uliczny: podjedź do startu i zgłoś gotowość.');}
   if(snapshot.jobs.heist.eligible&&snapshot.jobs.heist.status==='escape'&&oldJobs?.heist.status!=='escape'){state.wanted=3;state.heat=0;notify('Alarm! Patrol ruszył. Dotrzyjcie razem do kryjówki.');audio.effect('info');}
-  if(oldJobs&&snapshot.jobs.heist.status==='completed'&&oldJobs.heist.status!=='completed'){if(snapshot.jobs.heist.eligible){state.wanted=0;state.heat=0;state.police=[];state.arrestProgress=0;audio.effect('reward');}notify(snapshot.jobs.heist.eligible?'Napad zakończony! +$800 do portfela online.':'Ekipa dotarła do kryjówki.');}
+  if(oldJobs&&snapshot.jobs.heist.status==='completed'&&oldJobs.heist.status!=='completed'){if(snapshot.jobs.heist.eligible){state.wanted=0;state.heat=0;state.police=[];state.arrestProgress=0;audio.effect('reward');}notify(snapshot.jobs.heist.eligible?`Napad zakończony! +$${snapshot.jobs.heist.reward} do portfela online.`:'Ekipa dotarła do kryjówki.');}
   const placing=race.participants.find(person=>person.id===snapshot.youId),oldPlacing=oldJobs?.race.participants.find(person=>person.id===snapshot.youId);
   if(placing?.status==='finished'&&oldPlacing?.status!=='finished')notify(`Meta! Miejsce ${placing.rank}. Nagroda $${placing.prize}. Wyniki w panelu aktywności.`);
   garageUI.refresh(next.message&&next.message!==previous.message?next.message:undefined);
@@ -167,6 +180,7 @@ function handleOnlineState(next:MultiplayerState) {
  }
  if(next.status==='error'&&previous.message!==next.message)notify(next.message);
  if(next.status==='online'&&next.message&&next.message!==previous.message&&!poker.active)notify(next.message);
+ expansion?.roomChanged(next,previous);
  updateHUD();
 }
 function updateOnlineHUD(){
@@ -177,14 +191,14 @@ function updateOnlineHUD(){
  $('#money').previousElementSibling!.textContent=snapshot?'PORTFEL ONLINE':'GOTÓWKA';
  $('#crew-start').classList.add('hidden');$('#mission-status').classList.remove('crew-timer','crew-timer-low');
  $('#crew-legend').classList.toggle('hidden',!snapshot);
- const signature=snapshot?JSON.stringify(snapshot.members.map(member=>[member.id,member.name,member.slot,member.pose.interior])):'';
+ const signature=snapshot?JSON.stringify(snapshot.members.map(member=>[member.id,member.name,member.slot,member.pose.interior,member.pose.homeId])):'';
  if(signature!==crewLegendSignature){
   crewLegendSignature=signature;
   $('#crew-legend').replaceChildren(...(snapshot?.members.map(member=>{
    const chip=document.createElement('span');chip.className='crew-member';
    const dot=document.createElement('b');dot.textContent=String(member.slot+1);dot.style.background=member.id===snapshot.youId?'#f7f1dd':TEAM_MAP_COLORS[member.slot];
    const name=document.createElement('span');name.textContent=member.id===snapshot.youId?'Ty':member.name;
-   chip.title=`${member.name} · ${member.pose.interior?'w kasynie':'w mieście'}`;chip.append(dot,name);return chip;
+   chip.title=`${member.name} · ${member.pose.homeId?'w mieszkaniu / bazie':member.pose.interior?'w kasynie':'w mieście'}`;chip.append(dot,name);return chip;
   })??[]));
  }
  if(!snapshot)return;
@@ -223,13 +237,16 @@ function navigationTarget():Point|undefined {
  const jobs=onlineState.snapshot?.jobs;
  if(jobs?.active==='heist')return jobs.heist.target??undefined;
  if(jobs?.active==='race')return jobs.race.target??undefined;
+ const extra=expansion?.target;if(extra)return extra;
  const challenge=onlineState.snapshot?.challenge;
  return challenge?.status==='active'?challenge.target??undefined:undefined;
 }
 function interactInput(){
  if(onlineState.snapshot?.jobs.race.status==='countdown'){notify('Poczekaj na sygnał startu.');return;}
  if(state.player.passengerOf){room.exitRide();return;}
+ if(expansion?.interact())return;
  if(nearGarage()){openGarage();return;}
+ if(state.player.mode==='foot'&&nearestVehicle(state)?.id==='stratus'&&expansion?.career.storedCars[(onlineState.snapshot?.garage??soloGarage).selected]){notify('To auto jest zabezpieczone na parkingu. Odbierz je w panelu L przy mieszkaniu.');return;}
  if(onlineState.snapshot&&state.player.mode==='foot'&&!casinoAction(state)){
   const vehicle=nearestVehicle(state);
   const owner=vehicle?.id!=='stratus'&&onlineState.snapshot.members.find(member=>member.id!==onlineState.snapshot!.youId&&member.pose.vehicle?.id===vehicle?.id&&member.pose.mode==='drive');
@@ -238,12 +255,17 @@ function interactInput(){
  pulse.interact=true;
 }
 function nearestRide(){
- const snapshot=onlineState.snapshot;if(!snapshot||state.interior||state.player.mode!=='foot'||state.player.passengerOf)return;
+ const snapshot=onlineState.snapshot;if(!snapshot||expansion?.homeId||state.interior||state.player.mode!=='foot'||state.player.passengerOf)return;
  return snapshot.members.filter(member=>member.id!==snapshot.youId&&member.pose.mode==='drive'&&member.pose.vehicle&&Math.abs(member.pose.vehicle.speed)<=3&&Math.hypot(member.pose.x-state.player.x,member.pose.z-state.player.z)<=5.5).sort((a,b)=>Math.hypot(a.pose.x-state.player.x,a.pose.z-state.player.z)-Math.hypot(b.pose.x-state.player.x,b.pose.z-state.player.z))[0];
 }
 function rideInput(){
  if(state.player.passengerOf){room.exitRide();return;}
  const driver=nearestRide();if(driver)room.ride(driver.id);else notify('Podejdź pieszo do zatrzymanego samochodu znajomego i naciśnij F.');
+}
+function requestRecovery(){
+ if(expansion?.homeId)return;
+ if(expansion?.career.storedCars[(onlineState.snapshot?.garage??soloGarage).selected]){notify('Własne auto jest zabezpieczone przy mieszkaniu. Odbierz je przez panel L.');return;}
+ pulse.reset=true;
 }
 function worldSeconds(){return onlineState.status==='online'?networkClock+Math.max(0,performance.now()-networkReceivedAt)/1000:state.time;}
 function updateJobsHUD(){
@@ -252,12 +274,12 @@ function updateJobsHUD(){
  if(!jobs?.active||state.interior)return;
  const heist=jobs.active==='heist',job=heist?jobs.heist:jobs.race;
  const seconds=Math.ceil(job.remainingMs/1000),target=job.target;
- $('#mission-label').textContent=heist?'SKOK NA SAPPHIRE':'WYŚCIG ULICZNY';
+ $('#mission-label').textContent=heist?(jobs.heist.variant==='bank'?'NORTHSIDE BANK':'SKOK NA SAPPHIRE'):'WYŚCIG ULICZNY';
  $('#mission-status').textContent=jobs.race.status==='countdown'&&!heist?`${Math.ceil(jobs.race.countdownMs/1000)} · START`:`${Math.floor(seconds/60)}:${String(seconds%60).padStart(2,'0')}`;
- $('#mission-title').textContent=heist?(jobs.heist.status==='gather'?'Przygotujcie skok':jobs.heist.status==='hack'?'Otwórzcie sejf':'Alarm! Do kryjówki!'):(jobs.race.status==='lobby'?'Zbiórka na starcie':jobs.race.status==='countdown'?'Na miejsca!':'Gaz do mety');
+ $('#mission-title').textContent=heist?(jobs.heist.status==='gather'?'Przygotujcie skok':jobs.heist.status==='hack'?'Otwórzcie sejf':jobs.heist.status==='recon'?'Rozpoznajcie bank':jobs.heist.status==='alarm'?'Wyłączcie alarm':jobs.heist.status==='breach'?'Otwórzcie skarbiec':'Alarm! Do kryjówki!'):(jobs.race.status==='lobby'?'Zbiórka na starcie':jobs.race.status==='countdown'?'Na miejsca!':'Gaz do mety');
  $('#mission-instruction').textContent=job.message;
- $('#mission-distance').textContent=target?`${Math.round(Math.hypot(target.x-state.player.x,target.z-state.player.z))} m · ${heist?({driver:'Kierowca',hacker:'Haker',lookout:'Obserwator',spectator:'Widz'}[jobs.heist.role]):'Własne auto'}`:'Wyniki w panelu aktywności';
- $('#mission-reward').textContent=heist?'+$800 / osoba':'$500 / $300 / $150';
+ $('#mission-distance').textContent=target?`${Math.round(Math.hypot(target.x-state.player.x,target.z-state.player.z))} m · ${heist?({driver:'Kierowca',hacker:'Haker',lookout:'Obserwator',breacher:'Włamywacz',spectator:'Widz'}[jobs.heist.role]):'Własne auto'}`:'Wyniki w panelu aktywności';
+ $('#mission-reward').textContent=heist?`+$${jobs.heist.reward} / osoba`:'$500 / $300 / $150';
  $('#mission-progress').classList.remove('hidden');
  const participant=jobs.race.participants.find(person=>person.id===onlineState.snapshot!.youId);
  const progress=heist?(jobs.heist.status==='gather'?0:jobs.heist.status==='hack'?1:2):(participant?.checkpoint??0),total=heist?3:4;
@@ -282,7 +304,7 @@ function openPoker(){if(state.interior!=='casino'||poker.active)return;held.clea
 function updateMouseHint(){ $('#mouse-hint').classList.toggle('hidden',mouse.locked);view.renderer.domElement.classList.toggle('mouse-locked',mouse.locked); }
 function fatal(message:string){const box=document.createElement('div');box.className='fatal';box.setAttribute('role','alert');box.textContent=message;const button=document.createElement('button');button.className='primary';button.textContent='Odśwież stronę';button.onclick=()=>location.reload();box.append(button);document.body.append(box);}
 function notify(message:string){clearTimeout(notificationTimer);$('#toast').textContent=message;$('#toast').classList.add('show');notificationTimer=setTimeout(()=>$('#toast').classList.remove('show'),4200);}
-function persist(){const saved=soloState??state;try{localStorage.setItem(SAVE_KEY,JSON.stringify({money:saved.money,wins:saved.missionsWon,bestRace:saved.bestRace,muted,pokerReserve:casinoReserve,garage:soloGarage}));saveAvailable=true;}catch{saveAvailable=false;}}
+function persist(){const saved=soloState??state;try{localStorage.setItem(SAVE_KEY,JSON.stringify({money:saved.money,wins:saved.missionsWon,bestRace:saved.bestRace,muted,pokerReserve:casinoReserve,garage:soloGarage,career:expansion?.savedCareer??loadedCareer}));saveAvailable=true;}catch{saveAvailable=false;}}
 async function toggleSound(){muted=!muted;await audio.toggle(!muted);if(!muted&&audio.muted){muted=true;notify('Audio jest niedostępne. Gra działa bez dźwięku.');}persist();updateHUD();}
 function district(p:Point):string{if(state.interior==='casino')return CASINO.name;if(p.x>60)return'Ocean Drive';if(p.z<-40)return'North Heights';if(p.x<-40)return'Little Havana';if(p.z>40)return'Southside';return'Downtown';}
 function updateCasinoHUD(){
@@ -294,7 +316,7 @@ function updateCasinoHUD(){
  $('#map-hint').textContent=inside?'♠ Stół · ↳ Wyjście':casinoNavigation?'♠ Trasa do kasyna':'◈ Cel zlecenia · ♠ Kasyno';
  if(inside){
   $('#mission-label').textContent='SAPPHIRE CLUB · KASYNO';$('#mission-status').textContent='OTWARTE';
-  $('#mission-title').textContent='Wieczór przy pokerze';$('#mission-instruction').textContent='Podejdź do stołu i naciśnij E. Przy drzwiach możesz wrócić do miasta.';
+  $('#mission-title').textContent='Sala gier Sapphire';$('#mission-instruction').textContent='Poker pośrodku, blackjack po lewej, ruletka po prawej. E przy stanowisku; turniej przy lewej ścianie.';
   $('#mission-distance').textContent='Blindy $5 / $10';$('#mission-reward').textContent='Texas Hold’em';
   $('#mission-progress').classList.add('hidden');$('#mission-next').classList.add('hidden');$('#escape').classList.add('hidden');
   $('#car-name').textContent='SAPPHIRE CLUB · SALA GIER';$('#clock').textContent='♠ SAPPHIRE CLUB';
@@ -312,9 +334,11 @@ function updateHUD(){const passenger=Boolean(state.player.passengerOf),car=activ
  $('#car-name').textContent=state.player.mode==='foot'?'SWOBODNY RUCH · PIESZO':car?.label??(car?.kind==='sport'?'STRATUS XS · SPORT':'SENTINEL · SEDAN');const health=state.player.mode==='drive'||passenger?(car?.health??100):state.player.health;$('#health-label').textContent=state.player.mode==='drive'||passenger?'STAN AUTA':'ZDROWIE';$('#health-value').textContent=`${Math.round(health)}%`;$('#health-bar').style.width=`${health}%`;
  document.querySelectorAll('#rpm i').forEach((el,i)=>el.classList.toggle('filled',i<Math.max(1,Math.ceil(speed/14))));$('#sound').setAttribute('aria-pressed',String(!muted));$('#sound').textContent=muted?'♪':'♫';$('#sound').title=muted?'Włącz dźwięk':'Wycisz dźwięk';$('#sound').setAttribute('aria-label',$('#sound').title);
  updateCasinoHUD();updateOnlineHUD();updateJobsHUD();updateCityEvent();const environment=getCityEnvironment(worldSeconds());if(state.interior!=='casino')$('#clock').textContent=`${environment.clock} · ${environment.period} · ${environment.weather}`;if(garageNavigation&&!state.interior)$('#map-hint').textContent='⚙ Trasa do garażu';if(nearGarage()){$('#interaction').classList.remove('hidden');$('#interaction-text').textContent='Otwórz garaż i tuning';}if(state.player.passengerOf){$('#interaction').classList.remove('hidden');$('#interaction-text').textContent='Jedziesz jako pasażer · E / F — wysiądź po zatrzymaniu';$('#car-name').textContent='WSPÓLNY PRZEJAZD · PASAŻER';}else if(nearestRide()){$('#interaction').classList.remove('hidden');$('#interaction-text').textContent='F — wsiądź jako pasażer znajomego';}
+ expansion?.updateHUD();
 }
 const map=$<HTMLCanvasElement>('#minimap').getContext('2d')!;
 function drawMap(){
+ if(expansion?.drawHomeMap(map)){mapNavigation={remotePlayers:0,route:[]};return;}
  const snapshot=onlineState.status==='online'?onlineState.snapshot:null;
  const crew=Boolean((snapshot?.challenge.status==='active'||snapshot?.jobs.active)&&!casinoNavigation&&!garageNavigation);
  const event=cityEventAt(worldSeconds()),claimed=snapshot?snapshot.cityEventClaimed:Boolean(event&&soloCityClaims.has(event.id));
@@ -325,16 +349,17 @@ function drawMap(){
   cityEvent:claimed?null:event,
  });
 }
-function showPause(help=false){held.clear();pulse={interact:false,nextMission:false,reset:false};paused=true;mouse.release();showingHelp=help;audio.update(0,false);$('#overlay-root').innerHTML=help?`<section class="overlay"><div class="dialog" role="dialog" aria-modal="true" aria-label="Sterowanie"><span class="eyebrow">NEON COAST · PRZEWODNIK</span><h2>MIASTO BEZ POŚPIECHU.</h2><p>Wykonuj zlecenia lub po prostu odkrywaj wybrzeże. Złoty znacznik i minimapa wskazują cel. Możesz wysiąść i przejąć zaparkowane auto.</p><ul class="keys-list"><li>Pieszo — ruch względem kamery <kbd>W S A D / STRZAŁKI</kbd></li><li>Samochód — gaz / hamulec / skręt <kbd>W S A D</kbd></li><li>Rozglądanie <kbd>MYSZ · KLIKNIJ OBRAZ</kbd></li><li>Obrót bez blokady kursora <kbd>PRZYTRZYMAJ PPM</kbd></li><li>Przybliżanie / oddalanie <kbd>KÓŁKO MYSZY</kbd></li><li>Hamulec ręczny <kbd>SPACJA</kbd></li><li>Nitro / sprint pieszo <kbd>SHIFT</kbd></li><li>Wsiądź / wysiądź (po zwolnieniu) <kbd>E</kbd></li><li>Aktywności, napad i wyścig <kbd>J</kbd></li><li>Garaż / trasa do warsztatu <kbd>G</kbd></li><li>Pasażer znajomego / wyjście <kbd>F</kbd></li><li>Zmień kamerę <kbd>C</kbd></li><li>Zlecenie solo / start przerzutu ekipy <kbd>M</kbd></li><li>Wróć na drogę / naprawa <kbd>R</kbd></li><li>Kasyno — ikona ♠ na minimapie <kbd>E PRZY DRZWIACH / STOLE</kbd></li><li>Pauza <kbd>P / ESC</kbd></li></ul><div class="buttons"><button class="primary" id="resume">ROZUMIEM →</button></div><small>Kolizje i przejmowanie cudzych aut przyciągają policję. Zgub pościg, oddalając się od radiowozów. Prototyp obejmuje swobodną jazdę, eksplorację i trzy rodzaje zleceń.</small></div></section>`:`<section class="overlay"><div class="dialog" role="dialog" aria-modal="true" aria-label="Pauza"><span class="eyebrow">NEON COAST · PAUZA</span><h2>MIASTO POCZEKA.</h2><p>${onlineState.status==='online'?'Pauza zatrzymuje tylko twoją postać. Ekipa i zegar przerzutu grają dalej.<br>':''}Gotówka: $${state.money.toLocaleString('pl-PL')}<br>Ukończone zlecenia: ${state.missionsWon}<br>${state.bestRace?`Najlepszy wyścig: ${state.bestRace.toFixed(1)} s`:'Twój pierwszy rekord wciąż czeka.'}</p><div class="buttons"><button class="primary" id="resume">WRÓĆ NA ULICE →</button><button class="secondary" id="restart">WRÓĆ NA DROGĘ</button><button class="secondary" id="pause-help">STEROWANIE</button></div><small>${saveAvailable?'Gotówka, rekordy i ustawienia zapisują się lokalnie.':'Zapis w tej przeglądarce jest niedostępny.'} Po odświeżeniu zaczynasz nową sesję miasta; pozycja i etap misji nie są zapisywane.</small></div></section>`;
- $('#resume').onclick=resume;$('#restart')?.addEventListener('click',()=>{resume();pulse.reset=true;});$('#pause-help')?.addEventListener('click',()=>showPause(true));$('#resume').focus();persist();}
+function showPause(help=false){held.clear();pulse={interact:false,nextMission:false,reset:false};paused=true;mouse.release();showingHelp=help;audio.update(0,false);$('#overlay-root').innerHTML=help?`<section class="overlay"><div class="dialog" role="dialog" aria-modal="true" aria-label="Sterowanie"><span class="eyebrow">NEON COAST · PRZEWODNIK</span><h2>MIASTO BEZ POŚPIECHU.</h2><p>Wykonuj zlecenia lub po prostu odkrywaj wybrzeże. Złoty znacznik i minimapa wskazują cel. Możesz wysiąść i przejąć zaparkowane auto.</p><ul class="keys-list"><li>Pieszo — ruch względem kamery <kbd>W S A D / STRZAŁKI</kbd></li><li>Samochód — gaz / hamulec / skręt <kbd>W S A D</kbd></li><li>Rozglądanie <kbd>MYSZ · KLIKNIJ OBRAZ</kbd></li><li>Obrót bez blokady kursora <kbd>PRZYTRZYMAJ PPM</kbd></li><li>Przybliżanie / oddalanie <kbd>KÓŁKO MYSZY</kbd></li><li>Hamulec ręczny <kbd>SPACJA</kbd></li><li>Nitro / sprint pieszo <kbd>SHIFT</kbd></li><li>Wsiądź / wysiądź (po zwolnieniu) <kbd>E</kbd></li><li>Aktywności, napad i wyścig <kbd>J</kbd></li><li>Kontakty, reputacja i mieszkania <kbd>L</kbd></li><li>Wydarzenia uliczne i dołączanie <kbd>B</kbd></li><li>Blackjack, ruletka i turniej przy stanowisku <kbd>K / E</kbd></li><li>Garaż / trasa do warsztatu <kbd>G</kbd></li><li>Pasażer znajomego / wyjście <kbd>F</kbd></li><li>Zmień kamerę <kbd>C</kbd></li><li>Zlecenie solo / start przerzutu ekipy <kbd>M</kbd></li><li>Wróć na drogę / naprawa <kbd>R</kbd></li><li>Kasyno — ikona ♠ na minimapie <kbd>E PRZY DRZWIACH / STOLE</kbd></li><li>Pauza <kbd>P / ESC</kbd></li></ul><div class="buttons"><button class="primary" id="resume">ROZUMIEM →</button></div><small>Kolizje i przejmowanie cudzych aut przyciągają policję. Zgub pościg, oddalając się od radiowozów. Prototyp obejmuje swobodną jazdę, eksplorację i trzy rodzaje zleceń.</small></div></section>`:`<section class="overlay"><div class="dialog" role="dialog" aria-modal="true" aria-label="Pauza"><span class="eyebrow">NEON COAST · PAUZA</span><h2>MIASTO POCZEKA.</h2><p>${onlineState.status==='online'?'Pauza zatrzymuje tylko twoją postać. Ekipa i zegar przerzutu grają dalej.<br>':''}Gotówka: $${state.money.toLocaleString('pl-PL')}<br>Ukończone zlecenia: ${state.missionsWon}<br>${state.bestRace?`Najlepszy wyścig: ${state.bestRace.toFixed(1)} s`:'Twój pierwszy rekord wciąż czeka.'}</p><div class="buttons"><button class="primary" id="resume">WRÓĆ NA ULICE →</button><button class="secondary" id="restart">WRÓĆ NA DROGĘ</button><button class="secondary" id="pause-help">STEROWANIE</button></div><small>${saveAvailable?'Gotówka, rekordy i ustawienia zapisują się lokalnie.':'Zapis w tej przeglądarce jest niedostępny.'} Po odświeżeniu zaczynasz nową sesję miasta; pozycja i etap misji nie są zapisywane.</small></div></section>`;
+ $('#resume').onclick=resume;$('#restart')?.addEventListener('click',()=>{resume();requestRecovery();});$('#pause-help')?.addEventListener('click',()=>showPause(true));$('#resume').focus();persist();}
 function resume(){paused=false;showingHelp=false;$('#overlay-root').innerHTML='';held.clear();oldFrame=performance.now();}
 function start(){started=true;paused=false;$('#start-menu').classList.add('hidden');$('#hud').classList.remove('hidden');oldFrame=performance.now();if(!muted)void audio.toggle(true);if(recoveredCasino>0){notify(`Zwrócono $${recoveredCasino} niewykorzystanych żetonów ze stołu.`);recoveredCasino=0;}else if(onlineState.snapshot)notify(`Pokój ${onlineState.snapshot.code}. Zaproś znajomych i spotkajcie się w kasynie.`);else notify('Nova: „Mam dla ciebie małą przesyłkę. Kieruj się do złotego znacznika.”');persist();}
 function camera(){cameraMode=(cameraMode+1)%3;orbit.setMode(cameraMode,state.player.heading);notify(`Kamera: ${['pościgowa','z lotu ptaka','pierwsza osoba'][cameraMode]}`);}
-function handleEvent(event:GameEvent){if(event.kind==='poker'){openPoker();return;}if(event.kind==='interior'){held.clear();pulse={interact:false,nextMission:false,reset:false};casinoNavigation=false;cameraMode=0;orbit.setMode(0,state.player.heading);updateHUD();}notify(event.text);audio.effect(event.kind==='reward'?'reward':event.kind==='damage'||event.kind==='arrest'?'damage':'info');if(event.kind==='reward'||event.kind==='arrest')persist();}
-$('#casino-nav').onclick=()=>{if(state.interior==='casino'){notify('Podejdź do stołu i naciśnij E, aby zagrać.');return;}garageNavigation=false;eventNavigationId='';casinoNavigation=!casinoNavigation;notify(casinoNavigation?'GPS: kasyno Sapphire Club. Wejście pieszo, E przy drzwiach.':'GPS: cel aktualnego zlecenia.');updateHUD();};
+function handleEvent(event:GameEvent){if(event.kind==='poker'){openPoker();return;}if(event.kind==='interior'){held.clear();pulse={interact:false,nextMission:false,reset:false};casinoNavigation=false;cameraMode=0;orbit.setMode(0,state.player.heading);updateHUD();}notify(event.text);audio.effect(event.kind==='reward'?'reward':event.kind==='damage'||event.kind==='arrest'?'damage':'info');if(event.kind==='reward')expansion?.missionReward();if(event.kind==='reward'||event.kind==='arrest')persist();}
+$('#casino-nav').onclick=()=>{if(state.interior==='casino'){notify('Podejdź do stołu i naciśnij E, aby zagrać.');return;}expansion?.clearRoute();garageNavigation=false;eventNavigationId='';casinoNavigation=!casinoNavigation;notify(casinoNavigation?'GPS: kasyno Sapphire Club. Wejście pieszo, E przy drzwiach.':'GPS: cel aktualnego zlecenia.');updateHUD();};
 $('#activities-open').onclick=()=>activitiesUI.open();$('#touch-activities').onclick=()=>activitiesUI.open();$('#touch-garage').onclick=routeGarage;$('#touch-ride').onclick=rideInput;$('#city-event-route').onclick=()=>{const event=cityEventAt(worldSeconds());if(event){eventNavigationId=event.id;garageNavigation=false;casinoNavigation=false;notify(`GPS: ${event.title}.`);}};$('#start-game').onclick=start;$('#intro-help').onclick=()=>showPause(true);$('#help').onclick=()=>showPause(true);$('#pause').onclick=()=>showPause();$('#sound').onclick=()=>{void toggleSound();};$('#mission-next').onclick=()=>{pulse.nextMission=true;};$('#crew-start').onclick=startCrewChallenge;$('#touch-enter').onclick=interactInput;$('#online').onclick=()=>onlineUI.open();$('#intro-online').onclick=()=>onlineUI.open();
 for(const button of document.querySelectorAll<HTMLButtonElement>('[data-hold]')){const key=button.dataset.hold!;button.onpointerdown=e=>{button.setPointerCapture(e.pointerId);held.add(key);e.preventDefault();};button.onpointerup=button.onpointercancel=()=>held.delete(key);}
 addEventListener('keydown',e=>{
+ if(expansion?.handleKey(e))return;
  if(garageUI.active){if(e.key==='Escape'&&!e.repeat){e.preventDefault();garageUI.handleEscape();}return;}
  if(activitiesUI.active){if(e.key==='Escape'&&!e.repeat){e.preventDefault();activitiesUI.handleEscape();}return;}
  if(onlineUI.active){if(e.key==='Escape'&&!e.repeat){e.preventDefault();onlineUI.handleEscape();}return;}
@@ -344,21 +369,25 @@ addEventListener('keydown',e=>{
  if(key==='p'||key==='escape'){if(e.repeat)return;if(paused)resume();else if(started)showPause();return;}
  if(paused){if(e.key==='Tab'){const buttons=[...$('#overlay-root').querySelectorAll<HTMLButtonElement>('button')],first=buttons[0],last=buttons.at(-1);if(e.shiftKey&&document.activeElement===first){last?.focus();e.preventDefault();}else if(!e.shiftKey&&document.activeElement===last){first?.focus();e.preventDefault();}}return;}
  if(!started)return;
- if(!e.repeat){if(key==='j'){activitiesUI.open();return;}if(key==='g'){if(nearGarage())openGarage();else routeGarage();return;}if(key==='f'){rideInput();return;}if(key==='e')interactInput();if(key==='m'){if(onlineState.status==='online')startCrewChallenge();else pulse.nextMission=true;}if(key==='r'&&!state.player.passengerOf&&onlineState.snapshot?.jobs.race.status!=='countdown')pulse.reset=true;if(key==='c')camera();if(key==='?'||key==='h')showPause(true);}
+ if(!e.repeat){if(key==='j'){activitiesUI.open();return;}if(key==='g'){if(nearGarage())openGarage();else routeGarage();return;}if(key==='f'){rideInput();return;}if(key==='e')interactInput();if(key==='m'&&!expansion?.homeId){if(onlineState.status==='online')startCrewChallenge();else pulse.nextMission=true;}if(key==='r'&&!state.player.passengerOf&&onlineState.snapshot?.jobs.race.status!=='countdown')requestRecovery();if(key==='c')camera();if(key==='?'||key==='h')showPause(true);}
  held.add(key);
 });
 addEventListener('keyup',e=>held.delete(e.key.toLowerCase()));addEventListener('blur',()=>held.clear());document.addEventListener('visibilitychange',()=>{if(document.hidden&&started&&!paused)showPause();});addEventListener('beforeunload',persist);
 function input():Input{return{throttle:held.has('w')||held.has('arrowup'),brake:held.has('s')||held.has('arrowdown'),left:held.has('a')||held.has('arrowleft'),right:held.has('d')||held.has('arrowright'),handbrake:held.has(' '),boost:held.has('shift'),sprint:held.has('shift'),interact:pulse.interact,nextMission:pulse.nextMission,reset:pulse.reset,viewHeading:orbit.yaw};}
-function frame(now:number){requestAnimationFrame(frame);const dt=Math.min((now-oldFrame)/1000,.2);oldFrame=now;
+function frame(now:number){requestAnimationFrame(frame);const dt=Math.max(0,Math.min((now-oldFrame)/1000,.2));oldFrame=now;
  if(onlineState.status==='online')synchronizeOnlineTraffic(state,networkClock+Math.max(0,now-networkReceivedAt)/1000);
  orbit.update(state.player,started&&(!paused||poker.active)?dt:0,activeVehicle(state)?.speed??0,mouse.dragging);
  const raceCountdown=onlineState.snapshot?.jobs.race.status==='countdown'&&onlineState.snapshot.jobs.race.grid;
- if(started&&!paused&&!state.player.passengerOf&&!raceCountdown){const before=state.money;const events=advanceSimulation(state,input(),dt);pulse={interact:false,nextMission:false,reset:false};events.forEach(handleEvent);if(onlineState.status==='online'&&state.money<before)room.spend(before-state.money);audio.update(activeVehicle(state)?.speed??0,state.player.mode==='drive');}
- if(state.player.passengerOf||raceCountdown)pulse={interact:false,nextMission:false,reset:false};
+ const tournamentSeated=onlineState.snapshot?.tournament.status==='playing'&&onlineState.snapshot.tournament.participants.some(person=>person.id===onlineState.snapshot!.youId&&person.status==='playing');
+ // Closing a panel resets oldFrame. A queued RAF can have an earlier timestamp;
+ // keep one-shot input until a frame can actually advance the simulation.
+ if(dt>0&&started&&!paused&&!expansion?.homeId&&!tournamentSeated&&!state.player.passengerOf&&!raceCountdown){const before=state.money;const events=advanceSimulation(state,input(),dt);pulse={interact:false,nextMission:false,reset:false};events.forEach(handleEvent);if(onlineState.status==='online'&&state.money<before)room.spend(before-state.money);audio.update(activeVehicle(state)?.speed??0,state.player.mode==='drive');}
+ expansion?.step(dt,input(),started&&!paused&&!state.player.passengerOf&&!raceCountdown);
+ if(state.player.passengerOf||raceCountdown||tournamentSeated)pulse={interact:false,nextMission:false,reset:false};
  if(onlineState.status==='online')room.updatePose(currentPose());
  if(poker.active)orbit.yaw=Math.max(-1.25,Math.min(1.25,orbit.yaw));
  view.update(state,paused&&!poker.active&&onlineState.status!=='online'?0:dt,cameraMode,orbit,navigationTarget(),Boolean((onlineState.snapshot?.challenge.status==='active'||onlineState.snapshot?.jobs.active)&&!casinoNavigation&&!garageNavigation),worldSeconds());
  hudClock+=dt;mapClock+=dt;if(hudClock>.09){updateHUD();hudClock=0;}if(mapClock>.08){drawMap();mapClock=0;}
 }
-Object.defineProperty(window,'__NEON_TEST__',{get:()=>({state:structuredClone(state),started,paused,cameraMode,garage:structuredClone(onlineState.snapshot?.garage??soloGarage),garageOpen:garageUI.active,activitiesOpen:activitiesUI.active,city:view.cityLifeSnapshot,cityClaimPending,casino:{pokerOpen:poker.active,poker:structuredClone(poker.snapshot),reserve:casinoReserve},camera:{yaw:orbit.yaw,pitch:orbit.pitch,zoom:orbit.zoom,locked:mouse.locked},online:structuredClone(onlineState),navigation:structuredClone(mapNavigation),rendering:{remotePlayers:view.remotePlayers,view:view.presentation,frames:view.renderFrames,software:view.softwareRendering,calls:view.renderer.info.render.calls,triangles:view.renderer.info.render.triangles}})});
+Object.defineProperty(window,'__NEON_TEST__',{get:()=>({state:structuredClone(state),started,paused,cameraMode,garage:structuredClone(onlineState.snapshot?.garage??soloGarage),garageOpen:garageUI.active,activitiesOpen:activitiesUI.active,expansion:expansion?.snapshot,city:view.cityLifeSnapshot,cityClaimPending,casino:{pokerOpen:poker.active,poker:structuredClone(poker.snapshot),reserve:casinoReserve},camera:{yaw:orbit.yaw,pitch:orbit.pitch,zoom:orbit.zoom,locked:mouse.locked},online:structuredClone(onlineState),navigation:structuredClone(mapNavigation),rendering:{remotePlayers:view.remotePlayers,view:view.presentation,frames:view.renderFrames,software:view.softwareRendering,calls:view.renderer.info.render.calls,triangles:view.renderer.info.render.triangles}})});
 room.subscribe(handleOnlineState);updateHUD();updateMouseHint();drawMap();if(recoveredCasino>0)persist();if(new URLSearchParams(location.search).has('room'))onlineUI.open();requestAnimationFrame(frame);

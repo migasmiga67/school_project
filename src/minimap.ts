@@ -2,6 +2,7 @@ import { CASINO } from './casino-location';
 import { BUILDINGS, ROADS, type GameState, type Point } from './model';
 import type { OnlineMember } from './multiplayer-model';
 import { GARAGE_LOCATION } from './garage';
+import { HOMES, CREW_BASE } from './career';
 
 export const TEAM_MAP_COLORS = ['#e0bb75', '#83c3d5', '#c390c0', '#8fc4a0'];
 export interface MinimapOptions {
@@ -152,6 +153,7 @@ export function renderMinimap(ctx: CanvasRenderingContext2D, state: GameState, o
   const club = mapPoint(CASINO.door); ctx.fillStyle = '#d8b6ff'; ctx.beginPath(); ctx.arc(club.x, club.y, 5.5, 0, Math.PI * 2); ctx.fill();
   ctx.fillStyle = '#36234b'; ctx.font = 'bold 10px Arial'; ctx.textAlign = 'center'; ctx.textBaseline = 'middle'; ctx.fillText('♠', club.x, club.y + .5);
   const shop=mapPoint(GARAGE_LOCATION);ctx.fillStyle='#78d7cd';ctx.fillRect(shop.x-5,shop.y-5,10,10);ctx.fillStyle='#153b3e';ctx.font='bold 9px Arial';ctx.fillText('G',shop.x,shop.y+.5);
+  for(const [id,point] of [...Object.entries(HOMES).map(([id,home])=>[id,home.door] as const),['crew',CREW_BASE.door] as const]){const p=mapPoint(point);ctx.fillStyle=id==='crew'?'#e7bd74':'#a6dccb';ctx.fillRect(p.x-4,p.y-4,8,8);ctx.fillStyle='#183c3f';ctx.font='bold 8px Arial';ctx.fillText(id==='crew'?'B':'H',p.x,p.y+.5);}
   if(options.cityEvent){const p=mapPoint(options.cityEvent.target);ctx.save();ctx.translate(p.x,p.y);ctx.rotate(Math.PI/4);ctx.fillStyle='#84dbff';ctx.fillRect(-3,-3,6,6);ctx.restore();}
   for (const car of state.vehicles) if (car.id !== state.player.vehicleId) {
     const p = mapPoint(car); ctx.fillStyle = '#d4e2d466'; ctx.fillRect(p.x - 1, p.y - 1, 2, 2);
@@ -160,7 +162,10 @@ export function renderMinimap(ctx: CanvasRenderingContext2D, state: GameState, o
     const p = mapPoint(police); ctx.fillStyle = Math.sin(time * 10) > 0 ? '#ff7b7b' : '#79bfff'; ctx.beginPath(); ctx.arc(p.x, p.y, 3, 0, Math.PI * 2); ctx.fill();
   }
   for (const member of others) {
-    if (member.pose.interior === 'casino') {
+    if (member.pose.homeId==='crew'||member.pose.homeId==='canal'||member.pose.homeId==='loft') {
+      const point=mapPoint(member.pose.homeId==='crew'?CREW_BASE.door:HOMES[member.pose.homeId].door);
+      teammate(ctx,{x:point.x+(member.slot-1.5)*7,y:point.y-9},member,true);
+    } else if (member.pose.interior === 'casino') {
       const angle = member.slot * Math.PI / 2;
       teammate(ctx, { x: club.x + Math.sin(angle) * 12, y: club.y + Math.cos(angle) * 12 }, member, true);
     } else teammate(ctx, mapPoint(member.pose), member);

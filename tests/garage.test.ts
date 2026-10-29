@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { activeVehicle, createGame, step } from '../src/game';
-import { applyGarage, createGarage, GARAGE_CARS, GARAGE_PAINTS, garageAction, garageVehicle, parseGarage, type GarageAction, type GarageState } from '../src/garage';
+import { applyGarage, createGarage, GARAGE_CARS, GARAGE_PAINTS, GARAGE_ELITE_REPUTATION, garageAction, garageVehicle, parseGarage, type GarageAction, type GarageState, type GarageUpgrade } from '../src/garage';
 import type { Input } from '../src/model';
 
 function transaction(garage: GarageState, wallet: number, action: GarageAction) {
@@ -56,7 +56,7 @@ describe('atomic garage transactions and saved profiles', () => {
       expect(original).toEqual(before);
     }
   });
-  it('charges level-dependent upgrades once and refuses a third level', () => {
+  it('keeps the original two upgrade prices and refuses a third level without reputation', () => {
     let result = transaction(createGarage(), 1000, { type: 'upgrade', upgrade: 'engine' });
     expect(result.wallet).toBe(650); expect(result.garage.cars.stratus!.engine).toBe(1);
     result = transaction(result.garage, result.wallet, { type: 'upgrade', upgrade: 'engine' });
@@ -96,6 +96,34 @@ describe('atomic garage transactions and saved profiles', () => {
     expect(car).toMatchObject(garageVehicle(result.garage)); expect(car.kind).toBe('sedan'); expect(car.label).toBe('Sentinel GT');
     expect(state.vehicles[1]).toEqual(traffic); expect(state.money).toBe(1250);
   });
+  it.each([['engine',1000],['brakes',750],['nitro',900]] as [GarageUpgrade,number][])('unlocks the third %s level at exactly 200 REP and charges $%i only once', (upgrade,price) => {
+    const garage=createGarage();garage.cars.stratus![upgrade]=2;
+    const before=structuredClone(garage);
+    const locked=garageAction(garage,2000,{type:'upgrade',upgrade},GARAGE_ELITE_REPUTATION-1);
+    expect(locked.ok).toBe(false);
+    if(!locked.ok)expect(locked.reason).toContain('200');
+    expect(garage).toEqual(before);
+    const result=garageAction(garage,2000,{type:'upgrade',upgrade},GARAGE_ELITE_REPUTATION);
+    expect(result.ok).toBe(true);
+    if(!result.ok)throw new Error(result.reason);
+    expect(result.wallet).toBe(2000-price);expect(result.garage.cars.stratus![upgrade]).toBe(3);
+    expect(garage).toEqual(before);
+    expect(garageAction(result.garage,5000,{type:'upgrade',upgrade},9999).ok).toBe(false);
+  });
+  it('does not buy elite parts with malformed reputation or insufficient funds', () => {
+    const garage=createGarage();garage.cars.stratus!.engine=2;
+    for(const reputation of [undefined,NaN,Infinity,-1,200.5,Number.MAX_SAFE_INTEGER+1])expect(garageAction(garage,5000,{type:'upgrade',upgrade:'engine'},reputation).ok).toBe(false);
+    expect(garageAction(garage,999,{type:'upgrade',upgrade:'engine'},200).ok).toBe(false);
+    expect(garage.cars.stratus!.engine).toBe(2);
+  });
+  it('round-trips acquired elite tuning while rejecting levels beyond three', () => {
+    const garage=createGarage();garage.cars.stratus={paint:GARAGE_PAINTS[0].color,engine:3,brakes:3,nitro:3};
+    expect(parseGarage(JSON.parse(JSON.stringify(garage)))).toEqual(garage);
+    const malformed=structuredClone(garage);malformed.cars.stratus!.engine=4;
+    expect(parseGarage(malformed).cars.stratus).toMatchObject({engine:0,brakes:3,nitro:3});
+    // Earned parts remain owned when the garage is loaded or a different car is selected.
+    expect(garageVehicle(garage).tuning).toEqual({engine:3,brakes:3,nitro:3});
+  });
 });
 
 describe('purchased tuning changes driving physics', () => {
@@ -132,5 +160,17 @@ describe('purchased tuning changes driving physics', () => {
     const state = driveState(); activeVehicle(state)!.tuning = { engine: 999, brakes: NaN, nitro: Infinity };
     advance(state, .5, { throttle: true, boost: true });
     expect(activeVehicle(state)!.speed).toBeLessThanOrEqual(45); expect(Number.isFinite(state.player.z)).toBe(true);
+  });
+  it('makes reputation-unlocked engine parts faster than level two and caps full elite boost at 50', () => {
+    const standard=driveState(),elite=driveState(),garage=createGarage();
+    garage.cars.stratus!.engine=2;applyGarage(standard,garage);
+    const result=garageAction(garage,1000,{type:'upgrade',upgrade:'engine'},200);
+    if(!result.ok)throw new Error(result.reason);
+    applyGarage(elite,result.garage);
+    advance(standard,.5,{throttle:true});advance(elite,.5,{throttle:true});
+    expect(activeVehicle(elite)!.speed).toBeGreaterThan(activeVehicle(standard)!.speed);
+    result.garage.cars.stratus!.nitro=3;applyGarage(elite,result.garage);
+    activeVehicle(elite)!.speed=99;advance(elite,.05,{throttle:true,boost:true});
+    expect(activeVehicle(elite)!.speed).toBe(50);
   });
 });

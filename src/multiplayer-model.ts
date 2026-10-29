@@ -2,9 +2,13 @@ import type { PokerAction, PokerState } from './poker-model';
 import type { Point, VehicleKind } from './model';
 import type { GarageAction, GarageState } from './garage';
 import type { JobAction, JobsSnapshot } from './online-jobs';
+import type { CasinoGameAction, CasinoGamesSnapshot } from './casino-games';
+import type { TournamentAction, TournamentSnapshot } from './poker-tournament';
+import type { CityEventAction, CityEventsSnapshot } from './city-events';
+import type { CareerAction, CareerEffect, CareerState, CrewBaseAction, CrewBaseState, HomeId } from './career';
 
 export const MAX_ROOM_PLAYERS = 4;
-export const ROOM_PROTOCOL = 3;
+export const ROOM_PROTOCOL = 4;
 export const ONLINE_BUY_IN = 200;
 export const ONLINE_TURN_MS = 30000;
 export const CREW_DURATION_MS = 150000;
@@ -28,7 +32,11 @@ export interface OnlinePose {
   interior: 'casino' | null; seated: boolean; vehicle: OnlineVehicle | null;
   /** Assigned by the host; a client cannot acquire a seat through a pose. */
   passengerOf?: string | null;
+  /** Host-authorized property interior. Coordinates use the shared room bounds. */
+  homeId?: string | null;
 }
+export type HomeAction = {kind:'enter';home:HomeId|'crew'}|{kind:'exit'};
+export interface OnlineCareerEffect { version:number; effect:CareerEffect|null; home:HomeId|null }
 export interface OnlineMember { id: string; name: string; slot: number; pose: OnlinePose }
 /** Poker is rotated so the recipient is seat zero. Unseen holes use rank 0 backs;
  * the deck and shuffle seed never leave the room host. */
@@ -39,6 +47,8 @@ export interface RoomSnapshot {
   tableVersion: number; turnDeadline: number | null;
   challenge: CrewChallenge;
   garage: GarageState; jobs: JobsSnapshot; cityEventClaimed: boolean;
+  career: CareerState; crewBase: CrewBaseState; careerEffect: OnlineCareerEffect;
+  casinoGames: CasinoGamesSnapshot; tournament: TournamentSnapshot; cityActivities: CityEventsSnapshot;
 }
 export type RoomCommand =
   | { type: 'pose'; pose: OnlinePose }
@@ -47,6 +57,12 @@ export type RoomCommand =
   | { type: 'spend'; amount: number }
   | { type: 'garage'; action: GarageAction }
   | { type: 'job'; action: JobAction }
+  | { type: 'career'; action: CareerAction }
+  | { type: 'crewBase'; action: CrewBaseAction }
+  | { type: 'home'; action: HomeAction }
+  | { type: 'casinoGame'; action: CasinoGameAction }
+  | { type: 'tournament'; action: TournamentAction }
+  | { type: 'cityActivity'; action: CityEventAction }
   | { type: 'cityEventClaim'; eventId: string }
   | { type: 'ride'; driverId: string }
   | { type: 'exitRide' };
@@ -75,6 +91,12 @@ export interface MultiplayerSession {
   startChallenge(): void;
   garage(action: GarageAction): void;
   job(action: JobAction): void;
+  career(action: CareerAction): void;
+  crewBase(action: CrewBaseAction): void;
+  home(action: HomeAction): void;
+  casinoGame(action: CasinoGameAction): void;
+  tournament(action: TournamentAction): void;
+  cityActivity(action: CityEventAction): void;
   claimCityEvent(): void;
   ride(driverId: string): void;
   exitRide(): void;

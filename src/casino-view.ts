@@ -1,6 +1,7 @@
 import * as THREE from 'three';
 import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
 import { CASINO } from './casino-location';
+import { CASINO_GAMES } from './casino-games-location';
 import { PokerTableView } from './poker-view';
 import type { PokerState } from './poker-model';
 
@@ -190,7 +191,38 @@ export class CasinoView {
     this.guest(table,4.35,0,Math.PI/2,0x3d715f,0x9f7256,0x29252b);
     this.label('TEXAS HOLD’EM', '#eddda9', 4.5, 0.6, root, 0, 1.55, -9.77);
 
-    // A lounge counter and art-deco trim establish the room without fake slot games.
+    // Dedicated, reachable stations correspond to actual playable games.
+    const blackjack = new THREE.Group(); blackjack.position.set(CASINO_GAMES.blackjack.x, 0, CASINO_GAMES.blackjack.z - 1.4); root.add(blackjack);
+    this.box(2.7, .24, 1.5, wood, blackjack, 0, 1.05, 0);
+    this.box(2.45, .06, 1.28, green, blackjack, 0, 1.205, 0);
+    this.box(.8, .95, .8, dark, blackjack, 0, .54, 0);
+    this.label('BLACKJACK 21', '#e9dbad', 2.8, .57, blackjack, 0, 2.1, -.6);
+    for(let index=0;index<3;index++)this.box(.32,.015,.45,this.material(index===1?0xdfc2b7:0xe8e4d2),blackjack,(index-1)*.42,1.25,0);
+    const roulette = new THREE.Group(); roulette.position.set(CASINO_GAMES.roulette.x, 0, CASINO_GAMES.roulette.z - 1.4); root.add(roulette);
+    this.box(2.7, .24, 1.7, wood, roulette, 0, 1.05, 0);
+    this.box(2.5, .05, 1.5, green, roulette, 0, 1.2, 0);
+    this.box(.8, .95, .8, dark, roulette, 0, .54, 0);
+    const wheel=this.mesh(new THREE.CylinderGeometry(.62,.62,.12,37),gold,roulette,-.52,1.3,0);
+    const wheelFelt=this.mesh(new THREE.CylinderGeometry(.52,.52,.13,37),dark,roulette,-.52,1.33,0);
+    wheelFelt.rotation.y=Math.PI/37;
+    for(let index=0;index<12;index++){
+      const angle=index*Math.PI/6,marker=this.box(.1,.02,.23,index%2?red:gold,roulette,-.52+Math.cos(angle)*.39,1.41,Math.sin(angle)*.39);marker.rotation.y=-angle;
+    }
+    this.mesh(new THREE.SphereGeometry(.055,7,5),blue,roulette,-.28,1.46,.3);
+    for(let row=0;row<3;row++)for(let col=0;col<4;col++)this.box(.19,.02,.25,(row+col)%2?red:dark,roulette,.4+col*.24,1.245,-.4+row*.29);
+    this.label('ROULETTE · 0–36', '#e9dbad', 2.8, .57, roulette, 0, 2.1, -.7);
+    // The tournament registration stand is clear of the normal poker approach.
+    const tournament = new THREE.Group(); tournament.position.set(CASINO_GAMES.tournament.x+.25,0,CASINO_GAMES.tournament.z);root.add(tournament);
+    this.box(.95,1.2,.62,wood,tournament,0,.62,0);
+    this.box(1.1,.14,.8,gold,tournament,0,1.3,0);
+    this.box(.64,.07,.42,blue,tournament,0,1.42,0);
+    this.label('TURNIEJ', '#f0d8a2', 2.2, .6, tournament, 0, 2.3, -.15);
+    this.label('2–4 GRACZY', '#acdfe2', 2.2, .43, tournament, 0, 1.8, -.15);
+    for(const point of Object.values(CASINO_GAMES)){
+      const ring=this.mesh(new THREE.TorusGeometry(.8,.035,4,28),gold,root,point.x,.12,point.z);ring.rotation.x=-Math.PI/2;
+    }
+
+    // A lounge counter and art-deco trim frame the gaming floor.
     this.box(2.3, 1.2, 5.4, wood, root, -8.65, 0.7, -4.7);
     this.box(2.65, 0.14, 5.7, gold, root, -8.65, 1.36, -4.7);
     for (let i = 0; i < 5; i++) {

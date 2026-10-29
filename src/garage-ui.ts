@@ -1,5 +1,5 @@
 import './garage.css';
-import { GARAGE_CARS, GARAGE_PAINTS, GARAGE_PAINT_PRICE, GARAGE_UPGRADE_NAMES, garageUpgradePrice, parseGarage, type GarageAction, type GarageState, type GarageUpgrade } from './garage';
+import { GARAGE_CARS, GARAGE_PAINTS, GARAGE_PAINT_PRICE, GARAGE_UPGRADE_NAMES, GARAGE_MAX_LEVEL, GARAGE_ELITE_REPUTATION, garageUpgradePrice, parseGarage, type GarageAction, type GarageState, type GarageUpgrade } from './garage';
 
 export interface GarageCallbacks {
   getGarage: () => GarageState;
@@ -9,6 +9,7 @@ export interface GarageCallbacks {
   onClose: () => void;
   onMessage: (text: string) => void;
   isOnline?: () => boolean;
+  getReputation?: () => number;
 }
 const money = (value: number) => `$${Math.max(0, value).toLocaleString('pl-PL')}`;
 const hex = (color: number) => `#${color.toString(16).padStart(6, '0')}`;
@@ -55,7 +56,7 @@ export class GarageUI {
   /** Supply a rejection/notice to acknowledge an unchanged authority snapshot. */
   refresh(message?: string) {
     if (!this.visible) return;
-    const signature = JSON.stringify([this.callbacks.getGarage(), this.callbacks.getWallet(), this.callbacks.isOnline?.() ?? false]);
+    const signature = JSON.stringify([this.callbacks.getGarage(), this.callbacks.getWallet(), this.callbacks.isOnline?.() ?? false, this.callbacks.getReputation?.() ?? 0]);
     if (signature === this.signature && !message) return;
     this.signature = signature; this.pending = false; this.clearWait();
     if (message) this.message = message;
@@ -87,6 +88,8 @@ export class GarageUI {
     if (!this.root || !this.visible) return;
     const focusId = this.root.contains(document.activeElement) ? (document.activeElement as HTMLElement).id : '';
     const garage = parseGarage(this.callbacks.getGarage()), wallet = this.callbacks.getWallet(), settings = garage.cars[garage.selected]!;
+    const rawReputation = this.callbacks.getReputation?.() ?? 0;
+    const reputation = Number.isSafeInteger(rawReputation) && rawReputation >= 0 ? rawReputation : 0;
     const model = GARAGE_CARS[garage.selected];
     this.root.innerHTML = `<section class="garage-shell"><header class="garage-header"><div><span class="garage-eyebrow">NEON COAST · MOD SHOP</span><h1 id="garage-heading">Twój garaż.</h1><p>Wybierz auto, nadaj mu kolor i przygotuj je na noc.</p></div><div class="garage-header-actions"><span class="garage-wallet"><small>${this.callbacks.isOnline?.() ? 'PORTFEL ONLINE' : 'TWÓJ PORTFEL'}</small><strong id="garage-wallet">${money(wallet)}</strong></span><button id="garage-close" class="garage-button garage-button--quiet" aria-label="Zamknij garaż">Wróć na ulicę ×</button></div></header>
     <div class="garage-content"><section class="garage-catalog" aria-label="Samochody w garażu">${Object.values(GARAGE_CARS).map(car => {
@@ -95,9 +98,10 @@ export class GarageUI {
     }).join('')}</section>
     <section class="garage-workshop" aria-labelledby="garage-workshop-heading"><div class="garage-workshop-title"><span class="garage-eyebrow">WYBRANY SAMOCHÓD</span><h2 id="garage-workshop-heading">${model.name}</h2><p>${this.callbacks.isOnline?.() ? 'Garaż i gotówka online dotyczą tego pokoju. Zakupy nie zmieniają twojego garażu solo.' : 'Zmiany dotyczą tego modelu. Samochody i tuning zapisują się w tej przeglądarce.'}</p></div>
     <section class="garage-paint" aria-label="Lakierowanie"><div><h3>Nowy lakier</h3><span>${money(GARAGE_PAINT_PRICE)}</span></div><div class="garage-swatches">${GARAGE_PAINTS.map(item => `<button id="garage-paint-${item.color.toString(16)}" class="garage-swatch ${settings.paint === item.color ? 'garage-swatch--selected' : ''}" style="--paint:${hex(item.color)}" aria-label="Lakier ${item.name} za $80" aria-pressed="${settings.paint === item.color}" title="${item.name}" ${this.pending || settings.paint === item.color || wallet < GARAGE_PAINT_PRICE ? 'disabled' : ''}><span>${settings.paint === item.color ? '✓' : ''}</span></button>`).join('')}</div></section>
-    <div class="garage-upgrades">${(['engine', 'brakes', 'nitro'] as const).map(upgrade => {
+    <p class="garage-unlock" id="garage-reputation">Reputacja: ${reputation} REP · ${reputation >= GARAGE_ELITE_REPUTATION ? 'Części elitarne poziomu 3 odblokowane.' : `Części poziomu 3 od ${GARAGE_ELITE_REPUTATION} REP. Wykonuj zlecenia kontaktów.`}</p><div class="garage-upgrades">${(['engine', 'brakes', 'nitro'] as const).map(upgrade => {
       const price = garageUpgradePrice(garage, upgrade), current = settings[upgrade];
-      return `<section class="garage-upgrade"><div><h3>${GARAGE_UPGRADE_NAMES[upgrade]}</h3><span class="garage-level" id="garage-level-${upgrade}">Poziom ${current}/2</span></div><p>${upgradeDescriptions[upgrade]}</p><div class="garage-upgrade-footer"><span class="garage-level-bars" aria-hidden="true"><i class="${current >= 1 ? 'is-filled' : ''}"></i><i class="${current >= 2 ? 'is-filled' : ''}"></i></span><button id="garage-upgrade-${upgrade}" class="garage-button" ${this.pending || price === null || wallet < price ? 'disabled' : ''}>${price === null ? 'Maksymalny poziom' : `Ulepsz · ${money(price)}`}</button></div></section>`;
+      const locked = current === GARAGE_MAX_LEVEL - 1 && reputation < GARAGE_ELITE_REPUTATION;
+      return `<section class="garage-upgrade"><div><h3>${GARAGE_UPGRADE_NAMES[upgrade]}</h3><span class="garage-level" id="garage-level-${upgrade}">Poziom ${current}/${GARAGE_MAX_LEVEL}</span></div><p>${upgradeDescriptions[upgrade]}</p><div class="garage-upgrade-footer"><span class="garage-level-bars" aria-hidden="true">${Array.from({length:GARAGE_MAX_LEVEL},(_,index)=>`<i class="${current > index ? 'is-filled' : ''}"></i>`).join('')}</span><button id="garage-upgrade-${upgrade}" class="garage-button" ${this.pending || price === null || wallet < price || locked ? 'disabled' : ''}>${price === null ? 'Maksymalny poziom' : locked ? `Poziom 3 · od ${GARAGE_ELITE_REPUTATION} REP` : `Ulepsz · ${money(price)}`}</button></div></section>`;
     }).join('')}</div></section></div>
     <footer class="garage-footer"><p id="garage-message" role="status" aria-live="polite">${safe(this.pending ? 'Warsztat potwierdza zlecenie…' : this.message || 'Kupno i tuning nie naprawiają uszkodzeń samochodu.')}</p><span>ESC · WRÓĆ</span></footer></section>`;
     this.query('#garage-close')?.addEventListener('click', () => this.close());

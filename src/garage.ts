@@ -27,15 +27,17 @@ export const GARAGE_PAINTS = [
   { color: 0x63a9a2, name: 'Miętowy' }, { color: 0x263341, name: 'Grafitowy' },
 ] as const;
 export const GARAGE_PAINT_PRICE = 80;
+export const GARAGE_MAX_LEVEL = 3;
+export const GARAGE_ELITE_REPUTATION = 200;
 export const UPGRADE_PRICES: Record<GarageUpgrade, readonly number[]> = {
-  engine: [350, 600], brakes: [250, 450], nitro: [300, 500],
+  engine: [350, 600, 1000], brakes: [250, 450, 750], nitro: [300, 500, 900],
 };
 export const GARAGE_UPGRADE_NAMES: Record<GarageUpgrade, string> = { engine: 'Silnik', brakes: 'Hamulce', nitro: 'Nitro' };
 const carIds: GarageCarId[] = ['stratus', 'sentinel', 'comet'];
 const isRecord = (value: unknown): value is Record<string, unknown> => Boolean(value && typeof value === 'object' && !Array.isArray(value));
 const isCar = (value: unknown): value is GarageCarId => typeof value === 'string' && carIds.includes(value as GarageCarId);
 const isUpgrade = (value: unknown): value is GarageUpgrade => value === 'engine' || value === 'brakes' || value === 'nitro';
-const level = (value: unknown) => Number.isInteger(value) && Number(value) >= 0 && Number(value) <= 2 ? Number(value) : 0;
+const level = (value: unknown) => Number.isInteger(value) && Number(value) >= 0 && Number(value) <= GARAGE_MAX_LEVEL ? Number(value) : 0;
 const defaults = (id: GarageCarId): GarageCarSettings => ({ paint: GARAGE_CARS[id].paint, engine: id === 'comet' ? 1 : 0, brakes: 0, nitro: id === 'comet' ? 1 : 0 });
 const paint = (value: unknown, fallback: number) => GARAGE_PAINTS.some(item => item.color === value) ? Number(value) : fallback;
 
@@ -62,7 +64,7 @@ export function garageUpgradePrice(garage: GarageState, upgrade: GarageUpgrade):
 }
 
 /** One atomic transaction is used by solo play and the online room authority. */
-export function garageAction(original: GarageState, wallet: number, action: GarageAction): GarageResult {
+export function garageAction(original: GarageState, wallet: number, action: GarageAction, reputation = 0): GarageResult {
   const fail = (reason: string): GarageResult => ({ ok: false, reason });
   if (!Number.isSafeInteger(wallet) || wallet < 0) return fail('Portfel garażu jest nieprawidłowy.');
   if (!isRecord(action)) return fail('Niepoprawne zlecenie garażu.');
@@ -91,10 +93,12 @@ export function garageAction(original: GarageState, wallet: number, action: Gara
     if (!isUpgrade(action.upgrade)) return fail('Nieznane ulepszenie samochodu.');
     const price = garageUpgradePrice(garage, action.upgrade);
     if (price === null) return fail('To ulepszenie jest już na maksymalnym poziomie.');
+    const settings = garage.cars[garage.selected]!;
+    if (settings[action.upgrade] === GARAGE_MAX_LEVEL - 1 && (!Number.isSafeInteger(reputation) || reputation < GARAGE_ELITE_REPUTATION)) return fail(`Części poziomu 3 wymagają ${GARAGE_ELITE_REPUTATION} punktów reputacji. Wykonuj zlecenia kontaktów, aby je odblokować.`);
     cost = price;
     if (wallet < cost) return fail(`Potrzebujesz $${cost} na to ulepszenie.`);
-    const settings = garage.cars[garage.selected]!; settings[action.upgrade]++;
-    message = `${GARAGE_UPGRADE_NAMES[action.upgrade]}: poziom ${settings[action.upgrade]}/2.`;
+    settings[action.upgrade]++;
+    message = `${GARAGE_UPGRADE_NAMES[action.upgrade]}: poziom ${settings[action.upgrade]}/${GARAGE_MAX_LEVEL}.`;
   } else return fail('Nieznane zlecenie garażu.');
   return { ok: true, garage, wallet: wallet - cost, message };
 }

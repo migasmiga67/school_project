@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { MultiplayerClient } from '../src/multiplayer-client';
 import { RoomAuthority } from '../src/room-authority';
 import { ROOM_PROTOCOL } from '../src/multiplayer-model';
+import { CASINO_GAMES } from '../src/casino-games-location';
 
 const transport = vi.hoisted(() => {
   class Events {
@@ -63,6 +64,35 @@ function welcome(peer: InstanceType<typeof transport.Peer>, protocol = ROOM_PROT
   return { type: 'snapshot', protocol, seq: 1, snapshot: room.snapshot(peer.id) };
 }
 function hello(sequence = 1) { return { type: 'hello', protocol: ROOM_PROTOCOL, name: 'Przyjaciel', seq: sequence }; }
+
+describe('expanded room snapshots across the transport boundary',()=>{
+  it('accepts a legally earned elite garage without rejecting the whole multiplayer snapshot',async()=>{
+    const {client,peer,result}=joining();peer.openSignaling();const connection=peer.connections[0];connection.openChannel();
+    const room=new RoomAuthority(CODE,HOST,'Gospodarz');expect(room.join(peer.id,'Przyjaciel').ok).toBe(true);
+    const accepted=(command:Parameters<RoomAuthority['command']>[1])=>{const outcome=room.command(peer.id,command,0);if(!outcome.ok)throw new Error(outcome.reason);};
+    const foot=(x:number,z:number)=>accepted({type:'pose',pose:{x,z,heading:0,mode:'foot',interior:null,seated:false,vehicle:null}});
+    for(let i=0;i<4;i++){accepted({type:'career',action:{type:'contractStart',contract:'nova'}});foot(-40,40);foot(40,-40);}
+    foot(-20,74);
+    for(let i=0;i<3;i++)accepted({type:'garage',action:{type:'upgrade',upgrade:'engine'}});
+    expect(room.snapshot(peer.id).garage.cars.stratus!.engine).toBe(3);
+    connection.receive({type:'snapshot',protocol:ROOM_PROTOCOL,seq:1,snapshot:room.snapshot(peer.id)});
+    expect(await result).toBeNull();expect(client.state.status).toBe('online');expect(client.state.snapshot?.garage.cars.stratus!.engine).toBe(3);
+  });
+
+  it('accepts a real private tournament hand while keeping the deck and opponent cards hidden',async()=>{
+    const {client,peer,result}=joining();peer.openSignaling();const connection=peer.connections[0];connection.openChannel();
+    const room=new RoomAuthority(CODE,HOST,'Gospodarz',123);expect(room.join(peer.id,'Przyjaciel').ok).toBe(true);
+    const accepted=(id:string,command:Parameters<RoomAuthority['command']>[1])=>{const outcome=room.command(id,command,0);if(!outcome.ok)throw new Error(outcome.reason);};
+    for(const id of [HOST,peer.id])accepted(id,{type:'pose',pose:{...CASINO_GAMES.tournament,heading:0,mode:'foot',interior:'casino',seated:false,vehicle:null}});
+    accepted(HOST,{type:'tournament',action:{kind:'open'}});
+    for(const id of [HOST,peer.id])accepted(id,{type:'tournament',action:{kind:'join'}});
+    accepted(HOST,{type:'tournament',action:{kind:'start'}});
+    connection.receive({type:'snapshot',protocol:ROOM_PROTOCOL,seq:1,snapshot:room.snapshot(peer.id)});
+    expect(await result).toBeNull();const tournament=client.state.snapshot!.tournament;
+    expect(tournament.status).toBe('playing');expect(tournament.poker!.players[0].id).toBe(peer.id);expect(tournament.poker!.deck).toEqual([]);expect(tournament.poker!.seed).toBe(0);
+    expect(tournament.poker!.players.find(person=>person.id===HOST)!.hole.every(card=>card.rank===0)).toBe(true);
+  });
+});
 
 beforeEach(() => {
   clients = []; transport.Peer.instances = [];

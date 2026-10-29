@@ -1,5 +1,5 @@
 import {describe,expect,it} from 'vitest';
-import {OnlineJobs,HEIST_DURATION_MS,HEIST_SAFEHOUSE,JOB_COOLDOWN_MS,RACE_COUNTDOWN_MS,RACE_DURATION_MS,RACE_CHECKPOINTS,type JobAction,type JobMember} from '../src/online-jobs';
+import {OnlineJobs,HEIST_DURATION_MS,HEIST_SAFEHOUSE,JOB_COOLDOWN_MS,RACE_COUNTDOWN_MS,RACE_DURATION_MS,RACE_CHECKPOINTS,BANK_RECON,BANK_ALARM,BANK_VAULT,BANK_STAGING,BANK_DRILL_MS,BANK_HEIST_DURATION_MS,BANK_HEIST_REWARD,type JobAction,type JobMember} from '../src/online-jobs';
 import type {OnlinePose} from '../src/multiplayer-model';
 
 function foot(x=0,z=80):OnlinePose{return{x,z,heading:0,mode:'foot',interior:null,seated:false,vehicle:null};}
@@ -128,6 +128,116 @@ describe('cooperative casino heist',()=>{
   expect(jobs.command('friend',{kind:'heistHack',symbol:symbols[1]},people,1000+HEIST_DURATION_MS).ok).toBe(false);
   expect(jobs.snapshot('host',1000+HEIST_DURATION_MS).heist.status).toBe('failed');
   expect(jobs.update(people,1000+HEIST_DURATION_MS).credits).toEqual([]);
+ });
+});
+
+function bankReady(count=2){
+ const jobs=new OnlineJobs('host'),people=members(count);
+ accepted(jobs,'host',{kind:'heistStart',variant:'bank'},people);
+ const lookout=jobs.snapshot('host',0).heist.lookoutId!;
+ at(people,lookout,foot(BANK_RECON.x,BANK_RECON.z));
+ accepted(jobs,lookout,{kind:'heistRecon'},people);
+ at(people,'host',driver(BANK_STAGING.x,BANK_STAGING.z));
+ at(people,'friend',foot(BANK_ALARM.x,BANK_ALARM.z));
+ const symbols=jobs.snapshot('friend',0).heist.sequence;
+ for(const symbol of symbols)accepted(jobs,'friend',{kind:'heistHack',symbol},people);
+ const breacher=jobs.snapshot('host',0).heist.breacherId!;
+ at(people,breacher,foot(BANK_VAULT.x,BANK_VAULT.z));
+ accepted(jobs,breacher,{kind:'heistBreach'},people);
+ return {jobs,people,lookout,breacher};
+}
+
+describe('multi-stage Northside Bank heist',()=>{
+ it('assigns distinct four-person roles, gives personal reachable targets and reveals symbols only to the hacker during alarm',()=>{
+  const jobs=new OnlineJobs('host'),people=members(4);
+  accepted(jobs,'host',{kind:'heistStart',variant:'bank'},people);
+  expect(jobs.snapshot('host',0).heist).toMatchObject({variant:'bank',status:'recon',role:'driver',reward:BANK_HEIST_REWARD,target:BANK_STAGING});
+  expect(jobs.snapshot('third',0).heist).toMatchObject({role:'lookout',target:BANK_RECON,lookoutId:'third'});
+  expect(jobs.snapshot('fourth',0).heist).toMatchObject({role:'breacher',target:BANK_VAULT,breacherId:'fourth'});
+  expect(jobs.snapshot('friend',0).heist).toMatchObject({role:'hacker',target:BANK_ALARM,sequence:[]});
+  expect(jobs.command('host',{kind:'heistRecon'},people,0).ok).toBe(false);
+  expect(jobs.command('third',{kind:'heistRecon'},people,0).ok).toBe(false);
+  at(people,'third',foot(BANK_RECON.x,BANK_RECON.z));
+  accepted(jobs,'third',{kind:'heistRecon'},people);
+  expect(jobs.snapshot('friend',0).heist.sequence).toHaveLength(3);
+  for(const id of ['host','third','fourth'])expect(jobs.snapshot(id,0).heist.sequence).toEqual([]);
+  expect(jobs.command('fourth',{kind:'heistHack',symbol:0},people,0).ok).toBe(false);
+  expect(jobs.command('fourth',{kind:'heistBreach'},people,0).ok).toBe(false);
+ });
+
+ it('scales scouting and drilling to two players and completes the full legal plan with a one-shot payment',()=>{
+  const {jobs,people,lookout,breacher}=bankReady();
+  expect(lookout).toBe('host');expect(breacher).toBe('friend');
+  expect(jobs.snapshot('host',0).heist).toMatchObject({status:'breach',drillStarted:true,driverReady:true,lookoutReady:true,drillMs:0});
+  expect(jobs.update(people,BANK_DRILL_MS-1).credits).toEqual([]);
+  expect(jobs.snapshot('host',BANK_DRILL_MS-1).heist.status).toBe('breach');
+  jobs.update(people,BANK_DRILL_MS);
+  expect(jobs.snapshot('friend',BANK_DRILL_MS).heist).toMatchObject({status:'escape',sequence:[],target:HEIST_SAFEHOUSE});
+  at(people,'host',driver(HEIST_SAFEHOUSE.x,HEIST_SAFEHOUSE.z));
+  at(people,'friend',{...foot(HEIST_SAFEHOUSE.x,HEIST_SAFEHOUSE.z),passengerOf:'host'});
+  expect(jobs.update(people,BANK_DRILL_MS+1).credits).toEqual([{id:'host',amount:1400},{id:'friend',amount:1400}]);
+  expect(jobs.snapshot('host',BANK_DRILL_MS+1).heist.status).toBe('completed');
+  expect(jobs.update(people,BANK_DRILL_MS+2).credits).toEqual([]);
+ });
+
+ it('requires all four starting players at extraction and excludes late joiners from payout',()=>{
+  const {jobs,people}=bankReady(4);jobs.update(people,BANK_DRILL_MS);
+  at(people,'host',driver(-80,0));at(people,'friend',foot(-80,0));
+  expect(jobs.update(people,9000).credits).toEqual([]);
+  at(people,'third',foot(-80,0));expect(jobs.update(people,9001).credits).toEqual([]);
+  at(people,'fourth',foot(-80,0));
+  expect(jobs.update(people,9002).credits).toEqual(people.map(person=>({id:person.id,amount:BANK_HEIST_REWARD})));
+  expect(jobs.update(people,9003).credits).toEqual([]);
+  const duo=bankReady();duo.people.push({id:'late',name:'Późny',pose:foot(-80,0)});
+  duo.jobs.update(duo.people,BANK_DRILL_MS);
+  at(duo.people,'host',driver(-80,0));at(duo.people,'friend',foot(-80,0));
+  expect(duo.jobs.update(duo.people,9000).credits).toEqual([{id:'host',amount:1400},{id:'friend',amount:1400}]);
+  expect(duo.jobs.snapshot('late',9000).heist.eligible).toBe(false);
+ });
+
+ it('resets drilling when a role abandons cover and counts only continuously held positions',()=>{
+  const {jobs,people}=bankReady(4);
+  jobs.update(people,4000);expect(jobs.snapshot('host',4000).heist.drillMs).toBe(4000);
+  at(people,'third',foot(-40,-40));jobs.update(people,5000);
+  expect(jobs.snapshot('host',5000).heist).toMatchObject({status:'breach',drillMs:0,lookoutReady:false});
+  at(people,'third',foot(BANK_RECON.x,BANK_RECON.z));jobs.update(people,16000);
+  expect(jobs.snapshot('host',16000).heist.drillMs).toBe(0);
+  jobs.update(people,23999);expect(jobs.snapshot('host',23999).heist.status).toBe('breach');
+  jobs.update(people,24000);expect(jobs.snapshot('host',24000).heist.status).toBe('escape');
+ });
+
+ it('requires the designated breacher on foot and a stopped driver, not a passenger or moving car',()=>{
+  const {jobs,people}=bankReady(4);
+  expect(jobs.command('friend',{kind:'heistBreach'},people,0).ok).toBe(false);
+  people[0].pose.vehicle!.speed=8;jobs.update(people,1000);
+  expect(jobs.snapshot('host',1000).heist.driverReady).toBe(false);
+  jobs.update(people,20000);expect(jobs.snapshot('host',20000).heist.drillMs).toBe(0);
+  people[0].pose.vehicle!.speed=0;at(people,'fourth',{...foot(BANK_VAULT.x,BANK_VAULT.z),passengerOf:'host'});
+  jobs.update(people,21000);expect(jobs.snapshot('host',21000).heist.drillMs).toBe(0);
+  at(people,'fourth',foot(BANK_VAULT.x,BANK_VAULT.z));jobs.update(people,22000);
+  jobs.update(people,30000);expect(jobs.snapshot('host',30000).heist.status).toBe('escape');
+ });
+
+ it('fails on an assigned-role disconnect and does not revive the operation or pay on rejoining',()=>{
+  const {jobs,people}=bankReady(4),remaining=people.filter(person=>person.id!=='fourth');
+  expect(jobs.update(remaining,1000).credits).toEqual([]);
+  expect(jobs.snapshot('host',1000).heist).toMatchObject({status:'failed',cooldownMs:JOB_COOLDOWN_MS});
+  expect(jobs.update(people,1001).credits).toEqual([]);
+  expect(jobs.snapshot('fourth',1001).heist.eligible).toBe(false);
+  expect(jobs.snapshot('host',1001).heist.status).toBe('failed');
+ });
+
+ it('lets only the host abort and observes the six-minute deadline without stale rewards',()=>{
+  const first=bankReady();
+  expect(first.jobs.command('friend',{kind:'heistAbort'},first.people,1000).ok).toBe(false);
+  accepted(first.jobs,'host',{kind:'heistAbort'},first.people,1000);
+  expect(first.jobs.snapshot('host',1000).heist.status).toBe('failed');
+  expect(first.jobs.update(first.people,1001).credits).toEqual([]);
+  expect(first.jobs.command('host',{kind:'heistAbort'},first.people,1001).ok).toBe(false);
+  const jobs=new OnlineJobs('host'),people=members();accepted(jobs,'host',{kind:'heistStart',variant:'bank'},people);
+  jobs.update(people,BANK_HEIST_DURATION_MS-1);expect(jobs.snapshot('host',BANK_HEIST_DURATION_MS-1).heist.status).toBe('recon');
+  expect(jobs.update(people,BANK_HEIST_DURATION_MS).credits).toEqual([]);
+  expect(jobs.snapshot('host',BANK_HEIST_DURATION_MS).heist.status).toBe('failed');
  });
 });
 

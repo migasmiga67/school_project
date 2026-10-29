@@ -3,12 +3,17 @@ import { BUILDINGS, ROADS, WORLD_BOUNDS } from './model';
 import { createGarage, garageAction, garageVehicle, GARAGE_LOCATION, type GarageState } from './garage';
 import { OnlineJobs } from './online-jobs';
 import { cityEventAt } from './city-life';
+import { CityEvents } from './city-events';
+import { CasinoGames } from './casino-games';
+import { CASINO_GAMES } from './casino-games-location';
+import { PokerTournament } from './poker-tournament';
+import { awardReputation, careerAction, createCareer, createCrewBase, crewBaseAction, homeStreetExit, CREW_BASE, HOME_ROOM, HOMES, type CareerState, type CrewBaseState } from './career';
 import { act, createPokerTable, dealHand, foldPokerSeat, legalActions } from './poker';
 import { CREW_CHECKPOINTS, CREW_COOLDOWN_MS, CREW_DURATION_MS, CREW_REWARD, MAX_ROOM_PLAYERS, ONLINE_BUY_IN, ONLINE_TURN_MS } from './multiplayer-model';
-import type { CrewChallenge, OnlineMember, OnlinePose, OnlineVehicle, RoomCommand, RoomResult, RoomSnapshot } from './multiplayer-model';
+import type { CrewChallenge, HomeAction, OnlineCareerEffect, OnlineMember, OnlinePose, OnlineVehicle, RoomCommand, RoomResult, RoomSnapshot } from './multiplayer-model';
 import type { PokerAction, PokerSeat, PokerState } from './poker-model';
 
-interface Member { view: OnlineMember; wallet: number; lastSpend: number; garage: GarageState; claimedEvent: string | null }
+interface Member { view: OnlineMember; wallet: number; lastSpend: number; garage: GarageState; claimedEvent: string | null; career:CareerState; careerEffect:OnlineCareerEffect; casinoGames:CasinoGames; homeReturn:OnlinePose|null }
 const yes: RoomResult = {ok:true};
 const no=(reason:string):RoomResult=>({ok:false,reason});
 const handActive=(s:PokerState)=>s.phase!=='waiting'&&s.phase!=='showdown';
@@ -38,10 +43,13 @@ export class RoomAuthority {
   private readonly challengeEligible=new Set<string>();
   private readonly contributors=new Set<string>();
   private readonly jobs:OnlineJobs;
+  private readonly cityActivities=new CityEvents();
+  private readonly tournament:PokerTournament;
+  private crewBase:CrewBaseState=createCrewBase();
 
   constructor(code:string,hostId:string,name:string,seed?:number) {
     if(typeof code!=='string'||!/^[A-Z2-9]{8}$/i.test(code)||!validId(hostId)||!validName(nickname(name)))throw new Error('Niepoprawny kod pokoju lub pseudonim.');
-    this.code=code.toUpperCase();this.hostId=hostId;this.jobs=new OnlineJobs(hostId);
+    this.code=code.toUpperCase();this.hostId=hostId;this.jobs=new OnlineJobs(hostId);this.tournament=new PokerTournament(hostId,seed);
     this.table=createPokerTable(seed,ONLINE_BUY_IN);this.table.players=this.table.players.map((_,i)=>emptySeat(i));
     this.join(hostId,name);
   }
@@ -55,7 +63,7 @@ export class RoomAuthority {
     const slot=[0,1,2,3].find(index=>!occupied.has(index))!;
     const z=68-slot*7,color=[0xded8cb,0x8f78bf,0x63a9a2,0xe1a86b][slot];
     const pose:OnlinePose={x:0,z,heading:0,mode:'drive',interior:null,seated:false,vehicle:{id:'stratus',kind:'sport',x:0,z,heading:0,color,speed:0,health:100}};
-    this.people.set(id,{view:{id,name:clean,slot,pose},wallet:1250,lastSpend:-Infinity,garage:createGarage(),claimedEvent:null});
+    this.people.set(id,{view:{id,name:clean,slot,pose},wallet:1250,lastSpend:-Infinity,garage:createGarage(),claimedEvent:null,career:createCareer(),careerEffect:{version:0,effect:null,home:null},casinoGames:new CasinoGames(),homeReturn:null});
     return yes;
   }
 
@@ -66,7 +74,7 @@ export class RoomAuthority {
     const car=this.people.get(id)?.view.pose.vehicle;
     if(car&&car.id!=='stratus')this.vehicles.set(car.id,{...car,speed:0});
     this.challengeEligible.delete(id);
-    this.people.delete(id);this.updateJobs();
+    this.people.delete(id);this.updateJobs();this.updateExpansions();
   }
 
   command(id:string,command:RoomCommand,now=Date.now()):RoomResult {
@@ -81,8 +89,9 @@ export class RoomAuthority {
       case 'garage': {
         if(this.jobs.busy||this.challengeStatus==='active')return no('Dokończ aktywność ekipy przed zmianą samochodu.');
         const pose=member.view.pose;
-        if(pose.interior||pose.seated||pose.passengerOf||Math.hypot(pose.x-GARAGE_LOCATION.x,pose.z-GARAGE_LOCATION.z)>6||Math.abs(pose.vehicle?.speed??0)>1.5)return no('Podejdź do warsztatu lub zaparkuj przy jego bramie.');
-        const result=garageAction(member.garage,member.wallet,command.action);
+        if(pose.interior||pose.homeId||pose.seated||pose.passengerOf||Math.hypot(pose.x-GARAGE_LOCATION.x,pose.z-GARAGE_LOCATION.z)>6||Math.abs(pose.vehicle?.speed??0)>1.5)return no('Podejdź do warsztatu lub zaparkuj przy jego bramie.');
+        if(command.action&&typeof command.action==='object'&&command.action.type==='select'&&typeof command.action.car==='string'&&member.career.storedCars[command.action.car])return no('Ten samochód jest zabezpieczony przy mieszkaniu. Odbierz go na swoim parkingu.');
+        const result=garageAction(member.garage,member.wallet,command.action,member.career.reputation);
         if(!result.ok)return no(result.reason);
         member.garage=result.garage;member.wallet=result.wallet;
         if(pose.vehicle?.id==='stratus')Object.assign(pose.vehicle,garageVehicle(member.garage));
@@ -90,16 +99,76 @@ export class RoomAuthority {
       }
       case 'job': {
         const action=command.action;
-        if(!action||typeof action!=='object'||!['heistStart','heistInteract','heistHack','raceStart','raceReady'].includes(action.kind))return no('Nieznana aktywność miasta.');
+        const planningRooms:{member:Member;pose:OnlinePose;homeReturn:OnlinePose|null}[]=[];
+        if(!action||typeof action!=='object'||!['heistStart','heistInteract','heistHack','heistRecon','heistBreach','heistAbort','raceStart','raceReady'].includes(action.kind))return no('Nieznana aktywność miasta.');
+        if(action.kind==='heistStart'&&action.variant!==undefined&&!['sapphire','bank'].includes(action.variant))return no('Nieznany plan napadu.');
         if(action.kind==='heistHack'&&(!Number.isInteger(action.symbol)||action.symbol<0||action.symbol>3))return no('Niepoprawny symbol terminala.');
         if((action.kind==='heistStart'||action.kind==='raceStart')&&this.challengeStatus==='active')return no('Najpierw dokończcie Nocny przerzut.');
-        const result=this.jobs.command(id,action,this.members(),this.now);this.updateJobs();return result;
+        if((action.kind==='heistStart'||action.kind==='raceStart')&&member.view.pose.homeId){
+          if(id!==this.hostId||member.view.pose.homeId!=='crew'||Math.hypot(member.view.pose.x-HOME_ROOM.planning.x,member.view.pose.z-HOME_ROOM.planning.z)>3)return no('Plan napadu otwórz przy stole w bazie ekipy albo wyjdź na ulicę.');
+          if(this.jobs.busy)return no('Najpierw dokończcie bieżące zlecenie ekipy.');
+          for(const person of this.people.values())if(person.view.pose.homeId==='crew'){
+            planningRooms.push({member:person,pose:structuredClone(person.view.pose),homeReturn:person.homeReturn?structuredClone(person.homeReturn):null});this.leaveHome(person);
+          }
+        }
+        const result=this.jobs.command(id,action,this.members(),this.now);
+        if(!result.ok)for(const previous of planningRooms){previous.member.view.pose=previous.pose;previous.member.homeReturn=previous.homeReturn;}
+        this.updateJobs();return result;
+      }
+      case 'career': {
+        const pose=member.view.pose,action=command.action;
+        if(!action||typeof action!=='object')return no('Nieznana akcja kariery.');
+        const personalHome=pose.homeId==='canal'||pose.homeId==='loft'?pose.homeId:null;
+        const result=careerAction(member.career,member.wallet,action,{pose:{...pose,interior:pose.homeId?'home':pose.interior},now:this.worldTime(),homeId:personalHome,garageOwned:member.garage.owned,selectedCar:member.garage.selected,vehicleId:pose.vehicle?.id??null,vehicleSpeed:pose.vehicle?.speed??0,busy:this.jobs.busy||this.challengeStatus==='active'||this.tournament.contains(id)});
+        if(!result.ok)return no(result.reason);
+        member.career=result.career;member.wallet=result.wallet;
+        if(result.effect){
+          const home='home' in action&&(action.home==='canal'||action.home==='loft')?action.home:null;
+          member.careerEffect={version:member.careerEffect.version+1,effect:result.effect,home};
+          if(result.effect.storedCar&&pose.vehicle?.id==='stratus'){
+            this.releasePassengers(id);member.view.pose={...pose,mode:'foot',vehicle:null,x:(home?HOMES[home].parking.x:pose.x)+2.6,z:home?HOMES[home].parking.z:pose.z,passengerOf:null};
+          }
+          if(result.effect.retrievedCar&&home){
+            const selected=garageAction(member.garage,member.wallet,{type:'select',car:result.effect.retrievedCar});
+            if(selected.ok)member.garage=selected.garage;
+          }
+          if(result.effect.repairCar&&pose.vehicle?.id==='stratus')pose.vehicle.health=100;
+        }
+        return yes;
+      }
+      case 'crewBase': {
+        const result=crewBaseAction(this.crewBase,member.wallet,command.action,id,id===this.hostId);
+        if(!result.ok)return no(result.reason);this.crewBase=result.base;member.wallet=result.wallet;return yes;
+      }
+      case 'home': return this.home(member,command.action);
+      case 'casinoGame': {
+        const pose=member.view.pose,action=command.action;
+        if(!action||typeof action!=='object'||pose.interior!=='casino'||pose.homeId||pose.mode!=='foot'||pose.seated||pose.passengerOf||this.tournament.contains(id))return no('Podejdź do wolnego stanowiska w kasynie.');
+        const target=action.kind==='rouletteSpin'?CASINO_GAMES.roulette:CASINO_GAMES.blackjack;
+        if((action.kind==='blackjackDeal'||action.kind==='rouletteSpin')&&Math.hypot(pose.x-target.x,pose.z-target.z)>2.8)return no('Podejdź do odpowiedniego stołu gry.');
+        const result=member.casinoGames.command(action,member.wallet);
+        if(!result.ok)return no(result.reason);member.wallet=result.wallet;return yes;
+      }
+      case 'tournament': {
+        const action=command.action,pose=member.view.pose;
+        if(!action||typeof action!=='object')return no('Nieznana akcja turnieju.');
+        if(action.kind!=='withdraw'&&(pose.interior!=='casino'||pose.homeId||pose.mode!=='foot'||pose.passengerOf||Math.hypot(pose.x-CASINO_GAMES.tournament.x,pose.z-CASINO_GAMES.tournament.z)>2.8))return no('Podejdź do stanowiska turniejowego w kasynie.');
+        if(this.seats.includes(id)||member.casinoGames.snapshot().blackjack.status==='playing')return no('Najpierw odejdź od stołu gotówkowego i dokończ blackjacka.');
+        if(action.kind==='start'){
+          const entrants=this.tournament.snapshot(id).participants.filter(person=>person.status==='registered');
+          if(entrants.some(person=>{const entrant=this.people.get(person.id)?.view.pose;return !entrant||entrant.interior!=='casino'||entrant.homeId||entrant.mode!=='foot'||Math.hypot(entrant.x-CASINO_GAMES.tournament.x,entrant.z-CASINO_GAMES.tournament.z)>2.8;}))return no('Wszyscy zapisani gracze muszą wrócić do stanowiska turniejowego.');
+        }
+        const result=this.tournament.command(id,action,this.members(),member.wallet,this.now);
+        if(!result.ok)return no(result.reason);member.wallet=result.wallet;this.updateExpansions();return yes;
+      }
+      case 'cityActivity': {
+        const result=this.cityActivities.command(id,command.action,this.members(),this.now);this.updateExpansions();return result;
       }
       case 'cityEventClaim': {
         const event=cityEventAt(this.worldTime()),pose=member.view.pose;
-        if(!event||command.eventId!==event.id||pose.interior||pose.seated||pose.passengerOf||Math.hypot(pose.x-event.target.x,pose.z-event.target.z)>5)return no('Podejdź do aktywnego wydarzenia w mieście.');
+        if(!event||command.eventId!==event.id||pose.interior||pose.homeId||pose.seated||pose.passengerOf||Math.hypot(pose.x-event.target.x,pose.z-event.target.z)>5)return no('Podejdź do aktywnego wydarzenia w mieście.');
         if(member.claimedEvent===event.id)return no('Nagroda za to wydarzenie została już odebrana.');
-        member.claimedEvent=event.id;member.wallet+=event.reward;return yes;
+        member.claimedEvent=event.id;member.wallet+=event.reward;member.career=awardReputation(member.career,event.id,20);return yes;
       }
       case 'challengeStart': return this.startChallenge(id,member);
       case 'pose': return this.move(member,command.pose);
@@ -128,7 +197,7 @@ export class RoomAuthority {
     if(!finite(now)||now<0)return false;
     this.now=Math.max(this.now,now);
     if(this.epoch===null)this.epoch=this.now;
-    let changed=this.updateJobs();
+    let changed=this.updateJobs();changed=this.updateExpansions()||changed;
     if(this.challengeStatus==='active'&&this.now>=this.challengeDeadline) {
       this.challengeStatus='failed';this.challengeReadyAt=this.challengeDeadline+CREW_COOLDOWN_MS;changed=true;
     }
@@ -144,14 +213,14 @@ export class RoomAuthority {
     if(!member)throw new Error('Nie należysz do tego pokoju.');
     const seat=this.seats.indexOf(id);
     const poker=seat>=0?this.publicTable(seat):null;
-    return {code:this.code,hostId:this.hostId,youId:id,members:[...this.people.values()].map(person=>structuredClone(person.view)).sort((a,b)=>a.slot-b.slot),wallet:member.wallet,seated:seat>=0,poker,tableVersion:this.version,turnDeadline:this.deadline,vehicles:[...this.vehicles.values()].map(car=>({...car})),worldTime:this.epoch===null?0:(this.now-this.epoch)/1000,challenge:this.publicChallenge(id),garage:structuredClone(member.garage),jobs:this.jobs.snapshot(id,this.now),cityEventClaimed:member.claimedEvent===cityEventAt(this.worldTime())?.id};
+    return {code:this.code,hostId:this.hostId,youId:id,members:[...this.people.values()].map(person=>structuredClone(person.view)).sort((a,b)=>a.slot-b.slot),wallet:member.wallet,seated:seat>=0,poker,tableVersion:this.version,turnDeadline:this.deadline,vehicles:[...this.vehicles.values()].map(car=>({...car})),worldTime:this.epoch===null?0:(this.now-this.epoch)/1000,challenge:this.publicChallenge(id),garage:structuredClone(member.garage),jobs:this.jobs.snapshot(id,this.now),cityEventClaimed:member.claimedEvent===cityEventAt(this.worldTime())?.id,career:structuredClone({...member.career,awarded:[]}),crewBase:structuredClone(this.crewBase),careerEffect:structuredClone(member.careerEffect),casinoGames:member.casinoGames.snapshot(),tournament:this.tournament.snapshot(id),cityActivities:this.cityActivities.snapshot(id)};
   }
 
   private startChallenge(id:string,member:Member):RoomResult {
     if(id!==this.hostId)return no('Tylko gospodarz może rozpocząć Nocny przerzut.');
     if(this.jobs.busy)return no('Najpierw dokończcie napad lub wyścig.');
     if(this.people.size<2)return no('Zaproś co najmniej jednego znajomego do wspólnego zlecenia.');
-    if(member.view.pose.interior!==null||member.view.pose.seated)return no('Wyjdź z kasyna, aby rozpocząć zlecenie ekipy.');
+    if(member.view.pose.interior!==null||member.view.pose.homeId||member.view.pose.seated)return no('Wyjdź z wnętrza, aby rozpocząć zlecenie ekipy.');
     if(this.challengeStatus==='active')return no('Nocny przerzut już trwa. Jedźcie do wspólnego celu.');
     if(this.now<this.challengeReadyAt)return no('Ekipa potrzebuje chwili przed następnym przerzutem.');
     this.challengeStatus='active';this.challengeRun++;this.checkpoint=0;this.challengeDeadline=this.now+CREW_DURATION_MS;
@@ -165,7 +234,7 @@ export class RoomAuthority {
   }
 
   private reachCheckpoint(member:Member) {
-    if(this.challengeStatus!=='active'||member.view.pose.interior!==null||member.view.pose.seated||member.view.pose.passengerOf)return;
+    if(this.challengeStatus!=='active'||member.view.pose.interior!==null||member.view.pose.homeId||member.view.pose.seated||member.view.pose.passengerOf)return;
     const target=CREW_CHECKPOINTS[this.checkpoint],pose=member.view.pose;
     if(Math.hypot(pose.x-target.x,pose.z-target.z)>5)return;
     this.contributors.add(member.view.id);this.checkpoint++;
@@ -173,19 +242,83 @@ export class RoomAuthority {
     this.challengeStatus='completed';this.challengeReadyAt=this.now+CREW_COOLDOWN_MS;
     for(const id of this.challengeEligible) {
       const participant=this.people.get(id);
-      if(participant)participant.wallet+=CREW_REWARD;
+      if(participant){participant.wallet+=CREW_REWARD;participant.career=awardReputation(participant.career,`crew:${this.challengeRun}`,60);}
     }
   }
 
   private worldTime() { return this.epoch===null?0:(this.now-this.epoch)/1000; }
   private members() { return [...this.people.values()].map(member=>member.view); }
 
+  /** Controllers own clocks and outcomes; only this boundary changes session wallets. */
+  private updateExpansions():boolean {
+    const before=this.tournament.snapshot(this.hostId).version;
+    const tournament=this.tournament.update(this.members(),this.now);
+    let changed=tournament.credits.length>0;
+    for(const credit of tournament.credits){
+      const member=this.people.get(credit.id);
+      if(member&&Number.isSafeInteger(credit.amount)&&credit.amount>0)member.wallet+=credit.amount;
+    }
+    const tournamentState=this.tournament.snapshot(this.hostId);
+    for(const member of this.people.values()){
+      const enrolled=tournamentState.status==='playing'&&this.tournament.contains(member.view.id);
+      member.view.pose.seated=this.seats.includes(member.view.id)||enrolled;
+      if(enrolled&&member.view.pose.interior!=='casino'){
+        // A queued pose cannot teleport a registered player out during start.
+        Object.assign(member.view.pose,{...CASINO_GAMES.tournament,mode:'foot',vehicle:null,interior:'casino',homeId:null});
+      }
+    }
+    const previousEvent=this.cityActivities.snapshot(this.hostId);
+    if(this.epoch!==null)this.cityActivities.update(this.members(),this.now);
+    const credits=this.cityActivities.drainCredits();
+    for(const credit of credits){
+      const member=this.people.get(credit.id);
+      if(member&&Number.isSafeInteger(credit.amount)&&credit.amount>0){member.wallet+=credit.amount;member.career=awardReputation(member.career,credit.eventId,80);}
+    }
+    const event=this.cityActivities.snapshot(this.hostId);
+    changed=changed||before!==tournamentState.version||credits.length>0||previousEvent.id!==event.id||previousEvent.status!==event.status||previousEvent.stage!==event.stage||previousEvent.holderId!==event.holderId;
+    // Contact objectives progress from verified poses, never client-provided rewards.
+    for(const member of this.people.values())if(member.career.activeContract){
+      const result=careerAction(member.career,member.wallet,{type:'contractVisit'},{pose:{...member.view.pose,interior:member.view.pose.homeId?'home':member.view.pose.interior},now:this.worldTime()});
+      if(result.ok){member.career=result.career;member.wallet=result.wallet;changed=true;}
+    }
+    return changed;
+  }
+
+  private home(member:Member,action:HomeAction):RoomResult {
+    if(!action||typeof action!=='object')return no('Nieznane wejście do lokalu.');
+    const pose=member.view.pose;
+    if(action.kind==='exit'){
+      if(!pose.homeId)return no('Nie jesteś w mieszkaniu.');
+      if(Math.hypot(pose.x-HOME_ROOM.exit.x,pose.z-HOME_ROOM.exit.z)>2)return no('Podejdź do drzwi wyjściowych.');
+      this.leaveHome(member);return yes;
+    }
+    if(action.kind!=='enter'||!['canal','loft','crew'].includes(action.home))return no('Nieznany lokal.');
+    if(pose.interior||pose.homeId||pose.seated||pose.passengerOf||pose.mode!=='foot')return no('Podejdź pieszo do drzwi lokalu.');
+    if(this.jobs.busy||this.challengeStatus==='active'||this.tournament.contains(member.view.id))return no('Najpierw zakończ aktywność ekipy.');
+    const definition=action.home==='crew'?CREW_BASE:HOMES[action.home];
+    if(action.home==='crew'?!this.crewBase.owned:!member.career.ownedHomes.includes(action.home))return no('Najpierw kup ten lokal.');
+    if(Math.hypot(pose.x-definition.door.x,pose.z-definition.door.z)>3.5)return no('Podejdź do drzwi wskazanego lokalu.');
+    member.homeReturn={...pose,...homeStreetExit(action.home),homeId:null};
+    member.view.pose={...HOME_ROOM.entry,heading:0,mode:'foot',vehicle:null,interior:null,homeId:action.home,seated:false,passengerOf:null};
+    return yes;
+  }
+  private leaveHome(member:Member){
+    const home=member.view.pose.homeId;
+    const exit=home==='crew'||home==='canal'||home==='loft'?homeStreetExit(home):{x:0,z:68,heading:Math.PI};
+    member.view.pose=member.homeReturn?{...member.homeReturn,homeId:null,seated:false}:{...exit,mode:'foot',vehicle:null,interior:null,homeId:null,seated:false,passengerOf:null};
+    member.homeReturn=null;
+  }
+
   private updateJobs():boolean {
     const before=JSON.stringify(this.jobs.snapshot(this.hostId,this.now));
     const result=this.jobs.update(this.members(),this.now);
     for(const credit of result.credits) {
       const member=this.people.get(credit.id);
-      if(member&&Number.isSafeInteger(credit.amount)&&credit.amount>0)member.wallet+=credit.amount;
+      if(member&&Number.isSafeInteger(credit.amount)&&credit.amount>0){
+        member.wallet+=credit.amount;const jobs=this.jobs.snapshot(credit.id,this.now);
+        const source=jobs.heist.status==='completed'&&jobs.heist.eligible&&credit.amount===jobs.heist.reward?`heist:${jobs.heist.variant}:${jobs.heist.run}`:`race:${jobs.race.run}`;
+        member.career=awardReputation(member.career,source,source.startsWith('heist:')?120:80);
+      }
     }
     // The ready grid is host owned, so neither a queued pose nor a slow client
     // can turn the countdown into a rolling start.
@@ -202,8 +335,8 @@ export class RoomAuthority {
   private ride(id:string,member:Member,driverId:string):RoomResult {
     if(!validId(driverId)||driverId===id)return no('Wybierz samochód innego gracza.');
     const driver=this.people.get(driverId),pose=member.view.pose,car=driver?.view.pose.vehicle;
-    if(pose.mode!=='foot'||pose.interior||pose.seated||pose.passengerOf)return no('Podejdź pieszo do samochodu znajomego.');
-    if(!driver||driver.view.pose.mode!=='drive'||driver.view.pose.interior||!car||car.health<=0||Math.abs(car.speed)>3||Math.hypot(pose.x-car.x,pose.z-car.z)>5.5)return no('Podejdź do zatrzymanego samochodu znajomego.');
+    if(pose.mode!=='foot'||pose.interior||pose.homeId||pose.seated||pose.passengerOf)return no('Podejdź pieszo do samochodu znajomego.');
+    if(!driver||driver.view.pose.mode!=='drive'||driver.view.pose.interior||driver.view.pose.homeId||!car||car.health<=0||Math.abs(car.speed)>3||Math.hypot(pose.x-car.x,pose.z-car.z)>5.5)return no('Podejdź do zatrzymanego samochodu znajomego.');
     if([...this.people.values()].filter(person=>person.view.pose.passengerOf===driverId).length>=3)return no('W samochodzie nie ma już wolnych miejsc.');
     member.view.pose={x:car.x,z:car.z,heading:car.heading,mode:'foot',interior:null,seated:false,vehicle:null,passengerOf:driverId};
     this.updateJobs();return yes;
@@ -251,9 +384,15 @@ export class RoomAuthority {
     // Pose pumps keep running while seated. The driver's accepted pose owns the
     // passenger position; ignoring these updates avoids repeated error notices.
     if(member.view.pose.passengerOf)return yes;
-    const bounds=value.interior==='casino'?CASINO.bounds:WORLD_BOUNDS;
+    const homeId=member.view.pose.homeId??null;
+    if(value.homeId!==undefined&&value.homeId!==null&&!['canal','loft','crew'].includes(value.homeId))return no('Niepoprawny lokal gracza.');
+    // Property transitions use home commands. Ignore the already queued pose
+    // from the previous space while a client receives the authoritative change.
+    if((value.homeId??null)!==homeId)return yes;
+    if(homeId&&(value.interior!==null||value.mode!=='foot'))return no('W mieszkaniu można poruszać się tylko pieszo.');
+    const bounds=homeId?HOME_ROOM.bounds:value.interior==='casino'?CASINO.bounds:WORLD_BOUNDS;
     if(value.x<bounds.minX||value.x>bounds.maxX||value.z<bounds.minZ||value.z>bounds.maxZ)return no('Pozycja znajduje się poza mapą.');
-    const seated=this.seats.includes(member.view.id);
+    const seated=this.seats.includes(member.view.id)||(this.tournament.snapshot(member.view.id).status==='playing'&&this.tournament.contains(member.view.id));
     if(seated&&(value.interior!=='casino'||value.mode!=='foot'||Math.hypot(value.x-member.view.pose.x,value.z-member.view.pose.z)>.5))return no('Wstań od stołu, zanim ruszysz dalej.');
     let vehicle:OnlinePose['vehicle']=null;
     if(value.mode==='drive') {
@@ -264,6 +403,7 @@ export class RoomAuthority {
       if(car.id!=='stratus'&&[...this.people.values()].some(person=>person!==member&&person.view.pose.mode==='drive'&&person.view.pose.vehicle?.id===car.id))return no('Ten samochód prowadzi już inny gracz.');
       vehicle={id:car.id,kind:car.kind,x:car.x,z:car.z,heading:Math.atan2(Math.sin(car.heading),Math.cos(car.heading)),color:car.color,speed:car.speed,health:car.health};
       if(car.id==='stratus')Object.assign(vehicle,garageVehicle(member.garage));
+      if(car.id==='stratus'&&member.career.storedCars[member.garage.selected])return no('Odbierz własny samochód z mieszkania, zanim ruszysz.');
     } else if(value.vehicle!==null)return no('Pieszy nie może jednocześnie prowadzić pojazdu.');
     const previousCar=member.view.pose.vehicle;
     if(previousCar&&(!vehicle||previousCar.id!==vehicle.id))this.releasePassengers(member.view.id);
@@ -272,16 +412,21 @@ export class RoomAuthority {
     const race=this.jobs.snapshot(member.view.id,this.now).race;
     const grid=race.status==='countdown'&&race.grid&&vehicle?.id==='stratus'?race.grid:null;
     if(grid&&vehicle)Object.assign(vehicle,grid,{heading:0,speed:0});
-    member.view.pose={x:grid?.x??value.x,z:grid?.z??value.z,heading:grid?0:Math.atan2(Math.sin(value.heading),Math.cos(value.heading)),mode:value.mode,interior:value.interior,seated,vehicle,passengerOf:null};
+    if(member.view.pose.interior==='casino'&&value.interior!=='casino'){
+      const blackjack=member.casinoGames.snapshot();
+      if(blackjack.blackjack.status==='playing')member.casinoGames.command({kind:'blackjackForfeit',version:blackjack.version},member.wallet);
+    }
+    member.view.pose={x:grid?.x??value.x,z:grid?.z??value.z,heading:grid?0:Math.atan2(Math.sin(value.heading),Math.cos(value.heading)),mode:value.mode,interior:value.interior,seated,vehicle,passengerOf:null,homeId};
     this.followPassengers(member.view.id);
-    this.reachCheckpoint(member);this.updateJobs();
+    this.reachCheckpoint(member);this.updateJobs();this.updateExpansions();
     return yes;
   }
 
   private sit(id:string,member:Member):RoomResult {
     if(this.seats.includes(id))return no('Masz już miejsce przy stole.');
     const pose=member.view.pose;
-    if(pose.passengerOf||pose.mode!=='foot'||pose.interior!=='casino'||Math.hypot(pose.x-CASINO.table.x,pose.z-CASINO.table.z)>5.5)return no('Podejdź pieszo do stołu w kasynie.');
+    if(pose.passengerOf||pose.homeId||pose.mode!=='foot'||pose.interior!=='casino'||Math.hypot(pose.x-CASINO.table.x,pose.z-CASINO.table.z)>5.5)return no('Podejdź pieszo do stołu w kasynie.');
+    if(this.tournament.contains(id)||member.casinoGames.snapshot().blackjack.status==='playing')return no('Najpierw zakończ turniej lub bieżące rozdanie blackjacka.');
     if(member.wallet<ONLINE_BUY_IN)return no('Potrzebujesz $200, aby zająć miejsce.');
     const seat=this.seats.findIndex((owner,index)=>owner===null&&(!handActive(this.table)||this.table.players[index].contributed===0));
     if(seat<0)return no('Wszystkie miejsca są zajęte. Poczekaj na kolejne rozdanie.');

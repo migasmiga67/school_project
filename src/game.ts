@@ -1,12 +1,13 @@
 import { BUILDINGS, ROADS, WORLD_BOUNDS } from './model';
 import { CASINO } from './casino-location';
-import type { GameEvent, GameState, Input, Point, Vehicle } from './model';
+import type { GameEvent, GameState, Input, Point, Vehicle, PursuitState, Roadblock } from './model';
 
 const START: Point = { x: 0, z: 68 };
 const PICKUP: Point = { x: -40, z: 0 };
 const DROP: Point = { x: 80, z: -40 };
 const RACE: Point[] = [{ x: 80, z: 80 }, { x: -80, z: 80 }, { x: -80, z: -80 }, { x: 80, z: -80 }];
-const SAFEHOUSE: Point = { x: -80, z: 0 };
+export const POLICE_SAFEHOUSE: Readonly<Point> = { x: -80, z: 0 };
+const SAFEHOUSE = POLICE_SAFEHOUSE;
 const RACE_LIMIT = 120;
 const TAU = Math.PI * 2;
 const length = (a: Point, b: Point) => Math.hypot(a.x - b.x, a.z - b.z);
@@ -14,12 +15,18 @@ const clamp = (v: number, min: number, max: number) => Math.max(min, Math.min(ma
 const angle = (v: number) => Math.atan2(Math.sin(v), Math.cos(v));
 const vehicle = (id: string, kind: Vehicle['kind'], x: number, z: number, heading: number, color: number, parked: boolean, owned = false): Vehicle => ({ id, kind, x, z, heading, speed: 0, color, parked, health: 100, owned, steer: 0, wheelPhase: 0 });
 
-interface Runtime { traffic: Map<string, number>; policeRoutes: Map<string, { target: Point; path: Point[]; at: number }>; serial: number }
+interface Runtime { traffic: Map<string, number>; policeRoutes: Map<string, { target: Point; path: Point[]; at: number }>; serial: number; lastSeen:Point|null; lastWanted:number; nextRoadblock:number; concealment:number }
 const runtimes = new WeakMap<GameState, Runtime>();
 function runtime(s: GameState): Runtime {
   let r = runtimes.get(s);
-  if (!r) { r = { traffic: new Map(), policeRoutes: new Map(), serial: 0 }; runtimes.set(s, r); }
+  if (!r) { r = { traffic: new Map(), policeRoutes: new Map(), serial: 0, lastSeen:null, lastWanted:0, nextRoadblock:0, concealment:0 }; runtimes.set(s, r); }
   return r;
+}
+function pursuitState(s:GameState):PursuitState {
+  return s.pursuit??=( {status:'clear',visible:false,hidden:false,searchSeconds:0,concealmentSeconds:0,patrols:[],roadblocks:[],helicopter:null} );
+}
+function roadblockHit(s:GameState,p:Point,radius:number):boolean {
+  return s.wanted>=2&&Boolean(s.pursuit?.roadblocks.some(b=>s.time<b.expiresAt&&Math.abs(p.x-b.x)<b.halfX+radius&&Math.abs(p.z-b.z)<b.halfZ+radius));
 }
 const trafficLoops: Point[][] = [
   [{ x: -80, z: -80 }, { x: 80, z: -80 }, { x: 80, z: 80 }, { x: -80, z: 80 }],
@@ -51,6 +58,7 @@ export function createGame(): GameState {
   const s: GameState = {
     interior: null,
     player: { ...START, heading: 0, mode: 'drive', vehicleId: 'stratus', health: 100 }, vehicles: cars, police: [],
+    pursuit:{status:'clear',visible:false,hidden:false,searchSeconds:0,concealmentSeconds:0,patrols:[],roadblocks:[],helicopter:null},
     money: 1250, wanted: 0, heat: 0, time: 0, arrestProgress: 0, collisionCooldown: 0, escapeTimer: 0,
     missionsWon: 0, bestRace: null,
     mission: { kind: 'delivery', stage: 0, active: true, clock: 0, completed: 0, waypoint: { ...PICKUP }, title: 'Specjalna przesyłka', instruction: 'Podjedź do punktu odbioru w dzielnicy Downtown.', reward: 450 },
@@ -128,6 +136,8 @@ function recover(s: GameState, events: GameEvent[], arrested = false) {
   Object.assign(s.player, START, { heading: 0, health: 100, mode: 'drive', vehicleId: car.id });
   const fine = Math.min(s.money, arrested ? 200 : 100); s.money -= fine;
   s.wanted = 0; s.heat = 0; s.police = []; s.arrestProgress = 0; s.escapeTimer = 0; s.collisionCooldown = 2;
+  Object.assign(pursuitState(s),{status:'clear',visible:false,hidden:false,searchSeconds:0,concealmentSeconds:0,roadblocks:[],helicopter:null});
+  runtime(s).lastWanted=0;runtime(s).lastSeen=null;runtime(s).concealment=0;
   runtime(s).policeRoutes.clear();
   if (s.mission.active) {
     if (s.mission.kind === 'delivery') { s.mission.stage = 0; s.mission.waypoint = { ...PICKUP }; s.mission.instruction = 'Przesyłka wróciła do nadawcy. Podjedź do punktu odbioru.'; }
@@ -176,7 +186,7 @@ function collision(s: GameState, car: Vehicle, speed: number, events: GameEvent[
 }
 function drive(s: GameState, car: Vehicle, input: Input, dt: number, events: GameEvent[]) {
   const tuning = car.tuning;
-  const tuningLevel = (value: number | undefined) => Number.isFinite(value) ? clamp(Math.floor(value!), 0, 2) : 0;
+  const tuningLevel = (value: number | undefined) => Number.isFinite(value) ? clamp(Math.floor(value!), 0, 3) : 0;
   const engine = tuningLevel(tuning?.engine), brakes = tuningLevel(tuning?.brakes), nitro = tuningLevel(tuning?.nitro);
   const acceleration = input.throttle ? (input.boost ? 19 + engine * 2 + nitro * 3 : 13 * (1 + engine * .18)) : input.brake ? (car.speed > .5 ? -23 * (1 + brakes * .25) : -10) : -Math.sign(car.speed) * Math.min(Math.abs(car.speed) / Math.max(dt, .0001), 3.6 + Math.abs(car.speed) * .12);
   car.speed = clamp(car.speed + acceleration * dt, -9, input.boost ? 35 + engine * 2 + nitro * 3 : 26 + engine * 3);
@@ -185,7 +195,11 @@ function drive(s: GameState, car: Vehicle, input: Input, dt: number, events: Gam
   car.steer += (axis - car.steer) * Math.min(1, dt * 7);
   car.heading = angle(car.heading + car.steer * Math.min(Math.abs(car.speed) / 5, 1) * Math.sign(car.speed || 1) * dt * (input.handbrake ? 2.4 : 1.45) / (1 + Math.abs(car.speed) / 42));
   const speed = car.speed;
+  const previous={x:car.x,z:car.z};
   if (move(car, Math.sin(car.heading) * speed * dt, -Math.cos(car.heading) * speed * dt, 1.5)) { collision(s, car, speed, events); car.speed *= -.18; }
+  if(roadblockHit(s,car,1.5)){
+    Object.assign(car,previous);collision(s,car,speed,events);car.speed*=-.24;
+  }
   car.wheelPhase += car.speed * dt * 1.6;
   Object.assign(s.player, { x: car.x, z: car.z, heading: car.heading });
 }
@@ -200,7 +214,11 @@ function walk(s: GameState, input: Input, dt: number) {
     const speed = input.sprint ? 6 : 3.2;
     s.player.heading = Math.atan2(x, -z);
     if (s.interior === 'casino') moveIndoor(s.player, x / norm * speed * dt, z / norm * speed * dt, .55);
-    else move(s.player, x / norm * speed * dt, z / norm * speed * dt, .55);
+    else {
+      const previous={x:s.player.x,z:s.player.z};
+      move(s.player, x / norm * speed * dt, z / norm * speed * dt, .55);
+      if(roadblockHit(s,s.player,.55))Object.assign(s.player,previous);
+    }
   }
 }
 function traffic(s: GameState, dt: number, events: GameEvent[]) {
@@ -271,13 +289,79 @@ function spawnPolice(s: GameState) {
   }
   if (s.police.length > s.wanted) s.police.length = s.wanted;
 }
+function updatePatrols(s:GameState,dt:number,events:GameEvent[]){
+  const state=pursuitState(s),car=activeVehicle(s);
+  if(s.wanted>0){state.patrols=[];return;}
+  if(state.patrols.length!==2)state.patrols=[0,1].map(index=>vehicle(`patrol-${index}`,'police',0,0,0,0xe3e9ed,false));
+  state.patrols.forEach((cop,index)=>{
+    const pose=loopPose(trafficLoops[index],(index===0?205:63)+s.time*7);
+    Object.assign(cop,pose,{speed:7,wheelPhase:s.time*11.2});
+    if(car&&length(car,cop)<2.8&&Math.abs(car.speed)>5){
+      collision(s,car,Math.max(7,Math.abs(car.speed)*.6),events);car.speed*=.65;
+    }
+  });
+}
+function updateRoadblocks(s:GameState,events:GameEvent[]){
+  const state=pursuitState(s),rt=runtime(s);
+  state.roadblocks=state.roadblocks.filter(block=>block.expiresAt>s.time&&s.wanted>=2);
+  if(s.wanted<2||s.time<rt.nextRoadblock||state.roadblocks.length)return;
+  const heading=activeVehicle(s)?.heading??s.player.heading;
+  const direction={x:Math.sin(heading),z:-Math.cos(heading)};
+  const candidates=ROADS.flatMap(x=>ROADS.map(z=>({x,z}))).filter(point=>{
+    const d=length(point,s.player);
+    return d>=28&&d<=75&&length(point,SAFEHOUSE)>15;
+  }).sort((a,b)=>{
+    const score=(point:Point)=>length(point,s.player)-((point.x-s.player.x)*direction.x+(point.z-s.player.z)*direction.z)*1.5;
+    return score(a)-score(b);
+  });
+  const point=candidates[0];rt.nextRoadblock=s.time+24;
+  if(!point)return;
+  const horizontal=Math.abs(direction.z)>=Math.abs(direction.x);
+  const block:Roadblock={...point,id:`block-${++rt.serial}`,halfX:horizontal?3.8:.65,halfZ:horizontal?.65:3.8,heading:horizontal?0:Math.PI/2,expiresAt:s.time+22};
+  state.roadblocks.push(block);
+  events.push({kind:'wanted',text:'Policja ustawiła blokadę na skrzyżowaniu. Omiń barierę poboczem albo wybierz inną ulicę.'});
+}
+function updateHelicopter(s:GameState,dt:number,target:Point,concealed:boolean):boolean{
+  const state=pursuitState(s);
+  if(s.wanted<3){state.helicopter=null;return false;}
+  if(!state.helicopter)state.helicopter={x:target.x+38,z:target.z+22,heading:0,spotted:false,searching:true};
+  const helicopter=state.helicopter;
+  // Search the last reported block rather than tracking a hidden player's coordinates.
+  const searching=!state.visible;
+  const destination=searching?{x:target.x+Math.sin(s.time*.45)*19,z:target.z+Math.cos(s.time*.45)*19}:target;
+  const dx=destination.x-helicopter.x,dz=destination.z-helicopter.z,d=Math.hypot(dx,dz),travel=Math.min(d,18*dt);
+  if(d>.01){helicopter.x+=dx/d*travel;helicopter.z+=dz/d*travel;helicopter.heading=Math.atan2(dx,-dz);}
+  helicopter.x=clamp(helicopter.x,WORLD_BOUNDS.minX,WORLD_BOUNDS.maxX);helicopter.z=clamp(helicopter.z,WORLD_BOUNDS.minZ,WORLD_BOUNDS.maxZ);
+  helicopter.spotted=!concealed&&length(helicopter,s.player)<42&&clearSight(helicopter,s.player);
+  helicopter.searching=!helicopter.spotted;
+  return helicopter.spotted;
+}
 function pursuit(s: GameState, dt: number, events: GameEvent[]) {
-  if (s.wanted <= 0) { s.police = []; s.arrestProgress = 0; s.heat = 0; return; }
-  spawnPolice(s); const rt = runtime(s), car = activeVehicle(s);
+  const state=pursuitState(s),rt=runtime(s),car=activeVehicle(s);
+  updatePatrols(s,dt,events);
+  if(s.wanted<=0){
+    s.police=[];s.arrestProgress=0;s.heat=0;rt.lastWanted=0;rt.lastSeen=null;rt.concealment=0;rt.nextRoadblock=0;
+    state.status='clear';state.visible=false;state.hidden=false;state.searchSeconds=0;state.concealmentSeconds=0;state.roadblocks=[];state.helicopter=null;
+    return;
+  }
+  state.patrols=[];
+  if(rt.lastWanted===0||!rt.lastSeen)rt.lastSeen={x:s.player.x,z:s.player.z};
+  rt.lastWanted=s.wanted;
+  // Hide only after breaking visual contact and stopping near the safehouse.
+  // A nearby officer prevents concealment; entering the zone cannot erase an active tail.
+  const groundVisible=()=>s.police.some(c=>length(c,s.player)<35&&clearSight(c,s.player));
+  const shelter=length(s.player,SAFEHOUSE)<=8&&Math.abs(car?.speed??0)<=1.5;
+  const wasVisible=groundVisible();
+  const concealed=shelter&&!wasVisible&&!s.police.some(c=>length(c,s.player)<15);
+  spawnPolice(s);
+  updateRoadblocks(s,events);
+  const helicopterVisible=updateHelicopter(s,dt,rt.lastSeen,concealed);
+  if(wasVisible||helicopterVisible)rt.lastSeen={x:s.player.x,z:s.player.z};
+  const suspect=rt.lastSeen;
   for (const cop of s.police) {
     let route = rt.policeRoutes.get(cop.id);
-    if (!route || s.time >= route.at || length(route.target, s.player) > 18) {
-      route = { target: { x: s.player.x, z: s.player.z }, path: roadRoute(cop, s.player), at: s.time + 1.2 }; rt.policeRoutes.set(cop.id, route);
+    if (!route || s.time >= route.at || length(route.target, suspect) > 8) {
+      route = { target: { ...suspect }, path: roadRoute(cop, suspect), at: s.time + 1.2 }; rt.policeRoutes.set(cop.id, route);
     }
     while (route.path.length && length(cop, route.path[0]) < .5) route.path.shift();
     const target = route.path[0];
@@ -289,12 +373,21 @@ function pursuit(s: GameState, dt: number, events: GameEvent[]) {
     } else cop.speed = 0;
     if (car && length(cop, car) < 2.8 && Math.abs(car.speed) > 5) { collision(s, car, Math.max(7, Math.abs(car.speed) * .6), events); car.speed *= .65; }
   }
-  const visible = s.police.some(c => length(c, s.player) < 35 && clearSight(c, s.player));
-  if (visible) s.heat = 0; else s.heat += dt;
-  if (s.heat >= 12) { s.wanted--; s.heat = 0; if (s.wanted === 0) { s.police = []; rt.policeRoutes.clear(); events.push({ kind: 'info', text: 'Zgubiłeś patrol. Wybrzeże jest spokojne.' }); } }
-  const close = s.police.some(c => length(c, s.player) < 3);
-  s.arrestProgress = close && (!car || Math.abs(car.speed) < 3) ? Math.min(3, s.arrestProgress + dt) : Math.max(0, s.arrestProgress - dt * 2);
-  if (s.arrestProgress >= 3) recover(s, events, true);
+  const visible=groundVisible()||helicopterVisible;
+  if(visible){s.heat=0;rt.lastSeen={x:s.player.x,z:s.player.z};rt.concealment=0;}else{s.heat+=dt;rt.concealment=concealed?rt.concealment+dt:0;}
+  state.visible=visible;state.hidden=concealed&&!visible;state.status=state.hidden?'hidden':visible?'pursuit':'search';state.searchSeconds=s.heat;state.concealmentSeconds=rt.concealment;
+  if(rt.concealment>=6){
+    s.wanted=0;s.heat=0;s.police=[];rt.policeRoutes.clear();state.status='clear';state.visible=false;state.hidden=false;state.roadblocks=[];state.helicopter=null;state.searchSeconds=0;state.concealmentSeconds=0;
+    events.push({kind:'info',text:'Przeczekałeś obławę w kryjówce. Policja straciła twój ślad.'});
+  }else if (s.heat >= 12) {
+    s.wanted--;s.heat=0;state.searchSeconds=0;
+    if(s.wanted<3)state.helicopter=null;
+    if(s.wanted<2)state.roadblocks=[];
+    if(s.wanted===0){s.police=[];rt.policeRoutes.clear();state.status='clear';state.visible=false;state.hidden=false;events.push({kind:'info',text:'Zgubiłeś patrol. Wybrzeże jest spokojne.'});}
+  }
+  const close=s.wanted>0&&s.police.some(c=>length(c,s.player)<3);
+  s.arrestProgress=close&&(!car||Math.abs(car.speed)<3)?Math.min(3,s.arrestProgress+dt):Math.max(0,s.arrestProgress-dt*2);
+  if(s.arrestProgress>=3)recover(s,events,true);
 }
 
 export function missionStart(s: GameState): GameEvent[] {
@@ -325,7 +418,7 @@ function missions(s: GameState, dt: number, events: GameEvent[]) {
     if (mission.clock <= 0) { mission.active = false; mission.outcome = 'failed'; mission.waypoint = null; mission.instruction = 'Czas minął. Naciśnij M, aby powtórzyć trasę.'; events.push({ kind: 'mission', text: 'Wyścig zakończony. Następnym razem zetnij zakręty i użyj dopalacza.' }); return; }
   }
   if (mission.kind === 'escape') {
-    const hidden = !s.police.some(c => length(c, s.player) < 35 && clearSight(c, s.player));
+    const hidden = !s.police.some(c => length(c, s.player) < 35 && clearSight(c, s.player))&&!s.pursuit?.helicopter?.spotted;
     if (mission.waypoint && length(s.player, mission.waypoint) < 9 && hidden) s.escapeTimer += dt; else s.escapeTimer = 0;
     mission.clock = Math.max(0, 12 - s.escapeTimer);
     if (s.escapeTimer >= 12) { s.wanted = 0; s.police = []; s.heat = 0; complete(s, events); }

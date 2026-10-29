@@ -116,7 +116,10 @@ describe('host-authoritative cooperative city activity',()=>{
 
   it('expires on the host deadline, never accepts a checkpoint at that deadline, and never pays failure',()=>{
     const room=create();start(room,1000);reach(room,'host',0,40,1001);reach(room,'friend',40,40,1002);
-    expect(room.tick(1000+CREW_DURATION_MS-1)).toBe(false);
+    room.tick(1000+CREW_DURATION_MS-1);
+    // Other city activities can start during the challenge; its own deadline
+    // still must not expire even one millisecond early.
+    expect(room.snapshot('host').challenge.status).toBe('active');
     reach(room,'host',40,80,1000+CREW_DURATION_MS);
     expect(room.snapshot('host').challenge).toMatchObject({status:'failed',checkpoint:2,target:null,remainingMs:0,cooldownMs:CREW_COOLDOWN_MS});
     expect(room.snapshot('host').wallet).toBe(1250);expect(room.snapshot('friend').wallet).toBe(1250);

@@ -8,6 +8,8 @@ import { RemotePlayersView } from './remote-players';
 import { CityLife, getCityEnvironment } from './city-life';
 import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
 import { BUILDINGS, ROADS, type GameState, type Vehicle } from './model';
+import { PoliceView } from './police-view';
+import { expansionLandmarks } from './expansion-landmarks';
 
 type LitMaterial = THREE.MeshStandardMaterial | THREE.MeshLambertMaterial;
 
@@ -51,6 +53,10 @@ export class CityView {
   private readonly casino: CasinoView;
   private readonly remote: RemotePlayersView;
   private readonly living: CityLife;
+  private readonly policeVisuals: PoliceView;
+  private readonly homeScene = new THREE.Scene();
+  private homeGroup: THREE.Group | null = null;
+  private homeId: string | null = null;
   private hemisphere!: THREE.HemisphereLight;
   private sunlight!: THREE.DirectionalLight;
   private solarOrb!: THREE.Mesh<THREE.SphereGeometry, THREE.MeshBasicMaterial>;
@@ -122,6 +128,10 @@ export class CityView {
     this.scene.add(this.remote.group);
     this.living = new CityLife(this.softwareRendering);
     this.scene.add(this.living.group);
+    this.policeVisuals = new PoliceView(this.softwareRendering);
+    this.scene.add(this.policeVisuals.group);const landmarks=expansionLandmarks();this.scene.add(landmarks);this.cityObjects.push(landmarks);
+    this.homeScene.background = new THREE.Color(0x121c2b);
+    this.homeScene.add(new THREE.HemisphereLight(0xcde9ff,0x41334b,2.3));
     this.scene.updateMatrixWorld(true);
     this.observer = new ResizeObserver(() => this.resize());
     this.observer.observe(parent);
@@ -418,7 +428,13 @@ export class CityView {
     visual.group.removeFromParent();geometries.forEach(geometry=>geometry.dispose());materials.forEach(material=>material.dispose());
   }
 
-  get presentation(): 'city' | 'casino' | 'poker' { return this.seated ? 'poker' : this.indoors ? 'casino' : 'city'; }
+  get presentation(): 'city' | 'casino' | 'poker' | 'home' { return this.homeGroup ? 'home' : this.seated ? 'poker' : this.indoors ? 'casino' : 'city'; }
+  setHome(homeId:string|null,group:THREE.Group|null) {
+    if(this.homeId===homeId&&this.homeGroup===group)return;
+    this.homeGroup?.removeFromParent();this.homeId=homeId;this.homeGroup=group;this.initialized=false;
+    if(group){this.homeScene.add(group,this.hero,this.remote.group);}else this.scene.add(this.hero,this.remote.group);
+  }
+  addCityObject(group:THREE.Group){this.scene.add(group);}
   get remotePlayers() { return this.remote.visibleCount; }
   get cityLifeSnapshot() { return this.living.snapshot; }
   setOnline(members: OnlineMember[], selfId: string) {
@@ -432,6 +448,7 @@ export class CityView {
     this.casino.updatePoker(state, seated);
   }
   update(state: GameState, dt: number, cameraMode: number, pose?: CameraPose, navigation?: Point, crewTarget=false, citySeconds=state.time) {
+    if(this.homeGroup){this.updateHome(state,dt,cameraMode,pose);return;}
     const inside = state.interior === 'casino';
     if(inside !== this.indoors) {
       this.indoors = inside;this.initialized = false;
@@ -442,6 +459,7 @@ export class CityView {
     }
     const environment=getCityEnvironment(citySeconds);
     this.living.update(citySeconds,state.player,inside,dt);
+    this.policeVisuals.update(state,dt);this.policeVisuals.group.visible=!inside;
     if(inside){
       this.hemisphere.intensity=2.25;this.hemisphere.color.setHex(0xd6ebf8);this.hemisphere.groundColor.setHex(0x8a666c);
       this.sunlight.intensity=3.2;this.sunlight.color.setHex(0xffd1a1);
@@ -528,6 +546,23 @@ export class CityView {
     }
     this.remote.update(this.onlineMembers, this.onlineSelf, state.interior, dt,cameraMode===2&&riding?p.passengerOf??undefined:undefined);
     this.camera.lookAt(lookAt); this.renderer.render(this.scene, this.camera);this.renderFrames++;
+  }
+  private updateHome(state:GameState,dt:number,cameraMode:number,pose?:CameraPose){
+    this.visualTime+=dt;const p=state.player,yaw=pose?.yaw??p.heading,pitch=pose?.pitch??.35,zoom=pose?.zoom??1;
+    this.hero.visible=cameraMode!==2;this.hero.position.set(p.x,.1,p.z);this.hero.rotation.y=-p.heading;
+    const moved=this.lastPlayer?Math.hypot(p.x-this.lastPlayer.x,p.z-this.lastPlayer.z)>.001:false;this.lastPlayer={x:p.x,z:p.z};
+    this.heroLegs.forEach((leg,i)=>leg.rotation.x=moved?Math.sin(this.visualTime*10+i*Math.PI)*.45:0);
+    this.heroArms.forEach((arm,i)=>arm.rotation.x=moved?-Math.sin(this.visualTime*10+i*Math.PI)*.3:0);
+    const forward=new THREE.Vector3(Math.sin(yaw),0,-Math.cos(yaw));const pivot=new THREE.Vector3(p.x,1.5,p.z);
+    const destination=cameraMode===2?new THREE.Vector3(p.x,1.75,p.z):pivot.clone().addScaledVector(forward,-Math.cos(pitch)*4*zoom);
+    if(cameraMode!==2)destination.y+=Math.sin(pitch)*4*zoom;
+    destination.x=THREE.MathUtils.clamp(destination.x,-7.2,7.2);destination.z=THREE.MathUtils.clamp(destination.z,-5.7,7.2);destination.y=THREE.MathUtils.clamp(destination.y,.7,5.4);
+    if(!this.initialized||cameraMode!==this.lastMode){this.camera.position.copy(destination);this.initialized=true;this.lastMode=cameraMode;}else this.camera.position.lerp(destination,1-Math.exp(-Math.min(dt,.2)*8));
+    const lookAt=cameraMode===2?destination.clone().addScaledVector(forward,10):pivot.clone().addScaledVector(forward,1);
+    if(cameraMode===2)lookAt.y-=Math.tan(pitch)*10;
+    if(this.camera.fov!==58){this.camera.fov=58;this.camera.updateProjectionMatrix();}
+    this.remote.update(this.onlineMembers,this.onlineSelf,null,dt,undefined,this.homeId);
+    this.camera.lookAt(lookAt);this.renderer.render(this.homeScene,this.camera);this.renderFrames++;
   }
   resize() { const width = Math.max(1, this.parent.clientWidth), height = Math.max(1, this.parent.clientHeight); this.camera.aspect = width / height; this.camera.updateProjectionMatrix(); this.renderer.setSize(width, height, false); }
   destroy() { this.observer.disconnect(); this.living.destroy(); this.remote.destroy(); this.casino.destroy(); this.scene.traverse(object => { if (object instanceof THREE.Mesh) { object.geometry.dispose(); for (const material of Array.isArray(object.material) ? object.material : [object.material]) material.dispose(); } }); if(this.cityBackground instanceof THREE.Texture)this.cityBackground.dispose();this.glowTexture.dispose(); this.smokeTexture.dispose(); this.renderer.dispose(); this.renderer.domElement.remove(); }

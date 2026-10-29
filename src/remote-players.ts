@@ -220,7 +220,7 @@ export class RemotePlayersView {
     this.visuals.delete(id);
   }
 
-  update(members: OnlineMember[], selfId: string, interior: 'casino' | null, dt: number, hideVehicleOf?:string) {
+  update(members: OnlineMember[], selfId: string, interior: 'casino' | null, dt: number, hideVehicleOf?:string,homeId?:string|null) {
     if (this.destroyed) return;
     const step = Number.isFinite(dt) ? Math.min(.2, Math.max(0, dt)) : 0;
     const blend = 1 - Math.exp(-step * 14);
@@ -233,7 +233,7 @@ export class RemotePlayersView {
       const pose = member.pose,riding=Boolean(pose.passengerOf),driver=riding?members.find(person=>person.id===pose.passengerOf):undefined;
       const rideVehicle=driver?.pose.mode==='drive'?driver.pose.vehicle:null;
       const driving = !riding&&pose.mode === 'drive' && pose.vehicle !== null;
-      const visible = pose.interior === interior && !(pose.interior === 'casino' && pose.seated);
+      const visible = (pose.homeId??null)===(homeId??null) && pose.interior === interior && !(pose.interior === 'casino' && pose.seated);
       visual.root.visible = visible;
       if (!visible) { visual.initialized = false; continue; }
       this.count++;
