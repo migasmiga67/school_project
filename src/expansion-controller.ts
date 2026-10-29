@@ -239,7 +239,9 @@ export class CityExpansion {
    this.homeHint.textContent=`${home==='crew'?CREW_BASE.name:HOMES[home].name} · E przy drzwiach: wyjście · E przy stole: planowanie`;
    const set=(id:string,text:string)=>{const node=document.getElementById(id);if(node)node.textContent=text;};
    set('district',home==='crew'?'DOCKHOUSE':HOMES[home].name.toUpperCase());set('map-location','Wnętrze mieszkania');set('mission-title','Twoje miejsce w mieście');set('mission-instruction','Podejdź do stołu planowania albo naciśnij L, aby zarządzać wyposażeniem i parkingiem.');set('mission-label','KRYJÓWKA · WNĘTRZE 3D');set('mission-status','W DOMU');set('car-name','WNĘTRZE · SWOBODNY RUCH');set('clock','⌂ KRYJÓWKA');
+   set('mission-distance','Stół planowania · E');set('mission-reward','Kontakty · L');set('map-hint','⌂ Wyjście · Stół planowania');
    document.querySelector('#wanted')?.classList.add('hidden');document.querySelector('#city-event')?.classList.add('hidden');document.querySelector('#interaction')?.classList.remove('hidden');
+   document.querySelector('#mission-progress')?.classList.add('hidden');document.querySelector('#escape')?.classList.add('hidden');
    document.querySelector('#mission-next')?.classList.add('hidden');document.querySelector('#crew-start')?.classList.add('hidden');
    set('interaction-text',near(state.player,HOME_ROOM.exit,1.1)?'Wyjdź z mieszkania':near(state.player,HOME_ROOM.planning,3)?'Podejdź do planu napadu':'Kontakty, wyposażenie i parking');
   }else if(!state.interior){
