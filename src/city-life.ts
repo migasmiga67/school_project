@@ -56,6 +56,8 @@ export class CityLife {
   readonly group=new THREE.Group();
   private readonly geometry=new THREE.BoxGeometry(1,1,1);
   private readonly people:THREE.InstancedMesh[]=[];
+  private readonly peopleColors:THREE.Color[][]=[[],[],[],[]];
+  private readonly visiblePeople:number[]=[];
   private readonly rainMesh:THREE.InstancedMesh;
   private readonly rainMaterial=new THREE.MeshBasicMaterial({color:0xc2e7ff,transparent:true,opacity:.5,depthWrite:false});
   private readonly lampMaterial=new THREE.MeshBasicMaterial({color:0xffe1a0});
@@ -71,21 +73,22 @@ export class CityLife {
   private lastEventId='';
   private current={pedestrians:PEDESTRIAN_COUNT,rainDrops:0,rain:0,daylight:1,weather:'BEZCHMURNIE' as CityEnvironment['weather'],eventId:null as string|null,period:'ZACHÓD SŁOŃCA' as CityEnvironment['period']};
 
-  constructor(software:boolean) {
+  constructor(private readonly software:boolean) {
     this.group.name='city-life';
     const material=new THREE.MeshLambertMaterial({color:0xffffff});
-    const head=new THREE.SphereGeometry(.5,8,6),torso=new THREE.CapsuleGeometry(.5,.4,3,8).scale(1,1/1.4,1),limb=new THREE.CapsuleGeometry(.5,.55,3,6).scale(1,1/1.55,1);
+    const head=new THREE.SphereGeometry(.5,software?6:8,software?4:6),torso=new THREE.CapsuleGeometry(.5,.4,software?2:3,software?6:8).scale(1,1/1.4,1),limb=new THREE.CapsuleGeometry(.5,.55,software?2:3,6).scale(1,1/1.55,1);
     for(const [count,geometry] of [[PEDESTRIAN_COUNT,head],[PEDESTRIAN_COUNT,torso],[PEDESTRIAN_COUNT*2,limb],[PEDESTRIAN_COUNT*2,limb]] as const){
       const mesh=new THREE.InstancedMesh(geometry,material,count);mesh.instanceMatrix.setUsage(THREE.DynamicDrawUsage);mesh.frustumCulled=false;
       this.people.push(mesh);this.group.add(mesh);
     }
     const shirts=[0x679ca8,0xb67c77,0x8b80ae,0xc4a76b,0x67a68d,0x526b88];
+    const setColor=(part:number,index:number,color:number)=>{const value=new THREE.Color(color);this.peopleColors[part][index]=value;this.people[part].setColorAt(index,value);};
     for(let i=0;i<PEDESTRIAN_COUNT;i++){
-      this.people[0].setColorAt(i,new THREE.Color([0xd4a37d,0x9c6f54,0xc28e6c,0x6c4938][i%4]));
-      this.people[1].setColorAt(i,new THREE.Color(shirts[i%shirts.length]));
+      setColor(0,i,[0xd4a37d,0x9c6f54,0xc28e6c,0x6c4938][i%4]);
+      setColor(1,i,shirts[i%shirts.length]);
       for(let side=0;side<2;side++){
-        this.people[2].setColorAt(i*2+side,new THREE.Color(shirts[i%shirts.length]));
-        this.people[3].setColorAt(i*2+side,new THREE.Color(i%3?0x25394d:0x625b58));
+        setColor(2,i*2+side,shirts[i%shirts.length]);
+        setColor(3,i*2+side,i%3?0x25394d:0x625b58);
       }
     }
     this.rainMesh=new THREE.InstancedMesh(this.geometry,this.rainMaterial,software?128:480);
@@ -143,16 +146,31 @@ export class CityLife {
     this.group.visible=!indoors;
     this.current={pedestrians:PEDESTRIAN_COUNT,rainDrops:environment.rain>.01?this.rainMesh.count:0,rain:environment.rain,daylight:environment.daylight,weather:environment.weather,eventId:event?.id??null,period:environment.period};
     if(!indoors){
+      let visible=0,colorsChanged=false;
       for(let i=0;i<PEDESTRIAN_COUNT;i++){
         const pose=pedestrianPose(i,elapsed),stride=Math.sin(elapsed*5+i)*.38;
+        // The full city population keeps its route; software WebGL draws nearby people.
+        if(this.software&&(pose.x-player.x)**2+(pose.z-player.z)**2>10000)continue;
+        const index=visible++;
+        if(this.software&&this.visiblePeople[index]!==i){
+          this.visiblePeople[index]=i;colorsChanged=true;
+          for(let mesh=0;mesh<this.people.length;mesh++){
+            const parts=mesh<2?1:2;
+            for(let part=0;part<parts;part++)this.people[mesh].setColorAt(index*parts+part,this.peopleColors[mesh][i*parts+part]);
+          }
+        }
         this.dummy.position.set(pose.x,.05,pose.z);this.dummy.rotation.set(0,-pose.heading,0);this.dummy.scale.set(1,1,1);this.dummy.updateMatrix();
-        this.personPart(0,i,0,1.6,0,.4,.42,.4);this.personPart(1,i,0,1.09,0,.52,.7,.34);
+        this.personPart(0,index,0,1.6,0,.4,.42,.4);this.personPart(1,index,0,1.09,0,.52,.7,.34);
         for(let side=0;side<2;side++){
-          const sign=side?1:-1;this.personPart(2,i*2+side,sign*.36,1.1,0,.17,.64,.22,stride*sign);
-          this.personPart(3,i*2+side,sign*.15,.4,0,.2,.8,.26,-stride*sign);
+          const sign=side?1:-1;this.personPart(2,index*2+side,sign*.36,1.1,0,.17,.64,.22,stride*sign);
+          this.personPart(3,index*2+side,sign*.15,.4,0,.2,.8,.26,-stride*sign);
         }
       }
-      for(const mesh of this.people)mesh.instanceMatrix.needsUpdate=true;
+      this.visiblePeople.length=visible;
+      for(let index=0;index<this.people.length;index++){
+        const mesh=this.people[index];mesh.count=visible*(index<2?1:2);mesh.instanceMatrix.needsUpdate=true;
+        if(colorsChanged&&mesh.instanceColor)mesh.instanceColor.needsUpdate=true;
+      }
       this.rainMesh.visible=environment.rain>.01;this.rainMaterial.opacity=.25+environment.rain*.32;
       if(this.rainMesh.visible)for(let i=0;i<this.rainMesh.count;i++){
         const x=((i*17.31)%52)-26,z=((i*23.71)%52)-26,y=((i*7.3-elapsed*18)%25+25)%25;

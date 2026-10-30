@@ -99,8 +99,8 @@ export class CityView {
     const debug = gl.getExtension('WEBGL_debug_renderer_info');
     const device = debug ? String(gl.getParameter(debug.UNMASKED_RENDERER_WEBGL)) : '';
     this.softwareRendering = /swiftshader|llvmpipe|software/i.test(device);
-    if(this.softwareRendering){this.camera.far=260;this.camera.updateProjectionMatrix();}
-    this.renderer.setPixelRatio(this.softwareRendering ? 0.65 : Math.min(window.devicePixelRatio || 1, 1.5));
+    if(this.softwareRendering){this.camera.far=170;this.camera.updateProjectionMatrix();}
+    this.renderer.setPixelRatio(this.softwareRendering ? 0.55 : Math.min(window.devicePixelRatio || 1, 1.5));
     this.renderer.shadowMap.enabled = !this.softwareRendering;
     this.renderer.shadowMap.type = THREE.PCFSoftShadowMap;
     this.renderer.outputColorSpace = THREE.SRGBColorSpace;
@@ -109,12 +109,12 @@ export class CityView {
     this.surfaces=new SurfaceLibrary(this.softwareRendering,Math.min(8,this.renderer.capabilities.getMaxAnisotropy()));
     this.atmosphere=new AtmosphereView(this.softwareRendering);
     // Keep the sky inside the shorter software-rendering view distance.
-    if(this.softwareRendering)this.atmosphere.group.scale.setScalar(220/540);
+    if(this.softwareRendering)this.atmosphere.group.scale.setScalar(145/540);
     this.scene.add(this.atmosphere.group);
     this.renderer.domElement.setAttribute('aria-label', 'Trójwymiarowe miasto Neon Coast');
     parent.append(this.renderer.domElement);
     this.scene.background = this.sky();
-    this.scene.fog = new THREE.Fog(0xc5c0b4,this.softwareRendering?90:145,this.softwareRendering?240:540);
+    this.scene.fog = new THREE.Fog(0xc5c0b4,this.softwareRendering?70:145,this.softwareRendering?160:540);
     this.glowTexture = this.radial('#fff3cc');
     this.smokeTexture = this.radial('#bac6d0');
     this.lighting();
@@ -440,11 +440,11 @@ export class CityView {
     const sporty = vehicle.kind === 'sport'; const paint = this.material(vehicle.color, { metalness: 0.3, roughness: 0.36 });
     const black = this.material(0x25353e, { metalness: 0.25, roughness: 0.35 }); const tire = this.material(0x20252a); const chrome = this.material(0xc1c7c5, { metalness: 0.65, roughness: 0.3 });
     const bodyLength = sporty ? 4.5 : 4.7;
-    this.mesh(new RoundedBoxGeometry(1.95,.64,bodyLength,3,.16),paint,group,0,.7,0);
+    this.mesh(new RoundedBoxGeometry(1.95,.64,bodyLength,this.softwareRendering?1:3,.16),paint,group,0,.7,0);
     this.box(1.93, 0.13, bodyLength + 0.08, black, group, 0, 0.39, 0);
-    this.mesh(new RoundedBoxGeometry(1.7,.22,1.3,2,.08),paint,group,0,1.06,-1.4);
+    this.mesh(new RoundedBoxGeometry(1.7,.22,1.3,this.softwareRendering?1:2,.08),paint,group,0,1.06,-1.4);
     this.box(1.62, sporty ? 0.58 : 0.78, 1.9, black, group, 0, sporty ? 1.21 : 1.32, 0.1);
-    this.mesh(new RoundedBoxGeometry(1.63,.12,1.55,2,.055),paint,group,0,sporty?1.54:1.75,.18);
+    this.mesh(new RoundedBoxGeometry(1.63,.12,1.55,this.softwareRendering?1:2,.055),paint,group,0,sporty?1.54:1.75,.18);
     const glass = this.material(0x78a4b1, { roughness: 0.15, metalness: 0.5 });
     const windscreen = this.box(1.49, sporty ? 0.45 : 0.58, 0.06, glass, group, 0, sporty ? 1.31 : 1.42, -0.86); windscreen.rotation.x = -0.28;
     const rear = this.box(1.46, 0.43, 0.06, glass, group, 0, sporty ? 1.29 : 1.43, 1.05); rear.rotation.x = 0.24;
@@ -465,7 +465,7 @@ export class CityView {
     for (const x of [-1.02, 1.02]) for (const z of [-1.4, 1.4]) {
       const steer = new THREE.Group(); steer.position.set(x, 0.45, z); group.add(steer);
       const spin = new THREE.Group(); steer.add(spin);
-      const wheel = this.mesh(new THREE.CylinderGeometry(0.42, 0.42, 0.26, 20), tire, spin); wheel.rotation.z = Math.PI / 2;
+      const wheel = this.mesh(new THREE.CylinderGeometry(0.42, 0.42, 0.26,this.softwareRendering?12:20), tire, spin); wheel.rotation.z = Math.PI / 2;
       const hub = this.mesh(new THREE.CylinderGeometry(0.24, 0.24, 0.28, 12), chrome, spin); hub.rotation.z = Math.PI / 2;
       wheels.push(spin); if (z < 0) frontWheels.push(steer);
     }
@@ -536,7 +536,7 @@ export class CityView {
       this.solarOrb.visible=false;this.solarHalo.visible=false;
     }else{
       this.scene.background=this.outsideSky.setHex(environment.sky);
-      if(this.scene.fog instanceof THREE.Fog){this.scene.fog.color.setHex(environment.fog);this.scene.fog.near=this.softwareRendering?90-environment.rain*25:145-environment.rain*40;this.scene.fog.far=this.softwareRendering?240-environment.rain*60:540-environment.rain*140;}
+      if(this.scene.fog instanceof THREE.Fog){this.scene.fog.color.setHex(environment.fog);this.scene.fog.near=this.softwareRendering?70-environment.rain*20:145-environment.rain*40;this.scene.fog.far=this.softwareRendering?160-environment.rain*45:540-environment.rain*140;}
       this.hemisphere.intensity=1.0+environment.daylight*1.25;this.hemisphere.color.setHex(environment.daylight<.1?0xb6c8ef:0xd6ebf8);this.hemisphere.groundColor.setHex(environment.daylight<.1?0x41445f:0x8a666c);
       this.sunlight.intensity=.15+environment.daylight*3;this.sunlight.color.setHex(environment.sunColor);
       this.sunlight.position.set(state.player.x-100,100,state.player.z-65);this.sunlight.target.position.set(state.player.x,0,state.player.z);

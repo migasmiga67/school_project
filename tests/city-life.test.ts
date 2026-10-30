@@ -1,6 +1,7 @@
-import { describe,expect,it } from 'vitest';
+import { describe,expect,it,vi } from 'vitest';
+import * as THREE from 'three';
 import { BUILDINGS } from '../src/model';
-import { cityEventAt,getCityEnvironment,pedestrianPose,PEDESTRIAN_COUNT } from '../src/city-life';
+import { CityLife,cityEventAt,getCityEnvironment,pedestrianPose,PEDESTRIAN_COUNT } from '../src/city-life';
 
 describe('shared city clock and opportunities',()=>{
   it('starts at18:42, completes a day in720seconds and stays finite on invalid input',()=>{
@@ -34,4 +35,29 @@ describe('shared city clock and opportunities',()=>{
       expect(p.heading).toBeGreaterThanOrEqual(-Math.PI);expect(p.heading).toBeLessThanOrEqual(Math.PI);
     }
   });
+});
+
+it('keeps nearby pedestrian poses and colours when the software view changes districts',()=>{
+  vi.stubGlobal('document',{createElement:()=>({width:0,height:0,getContext:()=>({fillRect(){},strokeRect(){},fillText(){}})})});
+  const full=new CityLife(false),light=new CityLife(true);
+  try{
+    const meshes=(city:CityLife)=>city.group.children.filter((object):object is THREE.InstancedMesh=>object instanceof THREE.InstancedMesh).slice(0,4);
+    const fullPeople=meshes(full),lightPeople=meshes(light);
+    for(const [seconds,player]of[[0,{x:0,z:0}],[35,{x:-180,z:20}],[66,{x:80,z:-160}]]as const){
+      full.update(seconds,player,false,.016);light.update(seconds,player,false,.016);
+      const nearby=Array.from({length:PEDESTRIAN_COUNT},(_,i)=>i).filter(i=>{const p=pedestrianPose(i,seconds);return(p.x-player.x)**2+(p.z-player.z)**2<=10000;});
+      expect(nearby.length).toBeGreaterThan(0);expect(nearby.length).toBeLessThan(PEDESTRIAN_COUNT);
+      expect(light.snapshot.pedestrians).toBe(PEDESTRIAN_COUNT);
+      for(let part=0;part<4;part++){
+        const limbs=part<2?1:2;
+        expect(lightPeople[part].count).toBe(nearby.length*limbs);
+        nearby.forEach((source,index)=>{for(let side=0;side<limbs;side++){
+          const expected=new THREE.Matrix4(),actual=new THREE.Matrix4(),expectedColor=new THREE.Color(),actualColor=new THREE.Color();
+          fullPeople[part].getMatrixAt(source*limbs+side,expected);lightPeople[part].getMatrixAt(index*limbs+side,actual);
+          fullPeople[part].getColorAt(source*limbs+side,expectedColor);lightPeople[part].getColorAt(index*limbs+side,actualColor);
+          expect(actual.elements).toEqual(expected.elements);expect(actualColor).toEqual(expectedColor);
+        }});
+      }
+    }
+  }finally{full.destroy();light.destroy();vi.unstubAllGlobals();}
 });
