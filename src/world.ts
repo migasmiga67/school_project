@@ -99,6 +99,16 @@ export class CityView {
     const debug = gl.getExtension('WEBGL_debug_renderer_info');
     const device = debug ? String(gl.getParameter(debug.UNMASKED_RENDERER_WEBGL)) : '';
     this.softwareRendering = /swiftshader|llvmpipe|software/i.test(device);
+    if(this.softwareRendering){
+      // Multisampling is fixed when WebGL creates the context. Recreate it before
+      // attaching the canvas or uploading resources, retaining smooth edges on GPU.
+      this.renderer.dispose();this.renderer.forceContextLoss();
+      try{
+        this.renderer=new THREE.WebGLRenderer({antialias:false,alpha:false,powerPreference:'high-performance'});
+      }catch{
+        throw new Error('Nie udało się uruchomić grafiki WebGL. Włącz akcelerację sprzętową lub użyj aktualnego Chrome / Firefox.');
+      }
+    }
     if(this.softwareRendering){this.camera.far=170;this.camera.updateProjectionMatrix();}
     this.renderer.setPixelRatio(this.softwareRendering ? 0.55 : Math.min(window.devicePixelRatio || 1, 1.5));
     this.renderer.shadowMap.enabled = !this.softwareRendering;

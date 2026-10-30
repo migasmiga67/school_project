@@ -1,20 +1,18 @@
 import { expect,test,type BrowserContext,type Page } from '@playwright/test';
 import type { GameState } from '../src/model';
 import type { MultiplayerState } from '../src/multiplayer-model';
+import { CASINO } from '../src/casino-location';
+import { CASINO_GAMES } from '../src/casino-games-location';
+import { walk,walkTo } from './browser-navigation';
 
 type Snapshot={state:GameState;paused:boolean;online:MultiplayerState;rendering:{frames:number};expansion:{casinoOpen:boolean;casinoStation:string|null}};
 const snapshot=(page:Page):Promise<Snapshot>=>page.evaluate(()=>(window as unknown as{__NEON_TEST__:Snapshot}).__NEON_TEST__);
-async function move(page:Page,key:string,axis:'x'|'z',target:number,increasing:boolean){
- await page.keyboard.down(key);
- try{await expect.poll(async()=>{const value=(await snapshot(page)).state.player[axis];return increasing?value>=target:value<=target;},{timeout:15000,intervals:[50,100]}).toBe(true);}
- finally{await page.keyboard.up(key);}
-}
 async function visitTournament(page:Page){
  await page.bringToFront();if((await snapshot(page)).paused)await page.locator('#resume').click();
  await page.keyboard.press('e');await expect.poll(async()=>(await snapshot(page)).state.player.mode).toBe('foot');
- await move(page,'s','z',75,true);await move(page,'d','x',18.5,true);await move(page,'w','z',74.5,false);await page.keyboard.press('e');
+ await walk(page,'z',75,false,15000);await walkTo(page,CASINO.door,'x',false,15000);await page.keyboard.press('e');
  await expect.poll(async()=>(await snapshot(page)).state.interior).toBe('casino');
- await move(page,'a','x',-6.8,false);await move(page,'w','z',-4.8,false);await page.keyboard.press('e');
+ await walkTo(page,CASINO_GAMES.tournament,'x',false,15000);await page.keyboard.press('e');
  await expect(page.locator('#casino-games-dialog')).toBeVisible();await expect(page.locator('#casino-games-title')).toHaveText('TURNIEJ PRZYJACIÓŁ');
 }
 

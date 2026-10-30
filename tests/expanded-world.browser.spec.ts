@@ -1,5 +1,7 @@
 import { expect, test, type Page } from '@playwright/test';
-import { WORLD_BOUNDS, type GameState, type Point } from '../src/model';
+import { WORLD_BOUNDS, type GameState, type Input, type Point } from '../src/model';
+import { synchronizeOnlineTraffic } from '../src/game';
+import { advanceSimulation } from '../src/simulation';
 import { MAP_AREA_RATIO, WORLD_LANDMARKS } from '../src/world-layout';
 
 interface Snapshot {
@@ -11,6 +13,29 @@ interface Snapshot {
 }
 const snapshot = (page: Page): Promise<Snapshot> => page.evaluate(() =>
   (window as unknown as { __NEON_TEST__: Snapshot }).__NEON_TEST__);
+
+const driveInput: Input = {
+  throttle: true, brake: false, left: false, right: false, handbrake: false,
+  boost: false, sprint: false, interact: false, nextMission: false, reset: false,
+};
+const launchOffsets = [0, .4, .8];
+function northboundTrafficGap(state: GameState): boolean {
+  // Forecast detached copies only. The browser keeps all traffic and advances
+  // normally while the driver waits for a gap at the crossing avenues.
+  return launchOffsets.every(offset => {
+    const forecast = structuredClone(state);
+    forecast.time += offset;
+    synchronizeOnlineTraffic(forecast, forecast.time);
+    const car = forecast.vehicles.find(vehicle => vehicle.id === forecast.player.vehicleId);
+    if (!car || car.health < 100 || forecast.wanted > 0) return false;
+    for (let frame = 0; frame < 12 * 30; frame++) {
+      advanceSimulation(forecast, driveInput, 1 / 30);
+      if (car.health < 100 || forecast.wanted > 0) return false;
+      if (forecast.player.z < -132) return true;
+    }
+    return false;
+  });
+}
 
 async function stop(page: Page) {
   await page.keyboard.down(' ');
@@ -45,7 +70,11 @@ test('nowa dzielnica jest osiągalna samochodem poza starą granicą i widoczna 
   await page.locator(`#phone-route-${landmark.id}`).click();
   await expect(page.locator('#phone-root')).toHaveCount(0);
   await expect.poll(async () => (await snapshot(page)).navigation.route.at(-1)).toEqual(landmark.point);
-  const before = await snapshot(page);
+  let before = await snapshot(page);
+  await expect.poll(async () => {
+    before = await snapshot(page);
+    return northboundTrafficGap(before.state);
+  }, { intervals: [100, 200] }).toBe(true);
   const driveStartedAt = Date.now();
 
   // Follow the northbound avenue with actual driving input. The old map ended
@@ -74,6 +103,7 @@ test('nowa dzielnica jest osiągalna samochodem poza starą granicą i widoczna 
     body: JSON.stringify({
       start: before.rendering, northFinancial: arrived.rendering,
       driveWallSeconds: (Date.now() - driveStartedAt) / 1000,
+      driveStartWorldSeconds: before.state.time, launchOffsets,
       startPoint: before.state.player, endPoint: arrived.state.player,
     }, null, 2), contentType: 'application/json',
   });

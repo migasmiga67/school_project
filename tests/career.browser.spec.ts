@@ -1,6 +1,7 @@
 import { expect,test,type Page } from '@playwright/test';
-import type { CareerState } from '../src/career';
+import { CONTACTS,HOMES,HOME_ROOM,type CareerState } from '../src/career';
 import type { GameState } from '../src/model';
+import { approach,walk,walkTo } from './browser-navigation';
 
 interface Snapshot {
   state:GameState;
@@ -10,12 +11,6 @@ interface Snapshot {
   rendering:{view:string;frames:number};
 }
 const snapshot=(page:Page):Promise<Snapshot>=>page.evaluate(()=>(window as unknown as {__NEON_TEST__:Snapshot}).__NEON_TEST__);
-async function walk(page:Page,key:string,axis:'x'|'z',target:number,increasing:boolean){
-  await page.keyboard.down(key);
-  try{
-    await expect.poll(async()=>{const value=(await snapshot(page)).state.player[axis];return increasing?value>=target:value<=target;},{timeout:25000,intervals:[50,100]}).toBe(true);
-  }finally{await page.keyboard.up(key);}
-}
 async function start(page:Page){
   await page.goto('./');await page.locator('#start-game').click();
   await expect.poll(async()=>(await snapshot(page)).started).toBe(true);
@@ -38,21 +33,19 @@ test('kupione mieszkanie ma dostępne wnętrze 3D, wyposażenie i zapis po odśw
   await expect.poll(async()=>(await snapshot(page)).expansion.career.furniture.canal).toEqual(['sofa']);
   await expect.poll(async()=>(await snapshot(page)).state.money).toBe(190);
   await page.locator('#career-route-canal').click();await expect(page.locator('#career-root')).toHaveCount(0);
-  await leaveCar(page);await page.keyboard.down('Shift');
-  try{
-    // Stay on the outer avenues, well away from the automatic reward at(-40,40).
-    // A narrow pass just outside its radius depends on software-GPU key-up timing.
-    await walk(page,'s','z',80,true);await walk(page,'a','x',-80,false);
-    await walk(page,'w','z',40,false);await page.keyboard.up('Shift');
-    await walk(page,'d','x',-60,true);
-    await walk(page,'w','z',34.5,false);
-  }finally{await page.keyboard.up('Shift');}
+  await leaveCar(page);
+  // Stay on the outer avenues, well away from the automatic reward at(-40,40).
+  await walkTo(page,{x:0,z:80},'z',true);
+  await walkTo(page,{x:-80,z:80},'x',true);
+  await walkTo(page,{x:-80,z:40},'z',true);
+  await walkTo(page,HOMES.canal.parking,'x');
+  await walkTo(page,HOMES.canal.door,'z');
   await expect(page.locator('#interaction-text')).toContainText('mieszkania');await page.keyboard.press('e');
   await expect.poll(async()=>(await snapshot(page)).expansion.home).toBe('canal');
   await expect.poll(async()=>(await snapshot(page)).rendering.view).toBe('home');
   await expect(page.locator('#home-status')).toContainText('Mieszkanie nad kanałem');
   const entered=await snapshot(page),beforeFrames=entered.rendering.frames;
-  await walk(page,'w','z',.5,false);await walk(page,'a','x',-2.5,false);
+  await walk(page,'z',.5);await walk(page,'x',-2.5);
   expect((await snapshot(page)).rendering.frames).toBeGreaterThan(beforeFrames);
   expect((await snapshot(page)).expansion.home).toBe('canal');
   await page.screenshot({path:info.outputPath('owned-home-interior.png'),fullPage:true});
@@ -60,7 +53,7 @@ test('kupione mieszkanie ma dostępne wnętrze 3D, wyposażenie i zapis po odśw
   await expect(page.locator('#career-rest-canal')).toBeEnabled();await page.locator('#career-rest-canal').click();
   await expect(page.locator('#career-message')).toContainText('Zdrowie przywrócone');
   await page.screenshot({path:info.outputPath('owned-home-management.png'),fullPage:true});await page.locator('#career-close').click();
-  await walk(page,'d','x',0,true);await walk(page,'s','z',6.2,true);await page.keyboard.press('e');
+  await walkTo(page,HOME_ROOM.exit,'x');await approach(page,HOME_ROOM.exit,.8);await page.keyboard.press('e');
   await expect.poll(async()=>(await snapshot(page)).expansion.home).toBeNull();
   await expect.poll(async()=>(await snapshot(page)).rendering.view).toBe('city');
   expect((await snapshot(page)).state.money).toBe(190);
@@ -76,14 +69,14 @@ test('zlecenie kontaktu zalicza rzeczywistą trasę, wypłaca raz i zapisuje rep
   await page.keyboard.press('l');await expect(page.locator('#career-contract-milo')).toBeDisabled();
   await page.locator('#career-contract-nova').click();
   await expect.poll(async()=>(await snapshot(page)).expansion.career.activeContract?.id).toBe('nova');
-  await page.locator('#career-contract-route').click();await leaveCar(page);await page.keyboard.down('Shift');
+  await page.locator('#career-contract-route').click();await leaveCar(page);
   let beforeDelivery=0;
-  try{
-    await walk(page,'w','z',40,false);await walk(page,'a','x',-40,false);
-    await expect.poll(async()=>(await snapshot(page)).expansion.career.activeContract?.stage).toBe(1);
-    await walk(page,'w','z',-40,false);beforeDelivery=(await snapshot(page)).state.money;
-    await walk(page,'d','x',40,true);
-  }finally{await page.keyboard.up('Shift');}
+  const pickup=CONTACTS.nova.objectives[0].target,delivery=CONTACTS.nova.objectives[1].target;
+  await walkTo(page,{x:0,z:pickup.z},'z',true);
+  await walkTo(page,pickup,'x',true);
+  await expect.poll(async()=>(await snapshot(page)).expansion.career.activeContract?.stage).toBe(1);
+  await walkTo(page,{x:pickup.x,z:delivery.z},'z',true);beforeDelivery=(await snapshot(page)).state.money;
+  await walkTo(page,delivery,'x',true);
   await expect.poll(async()=>(await snapshot(page)).expansion.career.completedContracts).toBe(1);
   const completed=await snapshot(page);
   expect(completed.expansion.career.activeContract).toBeNull();expect(completed.expansion.career.reputation).toBe(60);

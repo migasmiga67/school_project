@@ -2,6 +2,7 @@ import { expect, test, type Browser, type BrowserContext, type Page, type TestIn
 import type { GameState } from '../src/model';
 import type { MultiplayerState, RoomSnapshot } from '../src/multiplayer-model';
 import type { PokerState } from '../src/poker-model';
+import { walkTo } from './browser-navigation';
 
 const GAME_URL = process.env.NEON_BASE_URL || 'http://127.0.0.1:5185/school_project/';
 
@@ -296,7 +297,7 @@ test('ekipa zalicza wspólną trasę, widzi GPS i otrzymuje nagrodę tylko w por
     // The host reaches the first stop using normal controls, then pauses locally.
     await host.keyboard.press('e');
     await expect.poll(async () => (await snapshot(host)).state.player.mode).toBe('foot');
-    await walkUntil(host, 'w', 'z', 40.5, false);
+    await walkTo(host, { x: 0, z: 40 }, 'z', false, 20000);
     for (const page of [host, guest]) {
       await expect.poll(async () => (await room(page)).challenge.checkpoint).toBe(1);
       expect((await room(page)).challenge.target).toEqual({ x: 40, z: 40 });
@@ -314,17 +315,17 @@ test('ekipa zalicza wspólną trasę, widzi GPS i otrzymuje nagrodę tylko w por
     if ((await snapshot(guest)).paused) await guest.locator('#resume').click();
     await guest.keyboard.press('e');
     await expect.poll(async () => (await snapshot(guest)).state.player.mode).toBe('foot');
-    await walkUntil(guest, 'w', 'z', 40.5, false);
+    await walkTo(guest, { x: 0, z: 40 }, 'z', false, 20000);
     await expect.poll(async () => (await room(host)).challenge.remainingMs).toBeLessThan(beforeGuestWalk - 1000);
     expect((await snapshot(host)).state.player).toEqual(pausedPosition);
     expect((await snapshot(host)).paused).toBe(true);
-    await walkUntil(guest, 'd', 'x', 40, true);
+    await walkTo(guest, { x: 40, z: 40 }, 'x', false, 20000);
     for (const page of [host, guest]) {
       await expect.poll(async () => (await room(page)).challenge.checkpoint).toBe(2);
       expect((await room(page)).challenge.target).toEqual({ x: 40, z: 80 });
     }
     await guest.screenshot({ path: testInfo.outputPath('crew-route-gps.png'), fullPage: true });
-    await walkUntil(guest, 's', 'z', 80, true);
+    await walkTo(guest, { x: 40, z: 80 }, 'z', false, 20000);
     for (const page of [host, guest]) {
       await expect.poll(async () => (await room(page)).challenge.status).toBe('completed');
       await expect.poll(async () => (await room(page)).wallet).toBe(1550);

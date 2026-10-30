@@ -301,10 +301,11 @@ test('napad wymaga przygotowania obu ról i prywatnej sekwencji hakera', async (
       await expect.poll(async () => (await room(guest)).jobs.heist.progress).toBe(index + 1);
     }
     for (const page of [host, guest]) {
-      await expect.poll(async () => (await room(page)).jobs.heist.status).toBe('escape');
-      expect((await room(page)).jobs.heist.target).toEqual({ x: -80, z: 0 });
-      await expect.poll(async () => (await snapshot(page)).state.wanted).toBe(3);
-      expect((await room(page)).wallet).toBe(1250);
+      // Verify the shared phase and local alarm in the same observed frame.
+      await expect.poll(async () => {
+        const current = await snapshot(page), shared = current.online.snapshot;
+        return shared && { online: current.online.status, status: shared.jobs.heist.status, target: shared.jobs.heist.target, wanted: current.state.wanted, wallet: shared.wallet };
+      }).toEqual({ online: 'online', status: 'escape', target: { x: -80, z: 0 }, wanted: 3, wallet: 1250 });
     }
     expect(pair.errors).toEqual([]); expect(pair.failed).toEqual([]);
   } catch (error) { await captureFailure(pair.contexts, info); throw error; }
