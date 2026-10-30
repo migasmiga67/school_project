@@ -1,5 +1,5 @@
 import { CASINO } from './casino-location';
-import { BUILDINGS, ROADS, WORLD_BOUNDS } from './model';
+import { BUILDINGS, ROAD_NODES, WORLD_BOUNDS } from './model';
 import { createGarage, garageAction, garageVehicle, GARAGE_LOCATION, type GarageState } from './garage';
 import { OnlineJobs } from './online-jobs';
 import { cityEventAt } from './city-life';
@@ -400,7 +400,7 @@ export class RoomAuthority {
     if(exit)return exit;
     // A disconnect must always free the seat even if a corrupted car pose was
     // surrounded by geometry; the nearest street intersection is a safe fallback.
-    return ROADS.flatMap(x=>ROADS.map(z=>({x,z}))).filter(safe).sort((a,b)=>Math.hypot(a.x-car.x,a.z-car.z)-Math.hypot(b.x-car.x,b.z-car.z))[0]??{x:0,z:80};
+    return ROAD_NODES.filter(safe).sort((a,b)=>Math.hypot(a.x-car.x,a.z-car.z)-Math.hypot(b.x-car.x,b.z-car.z))[0]??{x:0,z:80};
   }
 
   private exitRide(member:Member,forced=false):RoomResult {
@@ -450,7 +450,7 @@ export class RoomAuthority {
     if(value.mode==='drive') {
       const car=value.vehicle;
       if(value.interior!==null||!car||typeof car!=='object'||typeof car.id!=='string'||!/^[A-Za-z0-9_-]{1,64}$/.test(car.id)||!['sport','sedan','bike','boat'].includes(car.kind)||![car.x,car.z,car.heading,car.color,car.speed,car.health].every(finite)||Math.hypot(car.x-value.x,car.z-value.z)>2||Math.abs(car.speed)>50||car.health<0||car.health>100||!Number.isSafeInteger(car.color)||car.color<0||car.color>0xffffff||Math.abs(car.heading)>1e6)return no('Niepoprawny pojazd gracza.');
-      if(car.id!=='stratus'&&!/^(parked-[1-4]|traffic-[0-7]|bike-1|boat-1)$/.test(car.id))return no('Nieznany pojazd miasta.');
+      if(car.id!=='stratus'&&!/^(parked-[1-4]|traffic-(?:[0-9]|1[0-5])|bike-1|boat-1)$/.test(car.id))return no('Nieznany pojazd miasta.');
       if((car.kind==='boat')!==(car.id==='boat-1')||(car.kind==='bike')!==(car.id==='bike-1'))return no('Typ pojazdu nie pasuje do modelu miasta.');
       const carBounds=car.kind==='boat'?WATER_BOUNDS:WORLD_BOUNDS;
       if(car.x<carBounds.minX||car.x>carBounds.maxX||car.z<carBounds.minZ||car.z>carBounds.maxZ)return no('Pojazd znajduje się poza mapą.');

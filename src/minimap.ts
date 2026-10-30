@@ -1,9 +1,10 @@
 import { CASINO } from './casino-location';
-import { BUILDINGS, ROADS, type GameState, type Point } from './model';
+import { BUILDINGS, ROAD_X, ROAD_Z, WORLD_BOUNDS, NATURAL_BLOCKS, type GameState, type Point } from './model';
 import type { OnlineMember } from './multiplayer-model';
 import { GARAGE_LOCATION } from './garage';
 import { HOMES, CREW_BASE } from './career';
 import { DOCK, WATER_BOUNDS } from './mobility';
+import { districtAt, WORLD_LANDMARKS } from './world-layout';
 
 export const TEAM_MAP_COLORS = ['#e0bb75', '#83c3d5', '#c390c0', '#8fc4a0'];
 export interface MinimapOptions {
@@ -21,7 +22,11 @@ interface Projection { point: Point; axis: 'x' | 'z' }
 const distance = (a: Point, b: Point) => Math.abs(a.x - b.x) + Math.abs(a.z - b.z);
 const equal = (a: Point, b: Point) => Math.abs(a.x - b.x) + Math.abs(a.z - b.z) < 1e-7;
 const finite = (p: Point) => Number.isFinite(p.x) && Number.isFinite(p.z);
-const mapPoint = (p: Point) => ({ x: p.x + 104, y: (p.z + 104) / 208 * 200 });
+/** Keep the neighborhood readable as the overall world grows. North stays up. */
+export function neighborhoodProjection(center:Point,span=200){
+  const scale=224/span;
+  return(point:Point)=>({x:112+(point.x-center.x)*scale,y:100+(point.z-center.z)*scale});
+}
 
 /** Both the approach to a road and the final walk to a doorway avoid buildings. */
 function clearSegment(a: Point, b: Point) {
@@ -34,10 +39,10 @@ function clearSegment(a: Point, b: Point) {
 }
 
 function entrances(point: Point): Projection[] {
-  const candidates: Projection[] = ROADS.flatMap(road => [
-    { point: { x: road, z: point.z }, axis: 'x' as const },
-    { point: { x: point.x, z: road }, axis: 'z' as const },
-  ]).filter(candidate => clearSegment(point, candidate.point));
+  const candidates: Projection[] = [
+    ...ROAD_X.map(road=>({point:{x:road,z:point.z},axis:'x' as const})),
+    ...ROAD_Z.map(road=>({point:{x:point.x,z:road},axis:'z' as const})),
+  ].filter(candidate => clearSegment(point, candidate.point));
   const nearest = Math.min(...candidates.map(candidate => distance(point, candidate.point)));
   // Keep road connectors short. In particular, the casino entrance is reached
   // from the boulevard at z=80, rather than by a long line across its block.
@@ -72,7 +77,8 @@ export function planRoadRoute(start: Point, target: Point): Point[] {
     } else if ((from.axis === 'x' && a.x === b.x) || (from.axis === 'z' && a.z === b.z)) middle = [a, b];
     else {
       const coordinate = from.axis === 'x' ? 'z' : 'x';
-      const crossing = ROADS.reduce((best, road) =>
+      const crossings=from.axis==='x'?ROAD_Z:ROAD_X;
+      const crossing = crossings.reduce((best, road) =>
         Math.abs(a[coordinate] - road) + Math.abs(b[coordinate] - road) <
         Math.abs(a[coordinate] - best) + Math.abs(b[coordinate] - best) ? road : best);
       middle = from.axis === 'x'
@@ -120,6 +126,9 @@ function indoorMap(ctx: CanvasRenderingContext2D, state: GameState, others: Onli
 export function renderMinimap(ctx: CanvasRenderingContext2D, state: GameState, options: MinimapOptions): {remotePlayers:number;route:Point[]} {
   const others = options.onlineMembers.filter(member => member.id !== options.selfId);
   const time = options.time ?? state.time;
+  const mapPoint=neighborhoodProjection(state.player),scale=224/200;
+  const visible=(point:{x:number;y:number},pad=10)=>point.x>=-pad&&point.x<=224+pad&&point.y>=-pad&&point.y<=200+pad;
+  const edge=(point:{x:number;y:number})=>({x:Math.min(216,Math.max(8,point.x)),y:Math.min(192,Math.max(8,point.y))});
   ctx.save(); ctx.scale(ctx.canvas.width / 224, ctx.canvas.height / 200);
   ctx.beginPath(); ctx.rect(0, 0, 224, 200); ctx.clip();
   if (state.interior === 'casino') {
@@ -137,17 +146,24 @@ export function renderMinimap(ctx: CanvasRenderingContext2D, state: GameState, o
     for(const member of others)if(member.pose.x>=WATER_BOUNDS.minX&&!member.pose.interior&&!member.pose.homeId)teammate(ctx,project(member.pose),member);
     arrow(ctx,project(state.player),state.player.heading);ctx.restore();return{remotePlayers:others.length,route};
   }
-  ctx.fillStyle = '#1b3239'; ctx.fillRect(0, 0, 224, 200); ctx.fillStyle = '#417d8b'; ctx.fillRect(201, 0, 23, 200); ctx.fillStyle = '#b39f76'; ctx.fillRect(196, 0, 7, 200);
-  ctx.strokeStyle = '#6b8585'; ctx.lineWidth = 8;
-  for (const road of ROADS) {
-    const p = mapPoint({ x: road, z: road }); ctx.beginPath(); ctx.moveTo(p.x, 0); ctx.lineTo(p.x, 200); ctx.stroke();
-    ctx.beginPath(); ctx.moveTo(0, p.y); ctx.lineTo(198, p.y); ctx.stroke();
-  }
-  const park = mapPoint({ x: -32, z: -32 }); ctx.fillStyle = '#365d4c'; ctx.fillRect(park.x, park.y, 24, 24);
+  ctx.fillStyle='#263d38';ctx.fillRect(0,0,224,200);
+  const coast=mapPoint({x:115,z:0}).x,beach=mapPoint({x:94,z:0}).x;
+  const waterEdge=Math.min(224,Math.max(0,coast));ctx.fillStyle='#355e70';ctx.fillRect(waterEdge,0,224-waterEdge,200);
+  ctx.fillStyle='#b09f7e';ctx.fillRect(beach,0,coast-beach,200);
+  const landStart=mapPoint({x:WORLD_BOUNDS.minX,z:WORLD_BOUNDS.minZ}),landEnd=mapPoint({x:94,z:WORLD_BOUNDS.maxZ});
+  ctx.fillStyle='#515e54';ctx.fillRect(landStart.x,landStart.y,landEnd.x-landStart.x,landEnd.y-landStart.y);
+  const streets=(color:string,width:number)=>{
+    ctx.strokeStyle=color;ctx.lineWidth=width;
+    for(const road of ROAD_X){const from=mapPoint({x:road,z:WORLD_BOUNDS.minZ}),to=mapPoint({x:road,z:WORLD_BOUNDS.maxZ});ctx.beginPath();ctx.moveTo(from.x,from.y);ctx.lineTo(to.x,to.y);ctx.stroke();}
+    for(const road of ROAD_Z){const from=mapPoint({x:WORLD_BOUNDS.minX,z:road}),to=mapPoint({x:WORLD_BOUNDS.maxX,z:road});ctx.beginPath();ctx.moveTo(from.x,from.y);ctx.lineTo(to.x,to.y);ctx.stroke();}
+  };
+  streets('#84918c',14*scale);streets('#303c42',11*scale);
+  for(const area of NATURAL_BLOCKS){const park=mapPoint({x:area.x-14,z:area.z-14});ctx.fillStyle='#426b54';ctx.fillRect(park.x,park.y,28*scale,28*scale);}
   for (const building of BUILDINGS) {
     const p = mapPoint({ x: building.x - building.halfX, z: building.z - building.halfZ });
-    ctx.fillStyle = '#a1ad98'; ctx.fillRect(p.x, p.y, building.halfX * 2, building.halfZ * 2 * 200 / 208);
-    ctx.fillStyle = '#546f65'; ctx.fillRect(p.x + 2, p.y + 2, building.halfX * 2 - 4, building.halfZ * 2 * 200 / 208 - 4);
+    if(!visible(p,32))continue;
+    ctx.fillStyle='#9ba59c';ctx.fillRect(p.x,p.y,building.halfX*2*scale,building.halfZ*2*scale);
+    ctx.fillStyle='#707e77';ctx.fillRect(p.x+2,p.y+2,building.halfX*2*scale-4,building.halfZ*2*scale-4);
   }
   const target = options.target === undefined ? options.casinoNavigation ? CASINO.door : state.mission.waypoint : options.target;
   const route = target ? planRoadRoute(state.player, target) : [];
@@ -160,13 +176,14 @@ export function renderMinimap(ctx: CanvasRenderingContext2D, state: GameState, o
         route.map(mapPoint).forEach((point, index) => index ? ctx.lineTo(point.x, point.y) : ctx.moveTo(point.x, point.y)); ctx.stroke();
       }
     }
-    const p = mapPoint(target); ctx.strokeStyle = targetColor; ctx.lineWidth = 1.5; ctx.beginPath(); ctx.arc(p.x, p.y, 6 + Math.sin(time * 3), 0, Math.PI * 2); ctx.stroke();
+    const p = edge(mapPoint(target)); ctx.strokeStyle = targetColor; ctx.lineWidth = 1.5; ctx.beginPath(); ctx.arc(p.x, p.y, 6 + Math.sin(time * 3), 0, Math.PI * 2); ctx.stroke();
     ctx.fillStyle = targetColor; ctx.beginPath(); ctx.arc(p.x, p.y, 3, 0, Math.PI * 2); ctx.fill();
   }
   const club = mapPoint(CASINO.door); ctx.fillStyle = '#d8b6ff'; ctx.beginPath(); ctx.arc(club.x, club.y, 5.5, 0, Math.PI * 2); ctx.fill();
   ctx.fillStyle = '#36234b'; ctx.font = 'bold 10px Arial'; ctx.textAlign = 'center'; ctx.textBaseline = 'middle'; ctx.fillText('♠', club.x, club.y + .5);
   const shop=mapPoint(GARAGE_LOCATION);ctx.fillStyle='#78d7cd';ctx.fillRect(shop.x-5,shop.y-5,10,10);ctx.fillStyle='#153b3e';ctx.font='bold 9px Arial';ctx.fillText('G',shop.x,shop.y+.5);
   for(const [id,point] of [...Object.entries(HOMES).map(([id,home])=>[id,home.door] as const),['crew',CREW_BASE.door] as const]){const p=mapPoint(point);ctx.fillStyle=id==='crew'?'#e7bd74':'#a6dccb';ctx.fillRect(p.x-4,p.y-4,8,8);ctx.fillStyle='#183c3f';ctx.font='bold 8px Arial';ctx.fillText(id==='crew'?'B':'H',p.x,p.y+.5);}
+  for(const place of WORLD_LANDMARKS){const p=mapPoint(place.point);if(!visible(p))continue;ctx.fillStyle='#b9d1c9';ctx.beginPath();ctx.arc(p.x,p.y,3,0,Math.PI*2);ctx.fill();}
   if(options.cityEvent){const p=mapPoint(options.cityEvent.target);ctx.save();ctx.translate(p.x,p.y);ctx.rotate(Math.PI/4);ctx.fillStyle='#84dbff';ctx.fillRect(-3,-3,6,6);ctx.restore();}
   for (const car of state.vehicles) if (car.id !== state.player.vehicleId) {
     const p = mapPoint(car); ctx.fillStyle = '#d4e2d466'; ctx.fillRect(p.x - 1, p.y - 1, 2, 2);
@@ -177,12 +194,13 @@ export function renderMinimap(ctx: CanvasRenderingContext2D, state: GameState, o
   for (const member of others) {
     if (member.pose.homeId==='crew'||member.pose.homeId==='canal'||member.pose.homeId==='loft') {
       const point=mapPoint(member.pose.homeId==='crew'?CREW_BASE.door:HOMES[member.pose.homeId].door);
-      teammate(ctx,{x:point.x+(member.slot-1.5)*7,y:point.y-9},member,true);
+      teammate(ctx,edge({x:point.x+(member.slot-1.5)*7,y:point.y-9}),member,true);
     } else if (member.pose.interior === 'casino') {
       const angle = member.slot * Math.PI / 2;
-      teammate(ctx, { x: club.x + Math.sin(angle) * 12, y: club.y + Math.cos(angle) * 12 }, member, true);
-    } else teammate(ctx, mapPoint(member.pose), member);
+      teammate(ctx,edge({x:club.x+Math.sin(angle)*12,y:club.y+Math.cos(angle)*12}),member,true);
+    } else {const p=mapPoint(member.pose);teammate(ctx,edge(p),member,!visible(p,0));}
   }
+  ctx.fillStyle='#d9e4d4bb';ctx.font='8px Arial';ctx.textAlign='left';ctx.fillText(districtAt(state.player).toUpperCase(),8,12);
   arrow(ctx, mapPoint(state.player), state.player.heading);
   ctx.restore(); return { remotePlayers: others.length, route };
 }

@@ -1,4 +1,4 @@
-import { BUILDINGS, ROADS, WORLD_BOUNDS } from './model';
+import { BUILDINGS, ROAD_X, ROAD_Z, ROAD_NODES, WORLD_BOUNDS } from './model';
 import { CASINO } from './casino-location';
 import { BIKE_LOCATION, DOCK, advanceBikeFlight, advanceBoat, canBoardDockBoat, canDisembarkBoat, resetMobilityMotion } from './mobility';
 import type { GameEvent, GameState, Input, Point, Vehicle, PursuitState, Roadblock } from './model';
@@ -32,7 +32,12 @@ function roadblockHit(s:GameState,p:Point,radius:number):boolean {
 const trafficLoops: Point[][] = [
   [{ x: -80, z: -80 }, { x: 80, z: -80 }, { x: 80, z: 80 }, { x: -80, z: 80 }],
   [{ x: -40, z: -40 }, { x: -40, z: 40 }, { x: 40, z: 40 }, { x: 40, z: -40 }],
+  [{x:-200,z:-80},{x:-120,z:-80},{x:-120,z:80},{x:-200,z:80}],
+  [{x:-80,z:-200},{x:80,z:-200},{x:80,z:-120},{x:-80,z:-120}],
+  [{x:-160,z:120},{x:80,z:120},{x:80,z:200},{x:-160,z:200}],
 ];
+const trafficSeed=(index:number)=>index<8?(index%2?index*31+45:index*59+50):(index-8)*61+24;
+const trafficLoop=(index:number)=>trafficLoops[index<8?index%2:2+(index-8)%3];
 function loopPose(points: Point[], progress: number): Point & { heading: number } {
   const perimeter = points.reduce((sum, p, i) => sum + length(p, points[(i + 1) % points.length]), 0);
   let distance = ((progress % perimeter) + perimeter) % perimeter;
@@ -54,8 +59,8 @@ export function createGame(): GameState {
     {...vehicle('bike-1','bike',BIKE_LOCATION.x,BIKE_LOCATION.z,0,0x67cabc,true,true),label:'Vortex R · MOTOCYKL'},
     {...vehicle('boat-1','boat',DOCK.mooring.x,DOCK.mooring.z,Math.PI/2,0xf0dfbd,true,true),label:'TideRunner · MOTORÓWKA'},
   ];
-  for (let i = 0; i < 8; i++) {
-    const p = loopPose(trafficLoops[i % 2], i % 2 ? i * 31 + 45 : i * 59 + 50);
+  for (let i = 0; i < 16; i++) {
+    const p = loopPose(trafficLoop(i),trafficSeed(i));
     cars.push(vehicle(`traffic-${i}`, i % 3 === 0 ? 'sport' : 'sedan', p.x, p.z, p.heading, [0x51a89e, 0xe0b878, 0x926f9b, 0xa5b6c4][i % 4], false));
   }
   const s: GameState = {
@@ -67,7 +72,7 @@ export function createGame(): GameState {
     mission: { kind: 'delivery', stage: 0, active: true, clock: 0, completed: 0, waypoint: { ...PICKUP }, title: 'Specjalna przesyłka', instruction: 'Podjedź do punktu odbioru w dzielnicy Downtown.', reward: 450 },
   };
   const rt = runtime(s);
-  for (let i = 0; i < 8; i++) rt.traffic.set(`traffic-${i}`, i % 2 ? i * 31 + 45 : i * 59 + 50);
+  for (let i = 0; i < 16; i++) rt.traffic.set(`traffic-${i}`,trafficSeed(i));
   return s;
 }
 
@@ -78,12 +83,12 @@ export function activeVehicle(s: GameState): Vehicle | undefined {
 export function synchronizeOnlineTraffic(s: GameState, seconds: number) {
   if (!Number.isFinite(seconds) || seconds < 0) return;
   const rt = runtime(s), own = activeVehicle(s);
-  for (let i = 0; i < 8; i++) {
+  for (let i = 0; i < 16; i++) {
     const car = s.vehicles.find(item => item.id === `traffic-${i}`);
     if (!car || car.parked || car === own) continue;
     const speed = 8 + i % 4;
-    const progress = (i % 2 ? i * 31 + 45 : i * 59 + 50) + speed * seconds;
-    Object.assign(car, loopPose(trafficLoops[i % 2], progress), { speed, wheelPhase: speed * seconds * 1.6 });
+    const progress = trafficSeed(i) + speed * seconds;
+    Object.assign(car, loopPose(trafficLoop(i), progress), { speed, wheelPhase: speed * seconds * 1.6 });
     rt.traffic.set(car.id, progress);
   }
 }
@@ -248,9 +253,9 @@ function traffic(s: GameState, dt: number, events: GameEvent[]) {
     if (car === playerCar || car.parked || car.health <= 0 || car.kind==='boat'||car.kind==='bike') continue;
     const index = Number(car.id.split('-').at(-1)); if (!Number.isFinite(index)) continue;
     const speed = 8 + index % 4;
-    const old = rt.traffic.get(car.id) ?? (index % 2 ? index * 31 + 45 : index * 59 + 50);
+    const old = rt.traffic.get(car.id) ?? trafficSeed(index);
     const next = old + speed * dt; rt.traffic.set(car.id, next);
-    const p = loopPose(trafficLoops[index % 2], next); Object.assign(car, p, { speed }); car.wheelPhase += speed * dt;
+    const p = loopPose(trafficLoop(index), next); Object.assign(car, p, { speed }); car.wheelPhase += speed * dt;
     if (playerCar && playerCar.kind!=='boat'&&(playerCar.airHeight??0)<1.7&&length(car, playerCar) < (playerCar.kind==='bike'?2.2:3.05)) {
       const impact = Math.abs(playerCar.speed - car.speed) + 5;
       collision(s, playerCar, impact, events); playerCar.speed *= -.2; car.speed = 0; car.parked = true;
@@ -270,14 +275,14 @@ function traffic(s: GameState, dt: number, events: GameEvent[]) {
 }
 
 function roadPoint(p: Point): Point {
-  const x = ROADS.reduce((a, b) => Math.abs(b - p.x) < Math.abs(a - p.x) ? b : a);
-  const z = ROADS.reduce((a, b) => Math.abs(b - p.z) < Math.abs(a - p.z) ? b : a);
-  return Math.abs(x - p.x) < Math.abs(z - p.z) ? { x, z: clamp(p.z, -80, 80) } : { x: clamp(p.x, -80, 80), z };
+  const x = ROAD_X.reduce((a, b) => Math.abs(b - p.x) < Math.abs(a - p.x) ? b : a);
+  const z = ROAD_Z.reduce((a, b) => Math.abs(b - p.z) < Math.abs(a - p.z) ? b : a);
+  return Math.abs(x - p.x) < Math.abs(z - p.z) ? { x, z: clamp(p.z, ROAD_Z[0], ROAD_Z.at(-1)!) } : { x: clamp(p.x, ROAD_X[0], ROAD_X.at(-1)!), z };
 }
 /** Small Dijkstra graph with virtual points on road segments avoids cutting across buildings. */
 function roadRoute(from: Point, target: Point): Point[] {
   const start = roadPoint(from), goal = roadPoint(target);
-  const nodes: Point[] = ROADS.flatMap(x => ROADS.map(z => ({ x, z }))); nodes.push(start, goal);
+  const nodes: Point[] = [...ROAD_NODES,start,goal];
   const startIndex = nodes.length - 2, goalIndex = nodes.length - 1, distances = nodes.map(() => Infinity), previous = nodes.map(() => -1), visited = new Set<number>(); distances[startIndex] = 0;
   for (let count = 0; count < nodes.length; count++) {
     let current = -1;
@@ -288,8 +293,8 @@ function roadRoute(from: Point, target: Point): Point[] {
       if (i === current || visited.has(i)) continue;
       // Virtual start/goal points can share an off-grid coordinate. Alignment
       // alone would connect parallel streets straight through a building.
-      const verticalRoad = Math.abs(nodes[i].x - nodes[current].x) < .01 && ROADS.some(road => Math.abs(road - nodes[current].x) < .01);
-      const horizontalRoad = Math.abs(nodes[i].z - nodes[current].z) < .01 && ROADS.some(road => Math.abs(road - nodes[current].z) < .01);
+      const verticalRoad = Math.abs(nodes[i].x - nodes[current].x) < .01 && ROAD_X.some(road => Math.abs(road - nodes[current].x) < .01);
+      const horizontalRoad = Math.abs(nodes[i].z - nodes[current].z) < .01 && ROAD_Z.some(road => Math.abs(road - nodes[current].z) < .01);
       if (!verticalRoad && !horizontalRoad) continue;
       const cost = distances[current] + length(nodes[current], nodes[i]);
       if (cost < distances[i]) { distances[i] = cost; previous[i] = current; }
@@ -304,7 +309,7 @@ function roadRoute(from: Point, target: Point): Point[] {
 function spawnPolice(s: GameState) {
   const rt = runtime(s);
   while (s.police.length < s.wanted) {
-    const candidates = ROADS.flatMap(x => ROADS.map(z => ({ x, z }))).filter(p => length(p, s.player) >= 36 && s.police.every(c => length(c, p) > 15)).sort((a, b) => Math.abs(length(a, s.player) - 48) - Math.abs(length(b, s.player) - 48));
+    const candidates = ROAD_NODES.filter(p => length(p, s.player) >= 36 && s.police.every(c => length(c, p) > 15)).sort((a, b) => Math.abs(length(a, s.player) - 48) - Math.abs(length(b, s.player) - 48));
     const p = candidates[0] ?? { x: -80, z: -80 };
     s.police.push(vehicle(`police-${++rt.serial}`, 'police', p.x, p.z, 0, 0xf0f0e5, false));
   }
@@ -328,7 +333,7 @@ function updateRoadblocks(s:GameState,events:GameEvent[]){
   if(s.wanted<2||s.time<rt.nextRoadblock||state.roadblocks.length)return;
   const heading=activeVehicle(s)?.heading??s.player.heading;
   const direction={x:Math.sin(heading),z:-Math.cos(heading)};
-  const candidates=ROADS.flatMap(x=>ROADS.map(z=>({x,z}))).filter(point=>{
+  const candidates=ROAD_NODES.filter(point=>{
     const d=length(point,s.player);
     return d>=28&&d<=75&&length(point,SAFEHOUSE)>15;
   }).sort((a,b)=>{

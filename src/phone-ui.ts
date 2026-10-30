@@ -3,7 +3,9 @@ import { CASINO } from './casino-location';
 import { CONTACTS, CREW_BASE, HOMES } from './career';
 import { GARAGE_LOCATION } from './garage';
 import { PHONE_CHAT_LENGTH, PHONE_DELIVERY_PRICE, type PhoneAction, type PhoneActivity, type PhoneSnapshot } from './phone';
-import type { Point } from './model';
+import { BUILDINGS, NATURAL_BLOCKS, ROAD_X, ROAD_Z, WORLD_BOUNDS, type Point } from './model';
+import { WATER_BOUNDS } from './mobility';
+import { WORLD_LANDMARKS } from './world-layout';
 
 export interface PhoneDestination {id:string;name:string;point:Point;icon?:string}
 export interface PhoneCallbacks {
@@ -18,7 +20,11 @@ const safe=(value:string)=>value.replace(/[&<>"']/g,item=>({'&':'&amp;','<':'&lt
 const money=(value:number)=>`$${Math.max(0,value).toLocaleString('pl-PL')}`;
 const labels:Record<Tab,string>={home:'Start',map:'Mapa',contacts:'Kontakty',chat:'Czat',invites:'Ekipa',garage:'Auto'};
 const activities:Record<PhoneActivity,string>={heist:'Skok na Sapphire',bank:'Northside Bank',race:'Nocny sprint',challenge:'Nocny przerzut'};
-export const PHONE_DESTINATIONS:readonly PhoneDestination[]=[{id:'casino',name:CASINO.name,point:CASINO.door,icon:'♠'},{id:'garage',name:'MOD SHOP · garaż',point:GARAGE_LOCATION,icon:'G'},...Object.values(HOMES).map(home=>({id:home.id,name:home.name,point:home.door,icon:'⌂'})),{id:'crew',name:CREW_BASE.name,point:CREW_BASE.door,icon:'B'}];
+export const PHONE_DESTINATIONS:readonly PhoneDestination[]=[{id:'casino',name:CASINO.name,point:CASINO.door,icon:'♠'},{id:'garage',name:'MOD SHOP · garaż',point:GARAGE_LOCATION,icon:'G'},...Object.values(HOMES).map(home=>({id:home.id,name:home.name,point:home.door,icon:'⌂'})),{id:'crew',name:CREW_BASE.name,point:CREW_BASE.door,icon:'B'},...WORLD_LANDMARKS.map((place,index)=>({id:place.id,name:place.name,point:place.point,icon:['W','N','P','S'][index]}))];
+const fullMapBounds={minX:WORLD_BOUNDS.minX-16,maxX:WATER_BOUNDS.maxX+16,minZ:Math.min(WORLD_BOUNDS.minZ,WATER_BOUNDS.minZ)-16,maxZ:Math.max(WORLD_BOUNDS.maxZ,WATER_BOUNDS.maxZ)+16};
+const fullMapScale=Math.min(268/(fullMapBounds.maxX-fullMapBounds.minX),218/(fullMapBounds.maxZ-fullMapBounds.minZ));
+/** Full-world overview is independent from the player's neighborhood minimap. */
+export function projectPhoneMap(point:Point){return{x:140+(point.x-(fullMapBounds.minX+fullMapBounds.maxX)/2)*fullMapScale,y:115+(point.z-(fullMapBounds.minZ+fullMapBounds.maxZ)/2)*fullMapScale};}
 
 /** The phone is a presentation of host-owned state; map and contact buttons use existing game screens. */
 export class PhoneUI {
@@ -80,6 +86,10 @@ export class PhoneUI {
   (Object.keys(labels) as Tab[]).forEach(tab=>on(`#phone-app-${tab}`,()=>{this.tab=tab;this.notice='';this.refresh(true);}));
   for(const [id,callback] of [['appearance',this.callbacks.onAppearance],['factions',this.callbacks.onFactions],['campaign',this.callbacks.onCampaign],['mobility',this.callbacks.onMobility]] as const)if(callback)on(`#phone-launch-${id}`,()=>{this.close();callback();});
   for(const destination of this.destinations())on(`#phone-route-${CSS.escape(destination.id)}`,()=>{this.close();this.callbacks.onRoute({...destination.point},destination.name);});
+  for(const marker of this.root.querySelectorAll<SVGGElement>('[data-map-destination]')){
+    const navigate=()=>{const place=this.destinations().find(destination=>destination.id===marker.dataset.mapDestination);if(place){this.close();this.callbacks.onRoute({...place.point},place.name);}};
+    marker.addEventListener('click',navigate);marker.addEventListener('keydown',event=>{if(event.key==='Enter'||event.key===' '){event.preventDefault();navigate();}});
+  }
   on('#phone-open-contacts',()=>{this.close();this.callbacks.onContacts();});on('#phone-open-activities',()=>{this.close();this.callbacks.onActivities();});
   const draft=this.query<HTMLInputElement>('#phone-chat-text');if(draft)draft.oninput=()=>this.draft=draft.value;
   this.query<HTMLFormElement>('#phone-chat-form')?.addEventListener('submit',event=>{event.preventDefault();const text=this.draft.trim();if(!text){this.report('Wpisz wiadomość do ekipy.');return;}this.draft='';if(draft)draft.value='';this.issue({kind:'chat',text});});
@@ -99,8 +109,10 @@ export class PhoneUI {
  }
  private map(){
   const points=this.destinations(),position=this.callbacks.getPosition?.();
-  const project=(point:Point)=>({x:(point.x+104)/208*280,y:(point.z+104)/208*230});
-  return`<div class="phone-map"><svg viewBox="0 0 280 230" role="img" aria-label="Mapa wybrzeża i dostępne miejsca"><rect width="280" height="230" fill="#17343f"/><rect x="259" width="21" height="230" fill="#347c91"/>${[-80,-40,0,40,80].map(road=>{const p=project({x:road,z:road});return`<path d="M${p.x} 0V230M0 ${p.y}H259" stroke="#82958c" stroke-width="8"/>`;}).join('')}${points.map(place=>{const p=project(place.point);return`<circle cx="${p.x}" cy="${p.y}" r="5" fill="#f0d69c"/><text x="${p.x}" y="${p.y+3}" text-anchor="middle" fill="#16303c" font-size="8" font-weight="bold">${safe(place.icon??'·')}</text>`;}).join('')}${position?(()=>{const p=project(position);return`<circle cx="${p.x}" cy="${p.y}" r="5" stroke="#142a36" stroke-width="2" fill="#8aefd0"/>`;})():''}</svg><span>NEON COAST · GPS</span></div><p class="phone-copy">Wybierz miejsce. Trasa pojawi się na minimapie po schowaniu telefonu.</p><div class="phone-destinations">${points.map(place=>`<button id="phone-route-${safe(place.id)}"><b>${safe(place.icon??'◈')}</b><span>${safe(place.name)}</span><i>→</i></button>`).join('')}</div>`;
+  const project=projectPhoneMap,land=project({x:WORLD_BOUNDS.minX,z:WORLD_BOUNDS.minZ}),landEnd=project({x:WORLD_BOUNDS.maxX,z:WORLD_BOUNDS.maxZ}),shore=project({x:115,z:WORLD_BOUNDS.minZ});
+  const rect=(point:Point,w:number,h:number,color:string)=>{const p=project(point);return`<rect x="${p.x}" y="${p.y}" width="${w*fullMapScale}" height="${h*fullMapScale}" fill="${color}"/>`;};
+  const streets=[...ROAD_X.map(x=>{const a=project({x,z:WORLD_BOUNDS.minZ}),b=project({x,z:WORLD_BOUNDS.maxZ});return`M${a.x} ${a.y}L${b.x} ${b.y}`;}),...ROAD_Z.map(z=>{const a=project({x:WORLD_BOUNDS.minX,z}),b=project({x:WORLD_BOUNDS.maxX,z});return`M${a.x} ${a.y}L${b.x} ${b.y}`;})].join('');
+  return`<div class="phone-map"><svg viewBox="0 0 280 230" role="group" aria-label="Mapa całego wybrzeża; wybierz znacznik, aby wyznaczyć trasę"><rect width="280" height="230" fill="#254b5b"/><rect x="${land.x}" y="${land.y}" width="${landEnd.x-land.x}" height="${landEnd.y-land.y}" fill="#536157"/><rect x="${landEnd.x}" y="${land.y}" width="${shore.x-landEnd.x}" height="${landEnd.y-land.y}" fill="#b3a582"/><path d="${streets}" stroke="#909e95" stroke-width="${14*fullMapScale}" fill="none"/><path d="${streets}" stroke="#34424a" stroke-width="${10*fullMapScale}" fill="none"/>${NATURAL_BLOCKS.map(area=>rect({x:area.x-14,z:area.z-14},28,28,'#3d7053')).join('')}${BUILDINGS.map(building=>rect({x:building.x-building.halfX,z:building.z-building.halfZ},building.halfX*2,building.halfZ*2,'#a7afa3')).join('')}${points.map(place=>{const p=project(place.point);return`<g role="button" tabindex="0" data-map-destination="${safe(place.id)}" aria-label="Wyznacz trasę: ${safe(place.name)}" style="cursor:pointer"><title>${safe(place.name)}</title><circle cx="${p.x}" cy="${p.y}" r="5" stroke="#263e43" stroke-width="1" fill="#f0d69c"/><text x="${p.x}" y="${p.y+2.8}" text-anchor="middle" fill="#16303c" font-size="7" font-weight="bold">${safe(place.icon??'·')}</text></g>`;}).join('')}${WORLD_LANDMARKS.map(place=>{const p=project(place.point);return`<text x="${p.x+7}" y="${p.y+2}" fill="#e4ecdf" font-size="5.7">${safe(place.name)}</text>`;}).join('')}${position?(()=>{const p=project(position);return`<circle cx="${p.x}" cy="${p.y}" r="4" stroke="#152e35" stroke-width="1.8" fill="#8aefd0"/>`;})():''}<text x="266" y="14" fill="#dbe8db" font-size="8" text-anchor="middle">N ↑</text></svg><span>NEON COAST · CAŁE WYBRZEŻE</span></div><p class="phone-copy">Kliknij znacznik lub wybierz miejsce poniżej. GPS poprowadzi ulicami po schowaniu telefonu.</p><div class="phone-destinations">${points.map(place=>`<button id="phone-route-${safe(place.id)}"><b>${safe(place.icon??'◈')}</b><span>${safe(place.name)}</span><i>→</i></button>`).join('')}</div>`;
  }
  private contacts(){
   const reputation=this.callbacks.getReputation?.()??0;
@@ -118,7 +130,7 @@ export class PhoneUI {
   return`<div class="phone-car-card"><span aria-hidden="true">◒</span><small>TWÓJ WŁASNY POJAZD</small><h2>${safe(this.callbacks.getCarName?.()??'Wybrany samochód')}</h2><p>Kurier dostawi wybrany model na najbliższą ulicę za ${money(PHONE_DELIVERY_PRICE)}. Wyjdź pieszo na zewnątrz, poza aktywnym zleceniem i pościgiem.</p><strong>Portfel: ${money(this.callbacks.getWallet())}</strong><button id="phone-request-car" class="phone-primary" ${snapshot.deliveryCooldownMs>0||this.callbacks.getWallet()<PHONE_DELIVERY_PRICE?'disabled':''}>Zamów własne auto · ${money(PHONE_DELIVERY_PRICE)}</button><small id="phone-delivery-cooldown"></small></div><p class="phone-copy">Model zabezpieczony na parkingu przy mieszkaniu odbiera się przez panel L. Telefon zachowuje obecny stan i tuning auta.</p>`;
  }
  private trapFocus(event:KeyboardEvent){
-  const controls=[...(this.root?.querySelectorAll<HTMLElement>('button:not(:disabled),input:not(:disabled),select:not(:disabled),a[href]')??[])],first=controls[0],last=controls.at(-1);
+  const controls=[...(this.root?.querySelectorAll<HTMLElement>('button:not(:disabled),input:not(:disabled),select:not(:disabled),a[href],[data-map-destination]')??[])],first=controls[0],last=controls.at(-1);
   if(!first){event.preventDefault();return;}
   if(!controls.includes(document.activeElement as HTMLElement)){(event.shiftKey?last:first)?.focus();event.preventDefault();}
   else if(event.shiftKey&&document.activeElement===first){last?.focus();event.preventDefault();}else if(!event.shiftKey&&document.activeElement===last){first.focus();event.preventDefault();}

@@ -1,4 +1,4 @@
-import { BUILDINGS, ROADS, WORLD_BOUNDS, type Point } from './model';
+import { BUILDINGS, ROAD_X, ROAD_Z, WORLD_BOUNDS, type Point } from './model';
 
 export const PHONE_CHAT_LIMIT=40;
 export const PHONE_CHAT_LENGTH=180;
@@ -36,10 +36,8 @@ const activities:PhoneActivity[]=['heist','bank','race','challenge'];
 export function getPhoneDeliveryPoint(player:Point):(Point&{heading:number})|null {
  if(!Number.isFinite(player.x)||!Number.isFinite(player.z)||player.x<WORLD_BOUNDS.minX||player.x>WORLD_BOUNDS.maxX||player.z<WORLD_BOUNDS.minZ||player.z>WORLD_BOUNDS.maxZ)return null;
  const candidates: (Point&{heading:number})[]=[];
- for(const road of ROADS)for(const offset of [-6,6]){
-  candidates.push({x:road,z:Math.max(-88,Math.min(88,player.z+offset)),heading:0});
-  candidates.push({x:Math.max(-88,Math.min(88,player.x+offset)),z:road,heading:Math.PI/2});
- }
+ for(const road of ROAD_X)for(const offset of [-6,6])candidates.push({x:road,z:Math.max(WORLD_BOUNDS.minZ+10,Math.min(WORLD_BOUNDS.maxZ-10,player.z+offset)),heading:0});
+ for(const road of ROAD_Z)for(const offset of [-6,6])candidates.push({x:Math.max(WORLD_BOUNDS.minX+10,Math.min(WORLD_BOUNDS.maxX-10,player.x+offset)),z:road,heading:Math.PI/2});
  return candidates.filter(point=>{
   const distance=Math.hypot(point.x-player.x,point.z-player.z);
   return distance>=4.5&&distance<=20&&!BUILDINGS.some(building=>Math.abs(point.x-building.x)<building.halfX+2&&Math.abs(point.z-building.z)<building.halfZ+3);

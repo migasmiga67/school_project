@@ -1,12 +1,13 @@
 import * as THREE from 'three';
 import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
+import { RoundedBoxGeometry } from 'three/addons/geometries/RoundedBoxGeometry.js';
 import type { OnlineMember } from './multiplayer-model';
 import type { VehicleKind } from './model';
 import { appearanceColors, type AppearanceState } from './appearance';
 import { createMobilityVehicle } from './mobility-view';
 
 type LitMaterial = THREE.MeshLambertMaterial | THREE.MeshStandardMaterial;
-interface BodyPart { size: [number, number, number]; at: [number, number, number]; color: number; rotation?: [number, number, number] }
+interface BodyPart { size: [number, number, number]; at: [number, number, number]; color: number; rotation?: [number, number, number]; shape?:'sphere'|'capsule'|'torso'|'hair'; rounding?:number }
 interface CarShape { paint: THREE.BufferGeometry; details: THREE.BufferGeometry }
 interface RemoteVisual {
   root: THREE.Group;
@@ -55,14 +56,16 @@ export class RemotePlayersView {
   private readonly colored: LitMaterial;
   private readonly wheelShape: THREE.BufferGeometry;
   private readonly legShape: THREE.BufferGeometry;
+  private readonly shoeShape: THREE.BufferGeometry;
   private count = 0;
   private destroyed = false;
 
   constructor(private readonly software: boolean) {
     this.group.name = 'Other online players';
     this.colored = this.material(0xffffff, true);
-    this.legShape = this.track(new THREE.BoxGeometry(.25, .7, .28));
+    this.legShape = this.track(new THREE.CapsuleGeometry(.5,1,3,8));this.legShape.scale(.23,.37,.25);
     this.legShape.translate(0, -.35, 0);
+    this.shoeShape=this.boxes([{shape:'capsule',size:[.26,.15,.4],at:[0,-.68,-.075],color:0x202a30}]);
     this.wheelShape = this.wheelGeometry();
   }
 
@@ -92,7 +95,14 @@ export class RemotePlayersView {
   /** One mesh for all fixed details; animated limbs and wheels stay separate. */
   private boxes(parts: BodyPart[], colored = true) {
     const pieces = parts.map(part => {
-      const geometry = new THREE.BoxGeometry(...part.size).toNonIndexed();
+      let shape:THREE.BufferGeometry;
+      if(part.rounding!==undefined)shape=new RoundedBoxGeometry(...part.size,part.size[1]>.3?3:2,part.rounding);
+      else if(part.shape==='sphere'){shape=new THREE.SphereGeometry(.5,8,6);shape.scale(...part.size);}
+      else if(part.shape==='capsule'){shape=new THREE.CapsuleGeometry(.5,1,3,8);shape.scale(part.size[0],part.size[1]/2,part.size[2]);}
+      else if(part.shape==='torso'){shape=new THREE.CylinderGeometry(.5,.4,1,8);shape.scale(...part.size);}
+      else if(part.shape==='hair'){shape=new THREE.SphereGeometry(.5,8,5,0,Math.PI*2,0,Math.PI*.57);shape.scale(...part.size);}
+      else shape=new THREE.BoxGeometry(...part.size);
+      const geometry=shape.index?shape.toNonIndexed():shape;if(geometry!==shape)shape.dispose();
       if (part.rotation) {
         geometry.rotateX(part.rotation[0]); geometry.rotateY(part.rotation[1]); geometry.rotateZ(part.rotation[2]);
       }
@@ -111,25 +121,31 @@ export class RemotePlayersView {
     if (!body) {
       const shirt = colors.shirt, skin = colors.skin;
       const parts:BodyPart[]=[
-        { size: [.61, .71, .36], at: [0, 1.17, 0], color: shirt },
-        { size: [.18, .16, .2], at: [0, 1.58, 0], color: skin },
-        { size: [.41, .42, .37], at: [0, 1.77, -.015], color: skin },
-        { size: [.07, .055, .025], at: [-.09, 1.81, -.21], color: 0x202b32 },
-        { size: [.07, .055, .025], at: [.09, 1.81, -.21], color: 0x202b32 },
+        { shape:'torso',size: [.62, .72, .366], at: [0, 1.17, 0], color: shirt },
+        { shape:'capsule',size:[.52,.3,.31],at:[0,.87,0],color:colors.pants },
+        { shape:'capsule',size: [.145, .17, .145], at: [0, 1.58, 0], color: skin },
+        { shape:'sphere',size: [.38, .44, .35], at: [0, 1.79, -.015], color: skin },
+        { shape:'sphere',size:[.055,.105,.05],at:[-.19,1.78,0],color:skin },
+        { shape:'sphere',size:[.055,.105,.05],at:[.19,1.78,0],color:skin },
+        { shape:'sphere',size:[.05,.075,.06],at:[0,1.77,-.192],color:skin },
+        { shape:'sphere',size: [.038, .024, .018], at: [-.07, 1.83, -.181], color: 0x202b32 },
+        { shape:'sphere',size: [.038, .024, .018], at: [.07, 1.83, -.181], color: 0x202b32 },
       ];
-      if(colors.hairstyle==='buzz')parts.push({size:[.42,.065,.38],at:[0,1.96,-.015],color:colors.hair});
-      else {parts.push({size:[.43,.15,.39],at:[0,2,0],color:colors.hair},{size:[.42,colors.hairstyle==='long'?.45:.22,.1],at:[0,colors.hairstyle==='long'?1.8:1.87,.15],color:colors.hair});if(colors.hairstyle==='long')for(const side of[-1,1])parts.push({size:[.08,.36,.3],at:[side*.22,1.82,.015],color:colors.hair});}
-      if(colors.accessoryStyle==='glasses')parts.push({size:[.38,.1,.04],at:[0,1.82,-.225],color:colors.accessory});
-      if(colors.accessoryStyle==='cap')parts.push({size:[.47,.16,.43],at:[0,2.045,0],color:colors.accessory},{size:[.48,.045,.24],at:[0,1.99,-.27],color:colors.accessory});
-      if(colors.crewOutfit)parts.push({size:[.12,.44,.02],at:[.17,1.17,-.19],color:0xdcece2,rotation:[0,0,.2]});
+      parts.push({shape:'hair',size:[colors.hairstyle==='buzz'?.4:.42,colors.hairstyle==='buzz'?.416:colors.hairstyle==='long'?.456:.448,.4],at:[0,1.81,-.012],color:colors.hair});
+      if(colors.hairstyle!=='buzz')parts.push({shape:colors.hairstyle==='long'?'sphere':'capsule',size:[.35,colors.hairstyle==='long'?.52:.2,colors.hairstyle==='long'?.16:.12],at:[0,colors.hairstyle==='long'?1.72:1.86,.14],color:colors.hair});
+      if(colors.hairstyle==='long')for(const side of[-1,1])parts.push({shape:'capsule',size:[.075,.39,.22],at:[side*.185,1.76,.035],color:colors.hair});
+      if(colors.accessoryStyle==='glasses'){for(const side of[-1,1])parts.push({shape:'sphere',size:[.155,.095,.028],at:[side*.095,1.83,-.19],color:colors.accessory});parts.push({size:[.06,.024,.025],at:[0,1.84,-.207],color:colors.accessory});}
+      if(colors.accessoryStyle==='cap')parts.push({shape:'hair',size:[.472,.496,.4],at:[0,1.81,-.012],color:colors.accessory},{shape:'sphere',size:[.46,.035,.27],at:[0,1.965,-.22],color:colors.accessory});
+      if(colors.crewOutfit)parts.push({size:[.09,.36,.018],at:[.14,1.18,-.176],color:0xdcece2,rotation:[0,0,.2]});
       body = this.boxes(parts);
       this.avatarBodies.set(key, body);
     }
     let arm = this.armShapes.get(key);
     if (!arm) {
       arm = this.boxes([
-        { size: [.2, .35, .26], at: [0, -.175, 0], color: colors.shirt },
-        { size: [.18, .32, .24], at: [0, -.49, 0], color: colors.skin },
+        { shape:'capsule',size: [.21, .36, .23], at: [0, -.13, 0], color: colors.shirt },
+        { shape:'capsule',size: [.17, .32, .18], at: [0, -.44, 0], color: colors.skin },
+        { shape:'sphere',size: [.15, .2, .14], at: [0, -.66, -.015], color: colors.skin },
       ]);
       this.armShapes.set(key, arm);
     }
@@ -150,13 +166,13 @@ export class RemotePlayersView {
     if (cached) return cached;
     const sport = kind === 'sport', length = sport ? 4.5 : 4.7, roof = sport ? 1.54 : 1.75;
     const body: BodyPart[] = [
-      { size: [1.95, .64, length], at: [0, .7, 0], color: 0xffffff },
-      { size: [1.7, .22, 1.3], at: [0, 1.06, -1.4], color: 0xffffff },
-      { size: [1.63, .12, 1.55], at: [0, roof, .18], color: 0xffffff },
+      { size: [1.95, .64, length], at: [0, .7, 0], color: 0xffffff, rounding:.16 },
+      { size: [1.7, .22, 1.3], at: [0, 1.06, -1.4], color: 0xffffff, rounding:.08 },
+      { size: [1.63, .12, 1.55], at: [0, roof, .18], color: 0xffffff, rounding:.055 },
     ];
     const details: BodyPart[] = [
       { size: [1.93, .13, length + .08], at: [0, .39, 0], color: 0x25353e },
-      { size: [1.62, sport ? .58 : .78, 1.9], at: [0, sport ? 1.21 : 1.32, .1], color: 0x25353e },
+      { size: [1.62, sport ? .58 : .78, 1.9], at: [0, sport ? 1.21 : 1.32, .1], color: 0x25353e, rounding:.13 },
       { size: [1.49, sport ? .45 : .58, .06], at: [0, sport ? 1.31 : 1.42, -.86], color: 0x76a4b2, rotation: [-.28, 0, 0] },
       { size: [1.46, .43, .06], at: [0, sport ? 1.29 : 1.43, 1.05], color: 0x76a4b2, rotation: [.24, 0, 0] },
       { size: [.62, .17, .05], at: [0, .6, length / 2 + .06], color: 0xe5dec5 },
@@ -206,8 +222,8 @@ export class RemotePlayersView {
     const pants=this.material(shape.colors.pants);
     const legs: THREE.Group[] = [], arms: THREE.Group[] = [];
     for (const side of [-1, 1]) {
-      const leg = new THREE.Group(); leg.position.set(side * .17, .8, 0); avatar.add(leg); this.mesh(this.legShape, pants, leg); legs.push(leg);
-      const arm = new THREE.Group(); arm.position.set(side * .43, 1.48, 0); avatar.add(arm); this.mesh(shape.arm, this.colored, arm); arms.push(arm);
+      const leg = new THREE.Group(); leg.position.set(side * .15, .84, 0); avatar.add(leg); this.mesh(this.legShape, pants, leg);this.mesh(this.shoeShape,this.colored,leg); legs.push(leg);
+      const arm = new THREE.Group(); arm.position.set(side * .35, 1.45, 0); avatar.add(arm); this.mesh(shape.arm, this.colored, arm); arms.push(arm);
     }
     const car = new THREE.Group(); root.add(car);
     const carShape = this.carGeometry('sport'), paint = this.material(SLOT_COLORS[slot]);

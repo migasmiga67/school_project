@@ -13,7 +13,7 @@ import type { CampaignAction, CampaignSnapshot } from './campaign';
 import type { MobilityTrialAction, MobilityTrialSnapshot } from './mobility';
 
 export const MAX_ROOM_PLAYERS = 4;
-export const ROOM_PROTOCOL = 5;
+export const ROOM_PROTOCOL = 6;
 export const ONLINE_BUY_IN = 200;
 export const ONLINE_TURN_MS = 30000;
 export const CREW_DURATION_MS = 150000;

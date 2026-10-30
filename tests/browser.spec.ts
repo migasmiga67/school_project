@@ -63,9 +63,11 @@ test('można wysiąść, przejść pieszo i ponownie wejść do pobliskiego auta
   await page.keyboard.press('e');
   await expect.poll(async () => (await snapshot(page)).state.player.mode).toBe('foot');
   const before = (await snapshot(page)).state.player;
-  await page.keyboard.down('w');
+  // Walk toward the parked car: a slow renderer may process key-up after
+  // another frame, so moving away could leave the interaction radius.
+  await page.keyboard.down('a');
   await expect.poll(async () => moved(before, (await snapshot(page)).state.player), { intervals: [50, 100] }).toBeGreaterThan(0.3);
-  await page.keyboard.up('w');
+  await page.keyboard.up('a');
   const after = (await snapshot(page)).state.player;
   expect(moved(before, after)).toBeGreaterThan(0.2);
   await page.keyboard.press('e');

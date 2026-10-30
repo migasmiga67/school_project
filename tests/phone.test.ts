@@ -1,5 +1,8 @@
 import { describe,expect,it } from 'vitest';
-import { BUILDINGS,ROADS } from '../src/model';
+import { BUILDINGS,ROADS,WORLD_BOUNDS } from '../src/model';
+import { WATER_BOUNDS } from '../src/mobility';
+import { PHONE_DESTINATIONS,projectPhoneMap } from '../src/phone-ui';
+import { WORLD_LANDMARKS } from '../src/world-layout';
 import { HostPhone,getPhoneDeliveryPoint,PHONE_CHAT_LIMIT,PHONE_DELIVERY_PRICE,PHONE_INVITE_DURATION_MS,type PhoneAction,type PhoneMember,type PhoneDeliveryContext } from '../src/phone';
 
 const member=(id:string,name=id):PhoneMember=>({id,name,pose:{x:0,z:68,mode:'foot',interior:null,seated:false,vehicle:null}});
@@ -7,6 +10,19 @@ const host=member('host','Alicja'),friend=member('friend','Borys'),third=member(
 const create=()=>{const phone=new HostPhone('host'),members=[structuredClone(host),structuredClone(friend),structuredClone(third)];phone.update(members,0);return{phone,members};};
 const context:PhoneDeliveryContext={stored:false,busy:false};
 function accept(phone:HostPhone,members:PhoneMember[],id:string,action:PhoneAction,now=0,wallet=1250,delivery?:PhoneDeliveryContext){const result=phone.command(id,action,members,wallet,now,delivery);if(!result.ok)throw new Error(result.reason);return result;}
+
+describe('expanded phone map',()=>{
+ it('offers reachable destinations for all new districts',()=>{
+  for(const place of WORLD_LANDMARKS)expect(PHONE_DESTINATIONS.find(destination=>destination.id===place.id)).toMatchObject({name:place.name,point:place.point});
+  expect(new Set(PHONE_DESTINATIONS.map(destination=>destination.id)).size).toBe(PHONE_DESTINATIONS.length);
+ });
+ it('fits both land and ocean boundaries and places northern and southern areas correctly',()=>{
+  const points=[{x:WORLD_BOUNDS.minX,z:WORLD_BOUNDS.minZ},{x:WORLD_BOUNDS.maxX,z:WORLD_BOUNDS.maxZ},{x:WATER_BOUNDS.minX,z:WATER_BOUNDS.minZ},{x:WATER_BOUNDS.maxX,z:WATER_BOUNDS.maxZ},...WORLD_LANDMARKS.map(place=>place.point)];
+  for(const point of points){const pixel=projectPhoneMap(point);expect(pixel.x).toBeGreaterThan(0);expect(pixel.x).toBeLessThan(280);expect(pixel.y).toBeGreaterThan(0);expect(pixel.y).toBeLessThan(230);}
+  expect(projectPhoneMap({x:0,z:-160}).y).toBeLessThan(projectPhoneMap({x:0,z:160}).y);
+  expect(projectPhoneMap({x:-160,z:0}).x).toBeLessThan(projectPhoneMap({x:80,z:0}).x);
+ });
+});
 
 describe('host-owned phone chat',()=>{
  it('shares bounded plain messages, keeps sender identity host-owned and snapshots detached',()=>{

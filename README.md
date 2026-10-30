@@ -6,7 +6,9 @@ Oryginalny, niewielki sandbox 3D w przeglądarce, inspirowany miejskimi grami ak
 
 ## Zawartość
 
-- Miasto z cyklem dnia i nocy, deszczem, neonami i przechodniami: 15 bloków zabudowy, park, plaża, molo, palmy i ocean.
+- Miasto z cyklem dnia i nocy, deszczem, neonami i przechodniami: 67 bloków zabudowy, parki, plaża, molo i powiększona zatoka. Obszar lądowy jest około 3,6 raza większy niż w pierwszej wersji.
+- Cztery nowe dzielnice: zielone Westwood, biurowe North Financial, przemysłowy Port Nelson i nadmorska South Bay, połączone przejezdnymi alejami.
+- Dokładniejsze elewacje, witryny, dachy, tekstury asfaltu i chodników, zaokrąglone nadwozia i sylwetki postaci oraz woda z odbiciem nieba i pianą przy brzegu.
 - Auto sportowe i sedany, zaparkowane pojazdy i ruch uliczny; można wysiadać, chodzić, sprintować i przejmować auta.
 - Gaz, hamulec, jazda wstecz, ręczny, nitro i kolizje z zabudową oraz pojazdami.
 - Trzy typy zleceń: dostawa, wyścig przez punkty kontrolne, ucieczka przed policją.
@@ -70,7 +72,11 @@ Garaż solo zapisuje się razem z lokalnym profilem. W pokoju online masz osobny
 
 ## Żyjące miasto
 
-Pełna doba trwa **12 minut gry**. Zmieniają się oświetlenie, neony i pogoda; po chodnikach spacerują przechodnie. W pokoju online gracze korzystają ze wspólnego czasu miasta.
+Pełna doba trwa **12 minut gry**. Zmieniają się oświetlenie, neony i pogoda; po chodnikach spaceruje **40 przechodniów**, a po ulicach porusza się **16 aut ruchu miejskiego**. Nowe dzielnice mają zabudowę, drzewa, oświetlenie i własne trasy ruchu. W pokoju online gracze korzystają ze wspólnego czasu miasta.
+
+Minimapa podąża za graczem i pokazuje najbliższą okolicę; mapa w telefonie obejmuje całe miasto oraz zatokę. Wybierz jedną z czterech nowych dzielnic, aby GPS wyznaczył trasę ulicami. Dawne miejsca, wnętrza i cele zleceń pozostają dostępne.
+
+Powierzchnie korzystają ze wspólnych tekstur generowanych lokalnie. Akceleracja sprzętowa dodaje mapy normalnych i chropowatości oraz cienie; renderer programowy używa lżejszych materiałów i krótszego zasięgu widzenia. Geometria i okna są grupowane w lokalne sektory, aby kamera nie musiała rysować całej rozbudowanej mapy naraz.
 
 Co **120 sekund** pojawia się wydarzenie dostępne przez **40 sekund**: zgubiona przesyłka, pomoc na poboczu albo pilna dostawa. Panel wydarzenia i minimapa pokazują cel. Dotrzyj do niego pieszo lub jako kierowca; nagroda **$150–$200** jest odbierana automatycznie w pobliżu, raz za dane wydarzenie w bieżącej sesji. Pasażer nie odbiera nagrody za samo przejechanie przez punkt. Online wypłatę rozlicza gospodarz do portfela pokoju.
 

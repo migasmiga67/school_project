@@ -14,5 +14,14 @@ export interface GameState { interior:'casino'|null; player: Point & {heading:nu
 export interface Input { throttle:boolean;brake:boolean;left:boolean;right:boolean;handbrake:boolean;boost:boolean;sprint:boolean;interact:boolean;nextMission:boolean;reset:boolean;viewHeading?:number }
 export interface GameEvent { kind:'info'|'damage'|'reward'|'wanted'|'arrest'|'mission'|'interior'|'poker'; text:string; amount?:number }
 export const ROADS=[-80,-40,0,40,80];
-export const WORLD_BOUNDS={minX:-96,maxX:98,minZ:-98,maxZ:98};
-export const BUILDINGS:Collider[]=ROADS.slice(0,-1).flatMap((x,ix)=>ROADS.slice(0,-1).filter((_,iz)=>!(ix===1&&iz===1)).map(z=>({x:x+20,z:z+20,halfX:12,halfZ:12})));
+/** The original grid remains an alias for existing missions and save data. */
+export const ROAD_X=[-200,-160,-120,-80,-40,0,40,80];
+export const ROAD_Z=[-200,-160,-120,-80,-40,0,40,80,120,160,200];
+export const ROAD_NODES:Point[]=ROAD_X.flatMap(x=>ROAD_Z.map(z=>({x,z})));
+export const WORLD_BOUNDS={minX:-216,maxX:98,minZ:-218,maxZ:218};
+export const NATURAL_BLOCKS:Readonly<Point>[]=[{x:-20,z:-20},{x:-180,z:20},{x:-180,z:60}];
+const originalBuildings:Collider[]=ROADS.slice(0,-1).flatMap((x,ix)=>ROADS.slice(0,-1).filter((_,iz)=>!(ix===1&&iz===1)).map(z=>({x:x+20,z:z+20,halfX:12,halfZ:12})));
+const extensionBuildings:Collider[]=ROAD_X.slice(0,-1).flatMap(x=>ROAD_Z.slice(0,-1).map(z=>({x:x+20,z:z+20,halfX:12,halfZ:12}))).filter(block=>
+  !originalBuildings.some(original=>original.x===block.x&&original.z===block.z)&&!NATURAL_BLOCKS.some(park=>park.x===block.x&&park.z===block.z));
+/** Old indices and silhouettes stay stable; extensions share the exact physics footprint. */
+export const BUILDINGS:Collider[]=[...originalBuildings,...extensionBuildings];

@@ -7,7 +7,11 @@ import type { OnlineMember } from './multiplayer-model';
 import { RemotePlayersView } from './remote-players';
 import { CityLife, getCityEnvironment } from './city-life';
 import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
-import { BUILDINGS, ROADS, type GameState, type Vehicle } from './model';
+import { BUILDINGS, ROAD_X, ROAD_Z, WORLD_BOUNDS, NATURAL_BLOCKS, type GameState, type Vehicle } from './model';
+import { WORLD_LANDMARKS } from './world-layout';
+import { RoundedBoxGeometry } from 'three/addons/geometries/RoundedBoxGeometry.js';
+import { SurfaceLibrary, createWaterMaterial } from './surface-materials';
+import { AtmosphereView } from './atmosphere';
 import { PoliceView } from './police-view';
 import { expansionLandmarks } from './expansion-landmarks';
 import { AvatarView } from './avatar-view';
@@ -33,7 +37,7 @@ interface CarVisual {
 /** All art is generated here. The simulation, collisions and missions stay in game.ts. */
 export class CityView {
   readonly scene = new THREE.Scene();
-  readonly camera = new THREE.PerspectiveCamera(58, 1, 0.15, 650);
+  readonly camera = new THREE.PerspectiveCamera(58, 1, 0.15, 950);
   readonly renderer: THREE.WebGLRenderer;
   readonly softwareRendering: boolean;
   private lastPlayer: { x:number; z:number } | null = null;
@@ -43,6 +47,8 @@ export class CityView {
   private readonly heroArms: THREE.Mesh[] = [];
   private readonly customAvatar:AvatarView;
   private readonly mobilityVisuals:MobilityView;
+  private readonly surfaces:SurfaceLibrary;
+  private readonly atmosphere:AtmosphereView;
   private readonly palms: THREE.Group[] = [];
   private readonly marker = new THREE.Group();
   private readonly markerRing: THREE.Mesh;
@@ -85,7 +91,7 @@ export class CityView {
   constructor(parent: HTMLElement) {
     this.parent = parent;
     try {
-      this.renderer = new THREE.WebGLRenderer({ antialias: false, alpha: false, powerPreference: 'high-performance' });
+      this.renderer = new THREE.WebGLRenderer({ antialias: true, alpha: false, powerPreference: 'high-performance' });
     } catch {
       throw new Error('Nie udało się uruchomić grafiki WebGL. Włącz akcelerację sprzętową lub użyj aktualnego Chrome / Firefox.');
     }
@@ -93,16 +99,22 @@ export class CityView {
     const debug = gl.getExtension('WEBGL_debug_renderer_info');
     const device = debug ? String(gl.getParameter(debug.UNMASKED_RENDERER_WEBGL)) : '';
     this.softwareRendering = /swiftshader|llvmpipe|software/i.test(device);
+    if(this.softwareRendering){this.camera.far=260;this.camera.updateProjectionMatrix();}
     this.renderer.setPixelRatio(this.softwareRendering ? 0.65 : Math.min(window.devicePixelRatio || 1, 1.5));
     this.renderer.shadowMap.enabled = !this.softwareRendering;
     this.renderer.shadowMap.type = THREE.PCFSoftShadowMap;
     this.renderer.outputColorSpace = THREE.SRGBColorSpace;
     this.renderer.toneMapping = THREE.ACESFilmicToneMapping;
-    this.renderer.toneMappingExposure = 1.15;
+    this.renderer.toneMappingExposure = 1.05;
+    this.surfaces=new SurfaceLibrary(this.softwareRendering,Math.min(8,this.renderer.capabilities.getMaxAnisotropy()));
+    this.atmosphere=new AtmosphereView(this.softwareRendering);
+    // Keep the sky inside the shorter software-rendering view distance.
+    if(this.softwareRendering)this.atmosphere.group.scale.setScalar(220/540);
+    this.scene.add(this.atmosphere.group);
     this.renderer.domElement.setAttribute('aria-label', 'Trójwymiarowe miasto Neon Coast');
     parent.append(this.renderer.domElement);
     this.scene.background = this.sky();
-    this.scene.fog = new THREE.Fog(0xd5aeb1, 105, 360);
+    this.scene.fog = new THREE.Fog(0xc5c0b4,this.softwareRendering?90:145,this.softwareRendering?240:540);
     this.glowTexture = this.radial('#fff3cc');
     this.smokeTexture = this.radial('#bac6d0');
     this.lighting();
@@ -110,7 +122,7 @@ export class CityView {
     this.city();
     this.beach();
     this.skyline();
-    if (this.softwareRendering) this.batchStaticGeometry();
+    this.batchStaticGeometry();
     this.avatar();
     for(const child of this.hero.children)child.visible=false;
     this.customAvatar=new AvatarView(this.softwareRendering);this.hero.add(this.customAvatar.group);
@@ -152,7 +164,10 @@ export class CityView {
     this.scene.traverse(object => {
       if (!(object instanceof THREE.Mesh) || object instanceof THREE.InstancedMesh || !(object.material instanceof THREE.MeshStandardMaterial || object.material instanceof THREE.MeshLambertMaterial) || object.material.transparent) return;
       const material = object.material;
-      const key = [material.color.getHex(), material.emissive.getHex(), material.emissiveIntensity, material instanceof THREE.MeshStandardMaterial ? material.roughness : 0, material instanceof THREE.MeshStandardMaterial ? material.metalness : 0, material.side, material.map?.uuid, material.emissiveMap?.uuid, material.flatShading, Object.keys(object.geometry.attributes).sort().join(',')].join(':');
+      const position=new THREE.Vector3().setFromMatrixPosition(object.matrixWorld);
+      // Keep batches local, so looking north does not submit the entire expanded city.
+      const sector=`${Math.floor(position.x/80)},${Math.floor(position.z/80)}`;
+      const key = [sector, material.color.getHex(), material.emissive.getHex(), material.emissiveIntensity, material instanceof THREE.MeshStandardMaterial ? material.roughness : 0, material instanceof THREE.MeshStandardMaterial ? material.metalness : 0, material.side, material.map?.uuid, material.emissiveMap?.uuid, material.flatShading, Object.keys(object.geometry.attributes).sort().join(',')].join(':');
       let batch = batches.get(key);
       if (!batch) { batch = { material, meshes: [], geometries: [] }; batches.set(key, batch); }
       const geometry = object.geometry.index ? object.geometry.toNonIndexed() : object.geometry.clone();
@@ -165,7 +180,7 @@ export class CityView {
         if (geometry) {
           for (const mesh of batch.meshes) mesh.removeFromParent();
           const combined = new THREE.Mesh(geometry, batch.material);
-          combined.receiveShadow = true; this.scene.add(combined);
+          combined.receiveShadow = true;combined.castShadow=true;combined.geometry.computeBoundingSphere();this.scene.add(combined);
         }
       }
       for (const geometry of batch.geometries) geometry.dispose();
@@ -193,6 +208,14 @@ export class CityView {
     }
   }
   private mesh(geo: THREE.BufferGeometry, material: THREE.Material, parent: THREE.Object3D, x = 0, y = 0, z = 0) {
+    // Shared surface maps tile every eight metres, including on long roads.
+    if((material instanceof THREE.MeshStandardMaterial||material instanceof THREE.MeshLambertMaterial)&&material.map?.wrapS===THREE.RepeatWrapping){
+      const positions=geo.getAttribute('position'),normals=geo.getAttribute('normal'),uv=geo.getAttribute('uv');
+      if(positions&&normals&&uv)for(let index=0;index<positions.count;index++){
+        const nx=Math.abs(normals.getX(index)),ny=Math.abs(normals.getY(index)),nz=Math.abs(normals.getZ(index));
+        uv.setXY(index,(nx>ny&&nx>nz?positions.getZ(index):positions.getX(index))/8,(ny>nx&&ny>nz?positions.getZ(index):positions.getY(index))/8);
+      }
+    }
     const m = new THREE.Mesh(geo, material); m.position.set(x, y, z); m.castShadow = true; m.receiveShadow = true; parent.add(m); return m;
   }
   private box(w: number, h: number, d: number, material: THREE.Material, parent: THREE.Object3D, x = 0, y = 0, z = 0) {
@@ -215,82 +238,113 @@ export class CityView {
     this.hemisphere=new THREE.HemisphereLight(0xd6ebf8, 0x8a666c, 2.25);this.scene.add(this.hemisphere);
     const sunlight = this.sunlight=new THREE.DirectionalLight(0xffd1a1, 3.2); sunlight.position.set(-100, 100, -65); sunlight.castShadow = true;
     sunlight.shadow.mapSize.set(2048, 2048); Object.assign(sunlight.shadow.camera, { left: -125, right: 125, top: 125, bottom: -125, near: 1, far: 360 });
-    sunlight.shadow.normalBias = 0.12; sunlight.shadow.bias = -0.00015; this.scene.add(sunlight);
+    sunlight.shadow.normalBias = 0.12; sunlight.shadow.bias = -0.00015; this.scene.add(sunlight,sunlight.target);
     const sun = this.solarOrb=new THREE.Mesh(new THREE.SphereGeometry(20, 24, 16), new THREE.MeshBasicMaterial({ color: 0xffd0a0, fog: false })); sun.position.set(-180, 70, -270); this.scene.add(sun);
     const halo = this.solarHalo=new THREE.Sprite(new THREE.SpriteMaterial({ map: this.glowTexture, color: 0xffc995, transparent: true, opacity: 0.3, depthWrite: false, fog: false })); halo.position.copy(sun.position); halo.scale.set(140, 140, 1); this.scene.add(halo);
   }
   private ground() {
-    const sidewalk = this.material(0xc0b4a6); const road = this.material(0x555963); const line = this.material(0xd3c6a2);
-    const yellowMarks: THREE.Matrix4[] = [], whiteMarks: THREE.Matrix4[] = [];
-    const marker = new THREE.Object3D();
-    const mark = (list: THREE.Matrix4[], w: number, h: number, d: number, x: number, y: number, z: number) => {
-      marker.position.set(x, y, z); marker.scale.set(w, h, d); marker.updateMatrix(); list.push(marker.matrix.clone());
-    };
-    this.box(215, 0.4, 225, this.material(0xa4b39d), this.scene, -5, -0.28, 0);
-    for (const roadPosition of ROADS) {
-      this.box(12, 0.08, 205, road, this.scene, roadPosition, -0.015, 0);
-      this.box(205, 0.08, 12, road, this.scene, 0, -0.012, roadPosition);
-      for (let i = -96; i <= 96; i += 7) {
-        if (ROADS.some(cross => Math.abs(cross - i) < 9)) continue;
-        mark(yellowMarks, 0.16, 0.025, 3.5, roadPosition - 0.2, 0.045, i);
-        mark(yellowMarks, 0.16, 0.025, 3.5, roadPosition + 0.2, 0.045, i);
-        mark(yellowMarks, 3.5, 0.025, 0.16, i, 0.05, roadPosition - 0.2);
-        mark(yellowMarks, 3.5, 0.025, 0.16, i, 0.05, roadPosition + 0.2);
-      }
+    const sidewalk=this.surfaces.pavers,road=this.surfaces.asphalt,line=this.material(0xc9b48b),curb=this.surfaces.concrete;
+    // Distant terrain grounds the background skyline beyond the playable city.
+    // Its eastern edge meets the sea without changing movement bounds/colliders.
+    this.box(915,.55,1600,this.surfaces.grass,this.scene,-342.5,-.8,0);
+    const width=WORLD_BOUNDS.maxX-WORLD_BOUNDS.minX+16,depth=WORLD_BOUNDS.maxZ-WORLD_BOUNDS.minZ+16;
+    const centerX=(WORLD_BOUNDS.minX+WORLD_BOUNDS.maxX)/2,centerZ=(WORLD_BOUNDS.minZ+WORLD_BOUNDS.maxZ)/2;
+    this.box(width,.4,depth,this.material(0x89917a),this.scene,centerX,-.28,centerZ);
+    const yellowMarks:THREE.Matrix4[]=[],whiteMarks:THREE.Matrix4[]=[],dummy=new THREE.Object3D();
+    const mark=(list:THREE.Matrix4[],w:number,d:number,x:number,z:number)=>{dummy.position.set(x,.047,z);dummy.rotation.set(0,0,0);dummy.scale.set(w,.018,d);dummy.updateMatrix();list.push(dummy.matrix.clone());};
+    for(const x of ROAD_X){
+      this.box(12,.08,depth,road,this.scene,x,-.015,centerZ);
+      for(const side of[-1,1])this.box(.15,.018,depth,line,this.scene,x+side*5.3,.04,centerZ);
+      for(let z=WORLD_BOUNDS.minZ;z<WORLD_BOUNDS.maxZ;z+=7){if(ROAD_Z.some(cross=>Math.abs(cross-z)<9))continue;for(const side of[-1,1])mark(yellowMarks,.12,3.1,x+side*.18,z);}
     }
-    const crosswalk = this.material(0xe1d9c7);
-    for (const x of ROADS) for (const z of ROADS) for (let i = -4; i <= 4; i += 1.5) {
-      mark(whiteMarks, 0.8, 0.025, 2, x + i, 0.06, z + 8);
-      mark(whiteMarks, 2, 0.025, 0.8, x + 8, 0.06, z + i);
+    for(const z of ROAD_Z){
+      this.box(width,.08,12,road,this.scene,centerX,-.012,z);
+      for(const side of[-1,1])this.box(width,.018,.15,line,this.scene,centerX,.04,z+side*5.3);
+      for(let x=WORLD_BOUNDS.minX;x<WORLD_BOUNDS.maxX;x+=7){if(ROAD_X.some(cross=>Math.abs(cross-x)<9))continue;for(const side of[-1,1])mark(yellowMarks,3.1,.12,x,z+side*.18);}
     }
-    for (const [list, mat] of [[yellowMarks, line], [whiteMarks, crosswalk]] as const) {
-      const markings = new THREE.InstancedMesh(new THREE.BoxGeometry(1, 1, 1), mat, list.length);
-      list.forEach((matrix, index) => markings.setMatrixAt(index, matrix)); markings.receiveShadow = true; this.scene.add(markings);
+    for(const x of ROAD_X)for(const z of ROAD_Z)for(let i=-4;i<=4;i+=1.5){mark(whiteMarks,.8,2,x+i,z+8);mark(whiteMarks,2,.8,x+8,z+i);}
+    for(const[list,material]of[[yellowMarks,line],[whiteMarks,this.material(0xd5d2c4)]]as const){const instances=new THREE.InstancedMesh(new THREE.BoxGeometry(1,1,1),material,list.length);list.forEach((matrix,index)=>instances.setMatrixAt(index,matrix));instances.receiveShadow=true;instances.computeBoundingSphere();this.scene.add(instances);}
+    for(const x of ROAD_X.slice(0,-1))for(const z of ROAD_Z.slice(0,-1)){
+      this.box(28,.22,28,sidewalk,this.scene,x+20,.015,z+20);
+      for(const side of[-1,1]){this.box(28,.18,.28,curb,this.scene,x+20,.07,z+20+side*14);this.box(.28,.18,28,curb,this.scene,x+20+side*14,.07,z+20);}
     }
-    for (const x of ROADS.slice(0, -1)) for (const z of ROADS.slice(0, -1)) this.box(28, 0.28, 28, sidewalk, this.scene, x + 20, 0.03, z + 20);
-    // Ocean Boulevard promenade and western boundary verge.
-    this.box(6, 0.25, 205, this.material(0xd3c0aa), this.scene, 90, 0, 0);
-    this.box(7, 0.22, 205, sidewalk, this.scene, -91, 0, 0);
+    this.box(6,.22,depth,sidewalk,this.scene,90,0,centerZ);
+    this.box(7,.18,depth,curb,this.scene,WORLD_BOUNDS.minX+5,0,centerZ);
   }
 
   private city() {
-    const colors = [0xc4cec7, 0xd4a7a1, 0xc4b9cc, 0x9abfc5, 0xe4c5ad, 0x9eafb7, 0xc2c0a8];
-    const trim = this.material(0xe7ded1); const glass = this.material(0x668c9e, { roughness: 0.3, metalness: 0.3 });
-    const litGlass = this.material(0xd9c8a1, { emissive: 0x9f7740, emissiveIntensity: 0.18 });
-    const windowGeo = new THREE.BoxGeometry(1.8, 2, 0.09); const windows: THREE.Matrix4[] = []; const litWindows: THREE.Matrix4[] = [];
-    const dummy = new THREE.Object3D();
-    BUILDINGS.forEach((b, i) => {
-      const height = [17, 30, 12, 36, 22, 14, 29, 18, 40, 16, 25, 12, 33, 21, 19][i % 15];
-      const width = 21 + (i % 3); const depth = 21 + ((i + 1) % 3);
-      const baseMat = this.material(colors[i % colors.length]);
-      this.occluders.push(this.box(width, height, depth, baseMat, this.scene, b.x, height / 2 + 0.18, b.z));
-      this.box(width + 0.4, 0.6, depth + 0.4, trim, this.scene, b.x, height + 0.4, b.z);
-      this.box(width + 0.35, 0.42, depth + 0.35, trim, this.scene, b.x, 3.7, b.z);
-      this.box(7, 2, 5, this.material(0x92999b), this.scene, b.x + 3, height + 1.5, b.z - 3);
-      // Front arcade and door stay inside the known collider footprint.
-      this.box(3.4, 2.9, 0.15, glass, this.scene, b.x, 1.7, b.z + depth / 2 + 0.09);
-      this.box(7, 0.2, 1.2, trim, this.scene, b.x, 3.2, b.z + depth / 2);
-      for (let y = 5.3; y < height - 1.7; y += 3.6) for (let offset = -7.7; offset <= 7.7; offset += 3.8) {
-        for (const side of [0, 1, 2, 3]) {
-          dummy.position.set(side === 1 ? b.x + width / 2 + 0.06 : side === 3 ? b.x - width / 2 - 0.06 : b.x + offset, y, side === 0 ? b.z + depth / 2 + 0.06 : side === 2 ? b.z - depth / 2 - 0.06 : b.z + offset);
-          dummy.rotation.set(0, side % 2 ? Math.PI / 2 : 0, 0); dummy.updateMatrix();
-          ((Math.round(y) + side + Math.round(offset) + i) % 5 === 0 ? litWindows : windows).push(dummy.matrix.clone());
-        }
+    const trim=this.surfaces.concrete,glass=this.surfaces.windowGlass,roof=this.surfaces.roof;
+    const windowGeo=new THREE.BoxGeometry(1.55,1.95,.085);
+    const windowSectors=new Map<string,{windows:THREE.Matrix4[];litWindows:THREE.Matrix4[];frames:THREE.Matrix4[]}>();
+    const windowFrame=this.material(0x4a5051,{metalness:.35,roughness:.55});
+    const litGlass=this.surfaces.litWindow;
+    const dummy=new THREE.Object3D(),baseHeights=[17,30,12,36,22,14,29,18,40,16,25,12,33,21,19];
+    const doorMaterial=this.material(0x3d4c51,{metalness:.6,roughness:.26});
+    BUILDINGS.forEach((b,i)=>{
+      const sectorKey=`${Math.floor(b.x/80)},${Math.floor(b.z/80)}`;
+      let sector=windowSectors.get(sectorKey);
+      if(!sector){sector={windows:[],litWindows:[],frames:[]};windowSectors.set(sectorKey,sector);}
+      const{windows,litWindows,frames}=sector;
+      const western=b.x<-100,northern=b.z<-100,port=b.z>100;
+      const height=i<15?baseHeights[i%15]:western?7+(i%4)*2.2:port?8+(i%3)*3.4:northern?28+(i%5)*6:16+(i%4)*4;
+      const width=western?20:21+(i%3),depth=port?23:21+((i+1)%3);
+      const surface=western?this.surfaces.brick:port?this.surfaces.sandstone:northern?this.surfaces.office:this.surfaces.facades[i%this.surfaces.facades.length];
+      const building=this.mesh(new RoundedBoxGeometry(width,height,depth,1,.22),surface,this.scene,b.x,height/2+.18,b.z);this.occluders.push(building);
+      this.box(width+.35,.38,depth+.35,trim,this.scene,b.x,height+.36,b.z);
+      this.box(width-.45,.12,depth-.45,roof,this.scene,b.x,height+.61,b.z);
+      this.box(width+.12,.35,depth+.12,trim,this.scene,b.x,3.6,b.z);
+      // Real rooftop services and recessed shop fronts sit inside each collider.
+      this.box(western?2.4:5,western?.7:1.5,3,roof,this.scene,b.x+3,height+1.15,b.z-3);
+      const vent=this.mesh(new THREE.CylinderGeometry(.58,.58,.65,12),windowFrame,this.scene,b.x-4,height+.95,b.z+3);vent.rotation.y=i*.4;
+      this.box(2.7,2.8,.12,doorMaterial,this.scene,b.x,1.65,b.z+depth/2+.065);
+      this.box(.09,2.6,.14,trim,this.scene,b.x,1.65,b.z+depth/2+.14);
+      for(const side of[-1,1])this.box(5.2,2.2,.1,glass,this.scene,b.x+side*5.8,1.8,b.z+depth/2+.07);
+      this.box(15,.16,1.2,roof,this.scene,b.x,3.1,b.z+depth/2);
+      const step=western?4.6:3.8;
+      for(let y=5.4;surface!==this.surfaces.office&&y<height-1.3;y+=3.65)for(let offset=-7.6;offset<=7.6;offset+=step)for(const side of[0,1,2,3]){
+        dummy.position.set(side===1?b.x+width/2+.05:side===3?b.x-width/2-.05:b.x+offset,y,side===0?b.z+depth/2+.05:side===2?b.z-depth/2-.05:b.z+offset);
+        dummy.rotation.set(0,side%2?Math.PI/2:0,0);dummy.scale.set(1,1,1);dummy.updateMatrix();
+        ((Math.round(y)+side+Math.round(offset)+i)%6===0?litWindows:windows).push(dummy.matrix.clone());
+        dummy.scale.set(1.15,1.13,.65);dummy.updateMatrix();frames.push(dummy.matrix.clone());
       }
-      if (i % 3 === 1) {
-        const stripe = this.material(i % 2 ? 0xd8c5cd : 0x89a9b4);
-        this.box(0.5, height, depth + 0.12, stripe, this.scene, b.x - width / 2 + 2, height / 2 + 0.2, b.z);
+      if(i<15&&i%3===1)this.box(.28,height,depth+.08,trim,this.scene,b.x-width/2+2,height/2+.18,b.z);
+      if(port){
+        this.box(8,3.3,.15,roof,this.scene,b.x,1.85,b.z-depth/2-.06);
+        for(let stripe=0;stripe<5;stripe++)this.box(7.6,.055,.16,trim,this.scene,b.x,.6+stripe*.58,b.z-depth/2-.09);
       }
-      const names = ['PALM HOTEL', 'AZURE', 'NOVA', 'SEABREEZE', 'SUNDOWN', 'COASTAL', 'MARINA'];
-      if (i % 2 === 0) this.sign(names[i % names.length], i % 3 === 0 ? '#efb7c8' : '#b4e9e0', b.x, 5.1, b.z + depth / 2 + 0.14, 9, 1.4);
+      const names=western?['WESTWOOD MARKET','HILL GARAGE','COAST HOMES']:port?['DOCK STORAGE','SOUTH PORT','HARBOR WORKS']:northern?['AETHER FINANCE','NORTH PLAZA','CITY OFFICES']:['PALM HOTEL','AZURE','NOVA','SEABREEZE','SUNDOWN','COASTAL','MARINA'];
+      if(i<15?i%2===0:i%5===0)this.sign(names[i%names.length],western?'#d4c2a0':port?'#d4b386':'#bed7d8',b.x,4.7,b.z+depth/2+.15,10,1.1);
     });
-    for (const [list, mat] of [[windows, glass], [litWindows, litGlass]] as const) {
-      const instances = new THREE.InstancedMesh(windowGeo, mat, list.length); list.forEach((matrix, i) => instances.setMatrixAt(i, matrix)); instances.receiveShadow = true; this.scene.add(instances);
+    // Thin window surrounds are instanced just like the glazing itself.
+    for(const{windows,litWindows,frames}of windowSectors.values())for(const[list,material]of[[frames,windowFrame],[windows,glass],[litWindows,litGlass]]as const){if(!list.length)continue;const mesh=new THREE.InstancedMesh(windowGeo,material,list.length);list.forEach((matrix,index)=>mesh.setMatrixAt(index,matrix));mesh.receiveShadow=true;mesh.computeBoundingSphere();this.scene.add(mesh);}
+    for(let z=-200;z<=200;z+=28)this.palm(90,z,8.2+(Math.abs(z)%3),z*.02);
+    for(const z of[-188,-148,-108,-68,-28,12,52,92,132,172])for(const x of[-208,-168,-128,-88,-48,-8,32,72]){
+      if(x<-110)this.tree(x,z,5.5+Math.abs(z%3));else if(z<100)this.palm(x,z,8.4,x*.04);
     }
-    for (const z of [-90, -65, -40, -15, 10, 35, 60, 85]) this.palm(90, z, 8.5 + (z % 3), 0.3);
-    for (const z of [-68, -28, 12, 52]) for (const x of [-88, -48, -8, 32, 72]) this.palm(x, z, 8.5, x * 0.04);
-    for (const x of [-73, -33, 7, 47]) for (const z of [-72, -32, 8, 48, 88]) this.lamp(x, z);
-    this.park();
+    for(const x of ROAD_X.slice(0,-1).map(value=>value+7))for(const z of ROAD_Z.filter((_,i)=>i%2===0).map(value=>value+8))this.lamp(x,z);
+    this.park();this.districtDetails();
+  }
+
+  private tree(x:number,z:number,height:number){
+    const trunk=this.surfaces.bark,leaves=this.material(0x4d6552,{roughness:.95});
+    this.mesh(new THREE.CylinderGeometry(.12,.3,height*.64,9),trunk,this.scene,x,height*.32,z);
+    const canopy=this.mesh(new THREE.SphereGeometry(height*.32,10,7),leaves,this.scene,x,height*.8,z);canopy.scale.set(1,.8,.9);
+  }
+  private districtDetails(){
+    const paving=this.surfaces.pavers,metal=this.material(0x667273,{metalness:.55,roughness:.5}),wood=this.material(0x82705b),dark=this.material(0x313f45);
+    for(const block of NATURAL_BLOCKS){if(block.x===-20&&block.z===-20)continue;this.box(27,.09,27,this.surfaces.grass,this.scene,block.x,.17,block.z);this.box(3,.025,27,paving,this.scene,block.x,.23,block.z);for(let i=0;i<9;i++){const x=block.x-10+(i%3)*9,z=block.z-10+Math.floor(i/3)*9;if(Math.abs(x-block.x)>2)this.tree(x,z,7+(i%3));}}
+    // Street furniture stays on pavement and does not obstruct the road graph.
+    for(const x of[-194,-114,-34,46])for(const z of[-154,-74,6,86,166]){
+      this.box(3.2,.16,.7,wood,this.scene,x,.82,z);for(const side of[-1,1])this.box(.12,.74,.65,metal,this.scene,x+side*1.2,.42,z);
+      this.mesh(new THREE.CylinderGeometry(.38,.42,1.05,12),dark,this.scene,x+4,.55,z);
+    }
+    const containers=[this.material(0x70888b),this.material(0x9b6d56),this.material(0x928a6c)];
+    for(let i=0;i<9;i++){
+      const x=-211,z=128+i*7;
+      this.box(4.7,2.7,5.8,containers[i%3],this.scene,x,1.55,z);
+      for(let rib=0;rib<6;rib++)this.box(.07,2.55,.08,metal,this.scene,x-2+rib*.78,1.55,z+2.94);
+    }
+    for(const landmark of WORLD_LANDMARKS)this.sign(landmark.name.toUpperCase(),'#d9ddc5',landmark.point.x+7,3.8,landmark.point.z-6,12,1.6);
   }
   private sign(text: string, color: string, x: number, y: number, z: number, width: number, height: number) {
     const canvas = document.createElement('canvas'); canvas.width = 512; canvas.height = 96;
@@ -300,7 +354,7 @@ export class CityView {
   }
   private palm(x: number, z: number, height: number, angle: number) {
     const tree = new THREE.Group(); tree.position.set(x, 0.1, z); tree.rotation.y = angle; this.scene.add(tree);
-    const trunk = this.mesh(new THREE.CylinderGeometry(0.2, 0.42, height, 7), this.material(0x9d8165), tree, 0, height / 2, 0); trunk.rotation.z = 0.08;
+    const trunk = this.mesh(new THREE.CylinderGeometry(0.2, 0.42, height, 9), this.surfaces.bark, tree, 0, height / 2, 0); trunk.rotation.z = 0.08;
     const geometry = new THREE.BufferGeometry(); const vertices: number[] = [];
     for (let i = 0; i < 7; i++) {
       const a = i / 7 * Math.PI * 2; const dx = Math.cos(a), dz = Math.sin(a), px = -dz, pz = dx;
@@ -318,7 +372,7 @@ export class CityView {
     this.box(0.9, 0.12, 0.5, this.material(0xffe3ac, { emissive: 0xffcc85, emissiveIntensity: 0.7 }), this.scene, x + 1.2, 6.6, z);
   }
   private park() {
-    this.box(25, 0.1, 25, this.material(0x839b78), this.scene, -20, 0.21, -20);
+    this.box(25, 0.1, 25, this.surfaces.grass, this.scene, -20, 0.21, -20);
     this.box(25, 0.05, 3, this.material(0xcfbba1), this.scene, -20, 0.29, -20);
     this.box(3, 0.05, 25, this.material(0xcfbba1), this.scene, -20, 0.3, -20);
     const fountain = new THREE.Mesh(new THREE.CylinderGeometry(3.8, 4.1, 0.7, 20), this.material(0xcac8b6)); fountain.position.set(-20, 0.65, -20); fountain.receiveShadow = true; this.scene.add(fountain);
@@ -332,35 +386,41 @@ export class CityView {
     }
   }
   private beach() {
-    this.box(23, 0.22, 240, this.material(0xddc4a2), this.scene, 105, -0.12, 0);
-    const umbrellaColors = [0xea9e91, 0xa7d0c2, 0xdfc37f];
-    for (let z = -65, i = 0; z <= 80; z += 24, i++) {
-      const x = 103 + (i % 2) * 5;
-      this.mesh(new THREE.CylinderGeometry(0.06, 0.06, 2.8, 6), this.material(0xb69b7d), this.scene, x, 1.4, z);
-      this.mesh(new THREE.ConeGeometry(2.8, 0.9, 8), this.material(umbrellaColors[i % 3], { side: THREE.DoubleSide }), this.scene, x, 2.8, z);
-      this.box(1.3, 0.16, 2.7, this.material(0xe9dbc0), this.scene, x + 2.3, 0.18, z + 2.2);
+    const length=WORLD_BOUNDS.maxZ-WORLD_BOUNDS.minZ+32;
+    this.box(23,.22,length,this.surfaces.sand,this.scene,105,-.12,0);
+    const sand=this.material(0xc9bb9c,{roughness:1});
+    this.box(9,.025,length,sand,this.scene,111,-.005,0);
+    const umbrellaColors=[0xc69b89,0x8ba89d,0xb8a57d];
+    for(let z=-190,i=0;z<=190;z+=32,i++){
+      const x=103+(i%2)*5;
+      this.mesh(new THREE.CylinderGeometry(.045,.045,2.6,10),this.material(0x9b8c76),this.scene,x,1.3,z);
+      this.mesh(new THREE.ConeGeometry(2.5,.7,16),this.material(umbrellaColors[i%3],{side:THREE.DoubleSide}),this.scene,x,2.6,z);
+      this.box(1.1,.12,2.6,this.surfaces.concrete,this.scene,x+2.3,.17,z+2.2);
     }
-    const wood = this.material(0xb99878); this.box(40, 0.5, 6, wood, this.scene, 128, 0.6, 20);
-    for (let x = 112; x < 147; x += 5) for (const z of [17.5, 22.5]) this.box(0.35, 3, 0.35, this.material(0x8a7968), this.scene, x, -0.5, z);
-    this.box(8, 4, 6, this.material(0xc2d9d3), this.scene, 141, 2.8, 20);
-    this.mesh(new THREE.ConeGeometry(6, 2, 4), this.material(0x8e9da2), this.scene, 141, 5.6, 20).rotation.y = Math.PI / 4;
-    this.sign('PIER 09', '#f2d2ac', 141, 3.6, 23.05, 6, 1.2);
+    const wood=this.material(0x9c8971);this.box(40,.5,6,wood,this.scene,128,.6,20);
+    for(let x=112;x<147;x+=5)for(const z of[17.5,22.5])this.box(.28,3,.28,this.material(0x746d61),this.scene,x,-.5,z);
+    this.box(8,4,6,this.surfaces.stucco,this.scene,141,2.8,20);
+    this.mesh(new THREE.ConeGeometry(6,2,4),this.surfaces.roof,this.scene,141,5.6,20).rotation.y=Math.PI/4;
+    this.sign('PIER 09','#e1d6be',141,3.6,23.05,6,1.2);
+    // Extended coast has quiet bathing areas and a second pier to explore.
+    this.box(35,.36,5,wood,this.scene,128,.4,160);
+    for(let x=114;x<145;x+=6)for(const z of[158,162])this.box(.24,2.4,.24,wood,this.scene,x,-.45,z);
+    this.sign('SOUTH BEACH','#d7dfd1',142,2.4,163,8,1.3);
   }
   private water() {
-    const material = new THREE.ShaderMaterial({
-      uniforms: { uTime: { value: 0 }, uDaylight: { value: 1 } },
-      vertexShader: 'varying vec2 vUv; void main(){vUv=uv;gl_Position=projectionMatrix*modelViewMatrix*vec4(position,1.0);}',
-      fragmentShader: `varying vec2 vUv;uniform float uTime;uniform float uDaylight;void main(){float wave=sin(vUv.y*430.0+uTime*1.4+sin(vUv.x*50.0))*0.5+0.5;float shimmer=pow(wave,18.0)*0.16;vec3 water=mix(vec3(0.22,0.58,0.62),vec3(0.39,0.71,0.70),1.0-vUv.x);float shore=1.0-smoothstep(0.0,0.035,vUv.x);gl_FragColor=vec4((water+shimmer+shore*0.16)*(0.32+uDaylight*0.68),1.0);}`,
-    });
-    const plane = new THREE.Mesh(new THREE.PlaneGeometry(340, 650), material); plane.rotation.x = -Math.PI / 2; plane.position.set(285, -0.23, 0); this.scene.add(plane); return material;
+    const material=createWaterMaterial();
+    const plane=new THREE.Mesh(new THREE.PlaneGeometry(1200,1800),material);plane.rotation.x=-Math.PI/2;plane.position.set(715,-.23,0);plane.receiveShadow=false;this.scene.add(plane);return material;
   }
   private skyline() {
-    const mat = this.material(0x8d8ca4);
-    for (let i = 0; i < 17; i++) {
-      const h = 13 + ((i * 17) % 41); this.box(15 + i % 6, h, 18, mat, this.scene, -180 + i * 19, h / 2 - 0.2, -143 - (i % 3) * 14);
+    const mat=this.surfaces.office;
+    for(let i=0;i<22;i++){
+      const h=18+(i*17)%45;this.box(12+i%7,h,15,mat,this.scene,-250+i*17,h/2-.75,-260-(i%3)*11);
     }
-    const mountains = new THREE.Group(); this.scene.add(mountains);
-    for (let i = 0; i < 6; i++) this.mesh(new THREE.ConeGeometry(65, 35 + i * 4, 5), this.material(0x9e9cae), mountains, -245, 8, -200 + i * 85);
+    const mountains=new THREE.Group();this.scene.add(mountains);
+    const hill=this.material(0x6f807a);
+    for(let i=0;i<9;i++){
+      const mountain=this.mesh(new THREE.SphereGeometry(65+i%3*8,12,8),hill,mountains,-285-(i%3)*25,-10,-260+i*68);mountain.scale.set(1,.5+(i%3)*.1,1.1);
+    }
   }
 
   private avatar() {
@@ -380,11 +440,11 @@ export class CityView {
     const sporty = vehicle.kind === 'sport'; const paint = this.material(vehicle.color, { metalness: 0.3, roughness: 0.36 });
     const black = this.material(0x25353e, { metalness: 0.25, roughness: 0.35 }); const tire = this.material(0x20252a); const chrome = this.material(0xc1c7c5, { metalness: 0.65, roughness: 0.3 });
     const bodyLength = sporty ? 4.5 : 4.7;
-    this.box(1.95, 0.64, bodyLength, paint, group, 0, 0.7, 0);
+    this.mesh(new RoundedBoxGeometry(1.95,.64,bodyLength,3,.16),paint,group,0,.7,0);
     this.box(1.93, 0.13, bodyLength + 0.08, black, group, 0, 0.39, 0);
-    this.box(1.7, 0.22, 1.3, paint, group, 0, 1.06, -1.4);
+    this.mesh(new RoundedBoxGeometry(1.7,.22,1.3,2,.08),paint,group,0,1.06,-1.4);
     this.box(1.62, sporty ? 0.58 : 0.78, 1.9, black, group, 0, sporty ? 1.21 : 1.32, 0.1);
-    this.box(1.63, 0.12, 1.55, paint, group, 0, sporty ? 1.54 : 1.75, 0.18);
+    this.mesh(new RoundedBoxGeometry(1.63,.12,1.55,2,.055),paint,group,0,sporty?1.54:1.75,.18);
     const glass = this.material(0x78a4b1, { roughness: 0.15, metalness: 0.5 });
     const windscreen = this.box(1.49, sporty ? 0.45 : 0.58, 0.06, glass, group, 0, sporty ? 1.31 : 1.42, -0.86); windscreen.rotation.x = -0.28;
     const rear = this.box(1.46, 0.43, 0.06, glass, group, 0, sporty ? 1.29 : 1.43, 1.05); rear.rotation.x = 0.24;
@@ -405,8 +465,8 @@ export class CityView {
     for (const x of [-1.02, 1.02]) for (const z of [-1.4, 1.4]) {
       const steer = new THREE.Group(); steer.position.set(x, 0.45, z); group.add(steer);
       const spin = new THREE.Group(); steer.add(spin);
-      const wheel = this.mesh(new THREE.CylinderGeometry(0.42, 0.42, 0.26, 12), tire, spin); wheel.rotation.z = Math.PI / 2;
-      const hub = this.mesh(new THREE.CylinderGeometry(0.24, 0.24, 0.28, 8), chrome, spin); hub.rotation.z = Math.PI / 2;
+      const wheel = this.mesh(new THREE.CylinderGeometry(0.42, 0.42, 0.26, 20), tire, spin); wheel.rotation.z = Math.PI / 2;
+      const hub = this.mesh(new THREE.CylinderGeometry(0.24, 0.24, 0.28, 12), chrome, spin); hub.rotation.z = Math.PI / 2;
       wheels.push(spin); if (z < 0) frontWheels.push(steer);
     }
     const visual: CarVisual = { group, wheels, frontWheels, brake, head, paint, paintColor:vehicle.color, kind:vehicle.kind, smoke: [] };
@@ -476,11 +536,12 @@ export class CityView {
       this.solarOrb.visible=false;this.solarHalo.visible=false;
     }else{
       this.scene.background=this.outsideSky.setHex(environment.sky);
-      if(this.scene.fog instanceof THREE.Fog){this.scene.fog.color.setHex(environment.fog);this.scene.fog.near=105-environment.rain*30;this.scene.fog.far=360-environment.rain*100;}
+      if(this.scene.fog instanceof THREE.Fog){this.scene.fog.color.setHex(environment.fog);this.scene.fog.near=this.softwareRendering?90-environment.rain*25:145-environment.rain*40;this.scene.fog.far=this.softwareRendering?240-environment.rain*60:540-environment.rain*140;}
       this.hemisphere.intensity=1.0+environment.daylight*1.25;this.hemisphere.color.setHex(environment.daylight<.1?0xb6c8ef:0xd6ebf8);this.hemisphere.groundColor.setHex(environment.daylight<.1?0x41445f:0x8a666c);
       this.sunlight.intensity=.15+environment.daylight*3;this.sunlight.color.setHex(environment.sunColor);
+      this.sunlight.position.set(state.player.x-100,100,state.player.z-65);this.sunlight.target.position.set(state.player.x,0,state.player.z);
       this.solarOrb.visible=environment.daylight>.03;this.solarHalo.visible=this.solarOrb.visible;this.solarHalo.material.opacity=.15+environment.daylight*.15;
-      this.waterMaterial.uniforms.uDaylight.value=environment.daylight;
+      this.waterMaterial.uniforms.uDaylight.value=environment.daylight;this.waterMaterial.uniforms.uRain.value=environment.rain;this.surfaces.setNight(1-environment.daylight);
     }
     this.visualTime += dt;
     this.casino.update(this.visualTime);
@@ -557,7 +618,7 @@ export class CityView {
       if (obstruction) this.camera.position.copy(pivot).addScaledVector(offset.normalize(), Math.max(0.4, obstruction.distance - 0.55));
     }
     this.remote.update(this.onlineMembers, this.onlineSelf, state.interior, dt,cameraMode===2&&riding?p.passengerOf??undefined:undefined);
-    this.camera.lookAt(lookAt); this.renderer.render(this.scene, this.camera);this.renderFrames++;
+    this.camera.lookAt(lookAt);this.atmosphere.update(environment,this.camera.position,citySeconds);this.renderer.render(this.scene, this.camera);this.renderFrames++;
   }
   private updateHome(state:GameState,dt:number,cameraMode:number,pose?:CameraPose){
     this.visualTime+=dt;const p=state.player,yaw=pose?.yaw??p.heading,pitch=pose?.pitch??.35,zoom=pose?.zoom??1;
@@ -578,5 +639,5 @@ export class CityView {
     this.camera.lookAt(lookAt);this.renderer.render(this.homeScene,this.camera);this.renderFrames++;
   }
   resize() { const width = Math.max(1, this.parent.clientWidth), height = Math.max(1, this.parent.clientHeight); this.camera.aspect = width / height; this.camera.updateProjectionMatrix(); this.renderer.setSize(width, height, false); }
-  destroy() { this.observer.disconnect(); this.living.destroy(); this.remote.destroy(); this.casino.destroy(); this.scene.traverse(object => { if (object instanceof THREE.Mesh) { object.geometry.dispose(); for (const material of Array.isArray(object.material) ? object.material : [object.material]) material.dispose(); } }); if(this.cityBackground instanceof THREE.Texture)this.cityBackground.dispose();this.glowTexture.dispose(); this.smokeTexture.dispose(); this.renderer.dispose(); this.renderer.domElement.remove(); }
+  destroy() { this.observer.disconnect(); this.living.destroy(); this.remote.destroy(); this.casino.destroy();this.atmosphere.destroy(); this.scene.traverse(object => { if (object instanceof THREE.Mesh) { object.geometry.dispose(); for (const material of Array.isArray(object.material) ? object.material : [object.material]) material.dispose(); } });this.occluders.forEach(object=>object.geometry.dispose());this.surfaces.destroy(); if(this.cityBackground instanceof THREE.Texture)this.cityBackground.dispose();this.glowTexture.dispose(); this.smokeTexture.dispose(); this.renderer.dispose(); this.renderer.domElement.remove(); }
 }

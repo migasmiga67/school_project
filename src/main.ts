@@ -21,6 +21,7 @@ import './expansion.css';
 import { CityExpansion } from './expansion-controller';
 import { CityStories } from './city-stories';
 import { DOCK } from './mobility';
+import { districtAt } from './world-layout';
 
 const $=<T extends HTMLElement=HTMLElement>(selector:string)=>document.querySelector<T>(selector)!;
 const SAVE_KEY='neon-coast-profile-v1';
@@ -318,7 +319,7 @@ function fatal(message:string){const box=document.createElement('div');box.class
 function notify(message:string){clearTimeout(notificationTimer);$('#toast').textContent=message;$('#toast').classList.add('show');notificationTimer=setTimeout(()=>$('#toast').classList.remove('show'),4200);}
 function persist(){const saved=soloState??state;try{localStorage.setItem(SAVE_KEY,JSON.stringify({money:saved.money,wins:saved.missionsWon,bestRace:saved.bestRace,muted,pokerReserve:casinoReserve,garage:soloGarage,career:expansion?.savedCareer??loadedCareer,stories:stories?.saved??loadedStories}));saveAvailable=true;}catch{saveAvailable=false;}}
 async function toggleSound(){muted=!muted;await audio.toggle(!muted);if(!muted&&audio.muted){muted=true;notify('Audio jest niedostępne. Gra działa bez dźwięku.');}persist();updateHUD();}
-function district(p:Point):string{if(state.interior==='casino')return CASINO.name;if(p.x>60)return'Ocean Drive';if(p.z<-40)return'North Heights';if(p.x<-40)return'Little Havana';if(p.z>40)return'Southside';return'Downtown';}
+function district(p:Point):string{return state.interior==='casino'?CASINO.name:districtAt(p);}
 function updateCasinoHUD(){
  const action=casinoAction(state),near=nearestVehicle(state),inside=state.interior==='casino';
  $('#interaction').classList.toggle('hidden',state.player.mode==='foot'&&!near&&!action);

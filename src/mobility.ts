@@ -1,7 +1,7 @@
 import type { GameState, Input, Point, Vehicle } from './model';
 import type { OnlinePose } from './multiplayer-model';
 
-export const WATER_BOUNDS={minX:118,maxX:190,minZ:-92,maxZ:92};
+export const WATER_BOUNDS={minX:118,maxX:310,minZ:-212,maxZ:212};
 export const DOCK={land:{x:96,z:20},mooring:{x:124,z:26},radius:10};
 export const BIKE_LOCATION:Readonly<Point>={x:4.5,z:82};
 export interface BikeRamp extends Point {id:string;heading:number;width:number;length:number;height:number}

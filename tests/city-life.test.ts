@@ -1,6 +1,6 @@
 import { describe,expect,it } from 'vitest';
 import { BUILDINGS } from '../src/model';
-import { cityEventAt,getCityEnvironment,pedestrianPose } from '../src/city-life';
+import { cityEventAt,getCityEnvironment,pedestrianPose,PEDESTRIAN_COUNT } from '../src/city-life';
 
 describe('shared city clock and opportunities',()=>{
   it('starts at18:42, completes a day in720seconds and stays finite on invalid input',()=>{
@@ -28,7 +28,7 @@ describe('shared city clock and opportunities',()=>{
       const target=cityEventAt(seconds)!.target;
       expect(BUILDINGS.some(b=>Math.abs(target.x-b.x)<b.halfX&&Math.abs(target.z-b.z)<b.halfZ)).toBe(false);
     }
-    for(let i=0;i<16;i++)for(let seconds=0;seconds<150;seconds+=3){
+    for(let i=0;i<PEDESTRIAN_COUNT;i++)for(let seconds=0;seconds<150;seconds+=3){
       const p=pedestrianPose(i,seconds);
       expect(BUILDINGS.some(b=>Math.abs(p.x-b.x)<b.halfX+.55&&Math.abs(p.z-b.z)<b.halfZ+.55)).toBe(false);
       expect(p.heading).toBeGreaterThanOrEqual(-Math.PI);expect(p.heading).toBeLessThanOrEqual(Math.PI);

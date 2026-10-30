@@ -1,5 +1,6 @@
 import * as THREE from 'three';
 import type { Point } from './model';
+import { ROAD_NODES } from './model';
 
 export interface CityEvent { id:string; title:string; target:Point; reward:number; expiresAt:number }
 export interface CityEnvironment {
@@ -40,7 +41,8 @@ export function cityEventAt(seconds:number):CityEvent|null {
   return {id:`city-${cycle}-${event.kind}`,title:event.title,target:{...event.target},reward:event.reward,expiresAt:cycle*120+40};
 }
 
-const BLOCKS=[{x:-20,z:-20},{x:20,z:-20},{x:-60,z:20},{x:60,z:60}];
+const BLOCKS=[{x:-20,z:-20},{x:20,z:-20},{x:-60,z:20},{x:60,z:60},{x:-180,z:-20},{x:-140,z:60},{x:20,z:-180},{x:-60,z:-140},{x:-140,z:140},{x:20,z:180}];
+export const PEDESTRIAN_COUNT=BLOCKS.length*4;
 export function pedestrianPose(index:number,seconds:number):Point&{heading:number} {
   const block=BLOCKS[((Math.floor(index/4)%BLOCKS.length)+BLOCKS.length)%BLOCKS.length],half=13.5;
   const route=[{x:block.x-half,z:block.z-half},{x:block.x+half,z:block.z-half},{x:block.x+half,z:block.z+half},{x:block.x-half,z:block.z+half}];
@@ -67,17 +69,18 @@ export class CityLife {
   private readonly part=new THREE.Object3D();
   private readonly matrix=new THREE.Matrix4();
   private lastEventId='';
-  private current={pedestrians:16,rainDrops:0,rain:0,daylight:1,weather:'BEZCHMURNIE' as CityEnvironment['weather'],eventId:null as string|null,period:'ZACHÓD SŁOŃCA' as CityEnvironment['period']};
+  private current={pedestrians:PEDESTRIAN_COUNT,rainDrops:0,rain:0,daylight:1,weather:'BEZCHMURNIE' as CityEnvironment['weather'],eventId:null as string|null,period:'ZACHÓD SŁOŃCA' as CityEnvironment['period']};
 
   constructor(software:boolean) {
     this.group.name='city-life';
     const material=new THREE.MeshLambertMaterial({color:0xffffff});
-    for(const count of [16,16,32,32]){
-      const mesh=new THREE.InstancedMesh(this.geometry,material,count);mesh.instanceMatrix.setUsage(THREE.DynamicDrawUsage);mesh.frustumCulled=false;
+    const head=new THREE.SphereGeometry(.5,8,6),torso=new THREE.CapsuleGeometry(.5,.4,3,8).scale(1,1/1.4,1),limb=new THREE.CapsuleGeometry(.5,.55,3,6).scale(1,1/1.55,1);
+    for(const [count,geometry] of [[PEDESTRIAN_COUNT,head],[PEDESTRIAN_COUNT,torso],[PEDESTRIAN_COUNT*2,limb],[PEDESTRIAN_COUNT*2,limb]] as const){
+      const mesh=new THREE.InstancedMesh(geometry,material,count);mesh.instanceMatrix.setUsage(THREE.DynamicDrawUsage);mesh.frustumCulled=false;
       this.people.push(mesh);this.group.add(mesh);
     }
     const shirts=[0x679ca8,0xb67c77,0x8b80ae,0xc4a76b,0x67a68d,0x526b88];
-    for(let i=0;i<16;i++){
+    for(let i=0;i<PEDESTRIAN_COUNT;i++){
       this.people[0].setColorAt(i,new THREE.Color([0xd4a37d,0x9c6f54,0xc28e6c,0x6c4938][i%4]));
       this.people[1].setColorAt(i,new THREE.Color(shirts[i%shirts.length]));
       for(let side=0;side<2;side++){
@@ -100,16 +103,16 @@ export class CityLife {
   }
   private streetLights(){
     const postMaterial=new THREE.MeshLambertMaterial({color:0x334a54});
-    const posts=new THREE.InstancedMesh(this.geometry,postMaterial,25),bulbs=new THREE.InstancedMesh(this.geometry,this.lampMaterial,25);
+    const posts=new THREE.InstancedMesh(this.geometry,postMaterial,ROAD_NODES.length),bulbs=new THREE.InstancedMesh(this.geometry,this.lampMaterial,ROAD_NODES.length);
     let index=0;
-    for(const x of [-80,-40,0,40,80])for(const z of [-80,-40,0,40,80]){
+    for(const {x,z} of ROAD_NODES){
       this.dummy.position.set(x+6.6,2.45,z+6.6);this.dummy.rotation.set(0,0,0);this.dummy.scale.set(.15,4.8,.15);this.dummy.updateMatrix();posts.setMatrixAt(index,this.dummy.matrix);
       this.dummy.position.y=4.9;this.dummy.scale.set(.65,.18,.65);this.dummy.updateMatrix();bulbs.setMatrixAt(index,this.dummy.matrix);index++;
     }
     this.group.add(posts);this.lamps.add(bulbs);
-    const puddles=new THREE.InstancedMesh(this.geometry,this.puddleMaterial,20);
-    for(let i=0;i<20;i++){
-      this.dummy.position.set([-80,-40,0,40,80][i%5],.085,-65+Math.floor(i/5)*40);this.dummy.scale.set(2.8,.006,6);this.dummy.updateMatrix();puddles.setMatrixAt(i,this.dummy.matrix);
+    const puddles=new THREE.InstancedMesh(this.geometry,this.puddleMaterial,Math.floor(ROAD_NODES.length/2));
+    for(let i=0;i<puddles.count;i++){
+      const point=ROAD_NODES[i*2];this.dummy.position.set(point.x,.085,point.z+12);this.dummy.scale.set(2.8,.006,6);this.dummy.updateMatrix();puddles.setMatrixAt(i,this.dummy.matrix);
     }
     this.reflections.add(puddles);
   }
@@ -138,9 +141,9 @@ export class CityLife {
   update(seconds:number,player:Point,indoors:boolean,_dt:number):{period:CityEnvironment['period'];weather:CityEnvironment['weather'];event?:CityEvent}{
     const elapsed=time(seconds),environment=getCityEnvironment(elapsed),event=cityEventAt(elapsed);
     this.group.visible=!indoors;
-    this.current={pedestrians:16,rainDrops:environment.rain>.01?this.rainMesh.count:0,rain:environment.rain,daylight:environment.daylight,weather:environment.weather,eventId:event?.id??null,period:environment.period};
+    this.current={pedestrians:PEDESTRIAN_COUNT,rainDrops:environment.rain>.01?this.rainMesh.count:0,rain:environment.rain,daylight:environment.daylight,weather:environment.weather,eventId:event?.id??null,period:environment.period};
     if(!indoors){
-      for(let i=0;i<16;i++){
+      for(let i=0;i<PEDESTRIAN_COUNT;i++){
         const pose=pedestrianPose(i,elapsed),stride=Math.sin(elapsed*5+i)*.38;
         this.dummy.position.set(pose.x,.05,pose.z);this.dummy.rotation.set(0,-pose.heading,0);this.dummy.scale.set(1,1,1);this.dummy.updateMatrix();
         this.personPart(0,i,0,1.6,0,.4,.42,.4);this.personPart(1,i,0,1.09,0,.52,.7,.34);

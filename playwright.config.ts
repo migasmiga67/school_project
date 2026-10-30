@@ -8,7 +8,7 @@ if (process.env.GITHUB_ACTIONS) reporters.push(['github']);
 
 export default defineConfig({
   testDir: './tests',
-  testMatch: ['browser.spec.ts', 'casino.browser.spec.ts', 'multiplayer.browser.spec.ts', 'expansion.browser.spec.ts','career.browser.spec.ts','tournament.browser.spec.ts','stories.browser.spec.ts','mobility.browser.spec.ts'],
+  testMatch: ['browser.spec.ts', 'casino.browser.spec.ts', 'multiplayer.browser.spec.ts', 'expansion.browser.spec.ts','career.browser.spec.ts','tournament.browser.spec.ts','stories.browser.spec.ts','mobility.browser.spec.ts','expanded-world.browser.spec.ts'],
   timeout: 45000,
   expect: { timeout: 10000 },
   workers: 1,

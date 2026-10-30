@@ -12,7 +12,14 @@ export function createMobilityVehicle(kind:'bike'|'boat',color:number):MobilityV
  const group=new THREE.Group(),rider=new THREE.Group(),wheels:THREE.Group[]=[],frontWheels:THREE.Group[]=[];
  const paint=new THREE.MeshLambertMaterial({color}),dark=new THREE.MeshLambertMaterial({color:0x192936}),chrome=new THREE.MeshLambertMaterial({color:0xb2bfc0}),rubber=new THREE.MeshLambertMaterial({color:0x172029});
  const box=(parent:THREE.Object3D,w:number,h:number,d:number,material:THREE.Material,x:number,y:number,z:number)=>{const mesh=new THREE.Mesh(new THREE.BoxGeometry(w,h,d),material);mesh.position.set(x,y,z);parent.add(mesh);return mesh;};
- const person=(slot:string,w:number,h:number,d:number,x:number,y:number,z:number,color:number)=>{const mesh=box(rider,w,h,d,new THREE.MeshLambertMaterial({color}),x,y,z);mesh.name=`rider-${slot}`;mesh.userData.appearanceSlot=slot;return mesh;};
+ const person=(slot:string,w:number,h:number,d:number,x:number,y:number,z:number,color:number)=>{
+  let geometry:THREE.BufferGeometry;
+  if(slot==='shirt'){geometry=new THREE.CylinderGeometry(.5,.41,1,8);geometry.scale(w,h,d);}
+  else if(slot==='hair'){geometry=new THREE.SphereGeometry(.5,8,5,0,Math.PI*2,0,Math.PI*.57);geometry.scale(w,h*2,d);y-=.1;}
+  else if(slot==='skin'&&w>.3){geometry=new THREE.SphereGeometry(.5,8,6);geometry.scale(w,h,d);}
+  else{geometry=new THREE.CapsuleGeometry(.5,1,3,8);geometry.scale(w,h/2,d);}
+  const mesh=new THREE.Mesh(geometry,new THREE.MeshLambertMaterial({color}));mesh.position.set(x,y,z);mesh.castShadow=true;mesh.receiveShadow=true;rider.add(mesh);mesh.name=`rider-${slot}`;mesh.userData.appearanceSlot=slot;return mesh;
+ };
  if(kind==='bike'){
   for(const z of[-1.18,1.18]){
    const steer=new THREE.Group();steer.position.set(0,.48,z);group.add(steer);const spin=new THREE.Group();steer.add(spin);wheels.push(spin);if(z<0)frontWheels.push(steer);
@@ -23,8 +30,8 @@ export function createMobilityVehicle(kind:'bike'|'boat',color:number):MobilityV
   box(group,.65,.4,.2,paint,0,1.2,-1.02);box(group,.4,.22,.07,new THREE.MeshBasicMaterial({color:0xffe7ae}),0,1.23,-1.16);
   box(group,.34,.1,.08,new THREE.MeshBasicMaterial({color:0xe95f65}),0,1.05,1.35);box(group,.85,.08,.12,chrome,0,1.43,-.8);
   for(const x of[-.2,.2]){const fork=box(group,.08,.85,.08,chrome,x,.85,-1.06);fork.rotation.x=.17;box(group,.12,.12,.62,dark,x,.72,.5);}
-  person('shirt',.52,.64,.35,0,1.6,.24,0xc5b897).rotation.x=.23;person('skin',.36,.37,.36,0,2.08,.08,0xc19074);person('hair',.39,.17,.39,0,2.28,.08,0x29343d);
-  for(const x of[-.3,.3]){person('pants',.2,.65,.24,x,1.04,.46,0x324654).rotation.x=-.3;person('skin',.16,.63,.2,x,1.54,-.12,0xc19074).rotation.x=-.7;}
+  person('shirt',.52,.64,.35,0,1.6,.24,0xc5b897).rotation.x=-.18;person('skin',.14,.14,.14,0,1.93,-.015,0xc19074);person('skin',.36,.4,.34,0,2.08,-.045,0xc19074);person('hair',.39,.17,.37,0,2.28,-.025,0x29343d);
+  for(const x of[-.3,.3]){person('pants',.2,.65,.24,x,1.04,.46,0x324654).rotation.x=-.3;person('skin',.16,.66,.18,x,1.54,-.35,0xc19074).rotation.x=.9;person('skin',.145,.17,.14,x,1.34,-.64,0xc19074);}
  }else{
   // Bow is a stretched cone, stern is flat. The lower hull sits partly in water.
   const hull=new THREE.Mesh(new THREE.CylinderGeometry(1.3,1.0,5.8,4,1),paint);hull.rotation.x=Math.PI/2;hull.rotation.z=Math.PI/4;hull.scale.y=.5;hull.position.y=.35;group.add(hull);
@@ -33,9 +40,9 @@ export function createMobilityVehicle(kind:'bike'|'boat',color:number):MobilityV
   box(group,1.8,.2,.6,new THREE.MeshLambertMaterial({color:0xeadfc4}),0,1.02,1.3);box(group,1.8,.65,.22,new THREE.MeshLambertMaterial({color:0xeadfc4}),0,1.26,1.6);
   for(const x of[-1.05,1.05]){box(group,.1,.4,3.2,chrome,x,1,.1);box(group,.15,.12,.18,new THREE.MeshBasicMaterial({color:x<0?0xe06060:0x6fe4b6}),x,1.1,-1.15);}
   const motor=box(group,.65,.95,.65,dark,0,.38,2.85);motor.rotation.x=-.12;
-  rider.position.set(.45,.25,.55);person('shirt',.52,.68,.34,0,1.2,0,0xc5b897);person('skin',.36,.4,.36,0,1.78,-.02,0xc19074);person('hair',.39,.16,.39,0,1.99,0,0x29343d);
+  rider.position.set(.45,.25,.55);person('shirt',.52,.68,.34,0,1.2,0,0xc5b897);person('skin',.14,.14,.14,0,1.56,0,0xc19074);person('skin',.36,.43,.34,0,1.78,-.02,0xc19074);person('hair',.39,.16,.37,0,1.99,0,0x29343d);
   for(const x of[-.16,.16])person('pants',.22,.68,.24,x,.54,0,0x324654);
-  for(const x of[-.34,.34])person('skin',.17,.58,.22,x,1.2,-.1,0xc19074).rotation.x=-.45;
+  for(const x of[-.34,.34]){person('skin',.17,.58,.2,x,1.2,-.16,0xc19074).rotation.x=.45;person('skin',.14,.17,.14,x,.94,-.3,0xc19074);}
  }
  group.add(rider);return{group,wheels,frontWheels,paint,rider};
 }
