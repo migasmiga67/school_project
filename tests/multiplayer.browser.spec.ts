@@ -312,7 +312,8 @@ test('ekipa zalicza wspólną trasę, widzi GPS i otrzymuje nagrodę tylko w por
     // The host reaches the first stop using normal controls, then pauses locally.
     await host.keyboard.press('e');
     await expect.poll(async () => (await snapshot(host)).state.player.mode).toBe('foot');
-    await walkTo(host, { x: 0, z: 40 }, 'z', false, 20000);
+    // Sprint along avenues; the navigator releases Shift for the final approach.
+    await walkTo(host, { x: 0, z: 40 }, 'z', true, 20000);
     await Promise.all([host, guest].map(async page => {
       await expect.poll(async () => {
         const { shared } = await readOnline(page);
@@ -337,12 +338,12 @@ test('ekipa zalicza wspólną trasę, widzi GPS i otrzymuje nagrodę tylko w por
     if ((await snapshot(guest)).paused) await guest.locator('#resume').click();
     await guest.keyboard.press('e');
     await expect.poll(async () => (await snapshot(guest)).state.player.mode).toBe('foot');
-    await walkTo(guest, { x: 0, z: 40 }, 'z', false, 20000);
+    await walkTo(guest, { x: 0, z: 40 }, 'z', true, 20000);
     await expect.poll(async () => {
       const { local, shared } = await readOnline(host);
       return { clockAdvanced: shared.challenge.remainingMs < beforeGuestWalk - 1000, player: local.state.player, paused: local.paused };
     }).toEqual({ clockAdvanced: true, player: pausedPosition, paused: true });
-    await walkTo(guest, { x: 40, z: 40 }, 'x', false, 20000);
+    await walkTo(guest, { x: 40, z: 40 }, 'x', true, 20000);
     await Promise.all([host, guest].map(async page => {
       await expect.poll(async () => {
         const { shared } = await readOnline(page);
@@ -350,7 +351,7 @@ test('ekipa zalicza wspólną trasę, widzi GPS i otrzymuje nagrodę tylko w por
       }).toEqual({ checkpoint: 2, target: { x: 40, z: 80 } });
     }));
     await guest.screenshot({ path: testInfo.outputPath('crew-route-gps.png'), fullPage: true });
-    await walkTo(guest, { x: 40, z: 80 }, 'z', false, 20000);
+    await walkTo(guest, { x: 40, z: 80 }, 'z', true, 20000);
     await Promise.all([host, guest].map(async page => {
       await expect.poll(async () => {
         const { shared } = await readOnline(page), completed = shared.challenge;

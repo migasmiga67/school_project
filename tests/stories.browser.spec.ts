@@ -20,8 +20,9 @@ function observe(page:Page,errors:string[],missing:string[],name='solo'){
 }
 async function openPhone(page:Page){
  await page.bringToFront();
- if(await page.locator('#resume').isVisible())await page.locator('#resume').click();
- if(!await page.locator('#phone-root').count())await page.keyboard.press('t');
+ const ui=await page.evaluate(()=>({resume:document.querySelector('#resume')!==null,phone:document.querySelector('#phone-root')!==null}));
+ if(ui.resume)await page.locator('#resume').click();
+ if(!ui.phone)await page.keyboard.press('t');
  await expect(page.locator('#phone-root')).toBeVisible();
 }
 async function start(page:Page){await page.goto('./');await page.locator('#start-game').click();await expect.poll(async()=>(await snapshot(page)).started).toBe(true);}
@@ -93,9 +94,10 @@ async function pair(browser:Browser,info:TestInfo):Promise<Pair>{
   const page=await context.newPage();observe(page,errors,missing,name);await page.goto('./');await page.locator('#intro-online').click();await page.locator('#online-name').fill(name);return page;
  };
  try{
-  const host=await open('Alicja');await host.locator('#online-create').click();await expect.poll(async()=>(await snapshot(host)).online.status,{timeout:20000}).toBe('online');
+  const[host,guest]=await Promise.all([open('Alicja'),open('Borys')]);
+  await host.bringToFront();await host.locator('#online-create').click();await expect.poll(async()=>(await snapshot(host)).online.status,{timeout:20000}).toBe('online');
   const code=(await host.locator('#online-code').innerText()).trim();await host.locator('#online-enter').click();
-  const guest=await open('Borys');await guest.locator('#online-room').fill(code);await guest.locator('#online-join').click();await expect.poll(async()=>(await snapshot(guest)).online.status,{timeout:20000}).toBe('online');await guest.locator('#online-enter').click();
+  await guest.bringToFront();await guest.locator('#online-room').fill(code);await guest.locator('#online-join').click();await expect.poll(async()=>(await snapshot(guest)).online.status,{timeout:20000}).toBe('online');await guest.locator('#online-enter').click();
   for(const page of[host,guest])await expect.poll(async()=>(await room(page)).members.length).toBe(2);
   return{host,guest,contexts,errors,missing};
  }catch(error){await capture(contexts,info);await Promise.allSettled(contexts.map(context=>context.close()));throw error;}
@@ -129,7 +131,10 @@ test('telefon dwóch klientów przesyła zwykły tekst, zaproszenie i dostawia w
    const current=await snapshot(host);before=current.online.snapshot!;
    return{mode:current.state.player.mode,online:current.online.status,hasRoom:current.online.snapshot!==null};
   }).toEqual({mode:'foot',online:'online',hasRoom:true});
-  await openPhone(host);await host.locator('#phone-tab-garage').click();await host.locator('#phone-request-car').click();
+  // The host is already in front and the preceding foot movement proves the
+  // closed phone restored the game; open it through the normal shortcut.
+  await host.keyboard.press('t');await expect(host.locator('#phone-root')).toBeVisible();
+  await host.locator('#phone-tab-garage').click();await host.locator('#phone-request-car').click();
   let delivered!:RoomSnapshot;
   await expect.poll(async()=>{
    const shared=await room(host);delivered=shared;return{wallet:shared.wallet,version:shared.deliveryEffect.version};
