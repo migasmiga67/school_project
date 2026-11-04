@@ -24,7 +24,9 @@ export default defineConfig({
       args: ['--no-sandbox', '--disable-dev-shm-usage', '--no-proxy-server', '--enable-unsafe-swiftshader'],
     },
     screenshot: 'only-on-failure',
-    trace: 'retain-on-failure',
+    // Continuous screencast capture stalls software WebGL during frequent polls.
+    // Keep DOM/API/network diagnostics and explicit/failure screenshots.
+    trace: { mode: 'retain-on-failure', screenshots: false, snapshots: true, sources: true },
   },
   webServer: process.env.NEON_BASE_URL ? undefined : [{
     command: 'node scripts/serve-dist.mjs',

@@ -279,35 +279,57 @@ test('ekipa zalicza wspólną trasę, widzi GPS i otrzymuje nagrodę tylko w por
   test.setTimeout(180000);
   const pair = await createPair(browser, testInfo);
   const { host, guest } = pair;
+  // Keep related assertions on one accepted snapshot. Serial full-state reads
+  // otherwise spend the route's budget repeating the same browser round trip.
+  const readOnline = async (page: Page) => {
+    const local = await snapshot(page);
+    expect(local.online.status).toBe('online');
+    expect(local.online.snapshot).not.toBeNull();
+    return { local, shared: local.online.snapshot! };
+  };
   try {
     await host.bringToFront();
     if ((await snapshot(host)).paused) await host.locator('#resume').click();
     await expect(host.locator('#crew-start')).toBeEnabled();
     await expect(guest.locator('#crew-start')).toBeDisabled();
     await host.locator('#crew-start').click();
-    for (const page of [host, guest]) {
-      await expect.poll(async () => (await room(page)).challenge.status).toBe('active');
-      expect((await room(page)).challenge.target).toEqual({ x: 0, z: 40 });
-      expect((await room(page)).challenge.eligible).toBe(true);
+    const initialRooms = await Promise.all([host, guest].map(async page => {
+      let accepted!: RoomSnapshot;
+      await expect.poll(async () => {
+        const { local, shared } = await readOnline(page);
+        accepted = shared;
+        return {
+          status: shared.challenge.status, target: shared.challenge.target,
+          eligible: shared.challenge.eligible, remotePlayers: local.navigation.remotePlayers,
+          routeReady: local.navigation.route.length > 1,
+        };
+      }).toEqual({ status: 'active', target: { x: 0, z: 40 }, eligible: true, remotePlayers: 1, routeReady: true });
       await expect(page.locator('#mission-title')).toContainText('Nocny przerzut');
-      await expect.poll(async () => (await snapshot(page)).navigation.remotePlayers).toBe(1);
-      await expect.poll(async () => (await snapshot(page)).navigation.route.length).toBeGreaterThan(1);
-    }
+      return accepted;
+    }));
+    const hostId = initialRooms[0].youId, guestId = initialRooms[1].youId;
 
     // The host reaches the first stop using normal controls, then pauses locally.
     await host.keyboard.press('e');
     await expect.poll(async () => (await snapshot(host)).state.player.mode).toBe('foot');
     await walkTo(host, { x: 0, z: 40 }, 'z', false, 20000);
-    for (const page of [host, guest]) {
-      await expect.poll(async () => (await room(page)).challenge.checkpoint).toBe(1);
-      expect((await room(page)).challenge.target).toEqual({ x: 40, z: 40 });
-    }
-    const hostId = (await room(host)).youId, guestId = (await room(guest)).youId;
-    expect((await room(host)).challenge.contributors).toContain(hostId);
+    await Promise.all([host, guest].map(async page => {
+      await expect.poll(async () => {
+        const { shared } = await readOnline(page);
+        return {
+          checkpoint: shared.challenge.checkpoint, target: shared.challenge.target,
+          hostContributed: page !== host || shared.challenge.contributors.includes(hostId),
+        };
+      }).toEqual({ checkpoint: 1, target: { x: 40, z: 40 }, hostContributed: true });
+    }));
     await host.keyboard.press('Escape');
-    await expect.poll(async () => (await snapshot(host)).paused).toBe(true);
-    const pausedPosition = (await snapshot(host)).state.player;
-    const beforeGuestWalk = (await room(host)).challenge.remainingMs;
+    let pauseState!: Awaited<ReturnType<typeof readOnline>>;
+    await expect.poll(async () => {
+      pauseState = await readOnline(host);
+      return pauseState.local.paused;
+    }).toBe(true);
+    const pausedPosition = pauseState.local.state.player;
+    const beforeGuestWalk = pauseState.shared.challenge.remainingMs;
 
     // The guest contributes the remaining stops; the host's pause never pauses
     // the room or its deadline, and progress is replicated to both clients.
@@ -316,41 +338,46 @@ test('ekipa zalicza wspólną trasę, widzi GPS i otrzymuje nagrodę tylko w por
     await guest.keyboard.press('e');
     await expect.poll(async () => (await snapshot(guest)).state.player.mode).toBe('foot');
     await walkTo(guest, { x: 0, z: 40 }, 'z', false, 20000);
-    await expect.poll(async () => (await room(host)).challenge.remainingMs).toBeLessThan(beforeGuestWalk - 1000);
-    expect((await snapshot(host)).state.player).toEqual(pausedPosition);
-    expect((await snapshot(host)).paused).toBe(true);
+    await expect.poll(async () => {
+      const { local, shared } = await readOnline(host);
+      return { clockAdvanced: shared.challenge.remainingMs < beforeGuestWalk - 1000, player: local.state.player, paused: local.paused };
+    }).toEqual({ clockAdvanced: true, player: pausedPosition, paused: true });
     await walkTo(guest, { x: 40, z: 40 }, 'x', false, 20000);
-    for (const page of [host, guest]) {
-      await expect.poll(async () => (await room(page)).challenge.checkpoint).toBe(2);
-      expect((await room(page)).challenge.target).toEqual({ x: 40, z: 80 });
-    }
+    await Promise.all([host, guest].map(async page => {
+      await expect.poll(async () => {
+        const { shared } = await readOnline(page);
+        return { checkpoint: shared.challenge.checkpoint, target: shared.challenge.target };
+      }).toEqual({ checkpoint: 2, target: { x: 40, z: 80 } });
+    }));
     await guest.screenshot({ path: testInfo.outputPath('crew-route-gps.png'), fullPage: true });
     await walkTo(guest, { x: 40, z: 80 }, 'z', false, 20000);
-    for (const page of [host, guest]) {
-      await expect.poll(async () => (await room(page)).challenge.status).toBe('completed');
-      await expect.poll(async () => (await room(page)).wallet).toBe(1550);
-      const completed = (await room(page)).challenge;
-      expect(completed.checkpoint).toBe(3);
-      expect(completed.contributors).toEqual(expect.arrayContaining([hostId, guestId]));
-      expect(completed.cooldownMs).toBeGreaterThan(0);
-      expect(completed.target).toBeNull();
+    await Promise.all([host, guest].map(async page => {
+      await expect.poll(async () => {
+        const { shared } = await readOnline(page), completed = shared.challenge;
+        return {
+          status: completed.status, wallet: shared.wallet, checkpoint: completed.checkpoint,
+          contributors: completed.contributors, cooldownActive: completed.cooldownMs > 0, target: completed.target,
+        };
+      }).toEqual({ status: 'completed', wallet: 1550, checkpoint: 3, contributors: expect.arrayContaining([hostId, guestId]), cooldownActive: true, target: null });
       await expect(page.locator('#crew-start')).toBeDisabled();
       const profile = await page.evaluate(() => JSON.parse(localStorage.getItem('neon-coast-profile-v1') ?? '{}'));
       expect(profile.money).toBe(1250);
-    }
+    }));
     // More accepted poses and host ticks must not pay the completed run again.
     const completedAt = (await room(guest)).worldTime;
     await walkUntil(guest, 'a', 'x', 38, false);
-    await expect.poll(async () => (await room(guest)).worldTime).toBeGreaterThan(completedAt + .5);
-    expect((await room(host)).wallet + (await room(guest)).wallet).toBe(3100);
+    await expect.poll(async () => {
+      const [hostState, guestState] = await Promise.all([readOnline(host), readOnline(guest)]);
+      return { clockAdvanced: guestState.shared.worldTime > completedAt + .5, wallets: hostState.shared.wallet + guestState.shared.wallet };
+    }).toEqual({ clockAdvanced: true, wallets: 3100 });
 
     await leaveHostRoom(host);
-    await expect.poll(async () => (await snapshot(guest)).online.status).not.toBe('online');
-    for (const page of [host, guest]) {
-      expect((await snapshot(page)).state.money).toBe(1250);
-      expect((await snapshot(page)).state.mission.active).toBe(true);
-      await expect.poll(async () => (await snapshot(page)).navigation.remotePlayers).toBe(0);
-    }
+    await Promise.all([host, guest].map(async page => {
+      await expect.poll(async () => {
+        const local = await snapshot(page);
+        return { roomEnded: page !== guest || local.online.status !== 'online', money: local.state.money, missionActive: local.state.mission.active, remotePlayers: local.navigation.remotePlayers };
+      }).toEqual({ roomEnded: true, money: 1250, missionActive: true, remotePlayers: 0 });
+    }));
     expect(pair.errors).toEqual([]);
     expect(pair.failed).toEqual([]);
   } catch (error) {

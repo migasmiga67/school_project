@@ -17,6 +17,7 @@ import { expansionLandmarks } from './expansion-landmarks';
 import { AvatarView } from './avatar-view';
 import type { AppearanceState } from './appearance';
 import { MobilityView } from './mobility-view';
+import { VehicleLodLibrary, type DistantCarVisual } from './vehicle-lod';
 
 type LitMaterial = THREE.MeshStandardMaterial | THREE.MeshLambertMaterial;
 
@@ -32,6 +33,8 @@ interface CarVisual {
   paint: LitMaterial;
   paintColor: number;
   head: LitMaterial;
+  full?:THREE.Group;
+  distant?:DistantCarVisual;
 }
 
 /** All art is generated here. The simulation, collisions and missions stay in game.ts. */
@@ -49,6 +52,7 @@ export class CityView {
   private readonly mobilityVisuals:MobilityView;
   private readonly surfaces:SurfaceLibrary;
   private readonly atmosphere:AtmosphereView;
+  private readonly distantCars:VehicleLodLibrary|null;
   private readonly palms: THREE.Group[] = [];
   private readonly marker = new THREE.Group();
   private readonly markerRing: THREE.Mesh;
@@ -116,6 +120,7 @@ export class CityView {
     this.renderer.outputColorSpace = THREE.SRGBColorSpace;
     this.renderer.toneMapping = THREE.ACESFilmicToneMapping;
     this.renderer.toneMappingExposure = 1.05;
+    this.distantCars=this.softwareRendering?new VehicleLodLibrary():null;
     this.surfaces=new SurfaceLibrary(this.softwareRendering,Math.min(8,this.renderer.capabilities.getMaxAnisotropy()));
     this.atmosphere=new AtmosphereView(this.softwareRendering);
     // Keep the sky inside the shorter software-rendering view distance.
@@ -494,10 +499,17 @@ export class CityView {
       const smoke = new THREE.Sprite(new THREE.SpriteMaterial({ map: this.smokeTexture, color: 0x9ea3a6, opacity: 0, transparent: true, depthWrite: false })); group.add(smoke); visual.smoke.push(smoke);
     }
     if (this.softwareRendering) this.batchCarBody(group);
+    if(this.distantCars){
+      const full=new THREE.Group();full.add(...group.children);group.add(full);visual.full=full;
+      visual.distant=this.distantCars.create(vehicle.kind==='sport'?'sport':vehicle.kind==='police'?'police':'sedan',vehicle.color);
+      visual.distant.group.visible=false;group.add(visual.distant.group);
+    }
     return visual;
   }
 
   private disposeCar(visual:CarVisual) {
+    // Distant geometry/materials belong to the shared library, not an individual car.
+    visual.distant?.group.removeFromParent();
     const geometries=new Set<THREE.BufferGeometry>(),materials=new Set<THREE.Material>();
     visual.group.traverse(object=>{
       if(object instanceof THREE.Mesh){geometries.add(object.geometry);for(const material of Array.isArray(object.material)?object.material:[object.material])materials.add(material);}
@@ -561,9 +573,16 @@ export class CityView {
       alive.add(vehicle.id); let visual = this.cars.get(vehicle.id);
       if(visual&&visual.kind!==vehicle.kind){this.disposeCar(visual);this.cars.delete(vehicle.id);visual=undefined;}
       if (!visual) { visual = this.car(vehicle); this.cars.set(vehicle.id, visual); }
-      if(visual.paintColor!==vehicle.color){visual.paint.color.setHex(vehicle.color);visual.paintColor=vehicle.color;}
+      if(visual.paintColor!==vehicle.color){visual.paint.color.setHex(vehicle.color);visual.paintColor=vehicle.color;if(visual.distant)this.distantCars?.setColor(visual.distant,vehicle.color);}
       visual.group.visible = !inside && !this.remoteCars.has(vehicle.id) && !(cameraMode === 2 && state.player.mode === 'drive' && state.player.vehicleId === vehicle.id);
       visual.group.position.set(vehicle.x, 0.05, vehicle.z); visual.group.rotation.y = -vehicle.heading;
+      if(visual.full&&visual.distant){
+        const distance=Math.min((vehicle.x-state.player.x)**2+(vehicle.z-state.player.z)**2,(vehicle.x-this.camera.position.x)**2+(vehicle.z-this.camera.position.z)**2);
+        // Hysteresis prevents flicker around the boundary; owned/active cars stay detailed.
+        const distant=!vehicle.owned&&vehicle.id!==state.player.vehicleId&&distance>(visual.distant.group.visible?50**2:60**2);
+        visual.full.visible=!distant;visual.distant.group.visible=distant;
+        if(distant)continue;
+      }
       visual.wheels.forEach(wheel => { wheel.rotation.x = vehicle.wheelPhase; }); visual.frontWheels.forEach(wheel => { wheel.rotation.y = vehicle.steer * 0.35; });
       visual.brake.emissiveIntensity = vehicle.speed < 1 ? 0.8 : 0.2;
       visual.head.emissiveIntensity=.6+(1-environment.daylight)*1.4;
@@ -649,5 +668,5 @@ export class CityView {
     this.camera.lookAt(lookAt);this.renderer.render(this.homeScene,this.camera);this.renderFrames++;
   }
   resize() { const width = Math.max(1, this.parent.clientWidth), height = Math.max(1, this.parent.clientHeight); this.camera.aspect = width / height; this.camera.updateProjectionMatrix(); this.renderer.setSize(width, height, false); }
-  destroy() { this.observer.disconnect(); this.living.destroy(); this.remote.destroy(); this.casino.destroy();this.atmosphere.destroy(); this.scene.traverse(object => { if (object instanceof THREE.Mesh) { object.geometry.dispose(); for (const material of Array.isArray(object.material) ? object.material : [object.material]) material.dispose(); } });this.occluders.forEach(object=>object.geometry.dispose());this.surfaces.destroy(); if(this.cityBackground instanceof THREE.Texture)this.cityBackground.dispose();this.glowTexture.dispose(); this.smokeTexture.dispose(); this.renderer.dispose(); this.renderer.domElement.remove(); }
+  destroy() { this.observer.disconnect(); this.living.destroy(); this.remote.destroy(); this.casino.destroy();this.atmosphere.destroy(); this.scene.traverse(object => { if (object instanceof THREE.Mesh) { object.geometry.dispose(); for (const material of Array.isArray(object.material) ? object.material : [object.material]) material.dispose(); } });this.occluders.forEach(object=>object.geometry.dispose());this.surfaces.destroy();this.distantCars?.destroy(); if(this.cityBackground instanceof THREE.Texture)this.cityBackground.dispose();this.glowTexture.dispose(); this.smokeTexture.dispose(); this.renderer.dispose(); this.renderer.domElement.remove(); }
 }
