@@ -73,7 +73,8 @@ async function createPair(browser: Browser, testInfo: TestInfo, options: PairOpt
     return page;
   };
   try {
-    const host = await open('Alicja', 'host');
+    const [host, guest] = await Promise.all([open('Alicja', 'host'), open('Borys', 'guest')]);
+    await host.bringToFront();
     await host.locator('#online-create').click();
     await expect.poll(async () => (await snapshot(host)).online.status, { timeout: 20000 }).toBe('online');
     await expect(host.locator('#online-code')).toHaveText(/^[A-Z2-9]{8}$/);
@@ -81,20 +82,27 @@ async function createPair(browser: Browser, testInfo: TestInfo, options: PairOpt
     await host.locator('#online-enter').click();
     await expect.poll(async () => (await snapshot(host)).started).toBe(true);
 
-    const guest = await open('Borys', 'guest');
+    await guest.bringToFront();
     await guest.locator('#online-room').fill(code);
     await guest.locator('#online-join').click();
     await expect.poll(async () => (await snapshot(guest)).online.status, { timeout: options.guestJoinTimeoutMs ?? 20000 }).toBe('online');
     await guest.locator('#online-enter').click();
     await expect.poll(async () => (await snapshot(guest)).started).toBe(true);
-    for (const page of [host, guest]) {
-      await expect.poll(async () => (await room(page)).members.length).toBe(2);
-      await expect.poll(async () => (await snapshot(page)).rendering.remotePlayers).toBe(1);
-    }
-    expect((await room(host)).code).toBe(code);
-    expect((await room(guest)).code).toBe(code);
-    expect((await room(host)).hostId).toBe((await room(host)).youId);
-    expect((await room(guest)).youId).not.toBe((await room(host)).youId);
+    const accepted = await Promise.all([host, guest].map(async page => {
+      let current!: Snapshot;
+      await expect.poll(async () => {
+        current = await snapshot(page);
+        const shared = current.online.snapshot;
+        return {
+          online: current.online.status, hasRoom: shared !== null,
+          members: shared?.members.length, remotePlayers: current.rendering.remotePlayers,
+          code: shared?.code,
+        };
+      }).toEqual({ online: 'online', hasRoom: true, members: 2, remotePlayers: 1, code });
+      return current.online.snapshot!;
+    }));
+    expect(accepted[0].hostId).toBe(accepted[0].youId);
+    expect(accepted[1].youId).not.toBe(accepted[0].youId);
     return { host, guest, contexts, errors, failed };
   } catch (error) {
     await captureFailure(contexts, testInfo);
