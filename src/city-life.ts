@@ -1,7 +1,10 @@
 import * as THREE from 'three';
 import type { Point } from './model';
-import { BUILDINGS } from './model';
-import { CITY_STREETS, clearCitySegment } from './city-map';
+import { CITY_STREETS } from './city-map';
+import { AMBIENT_PEDESTRIAN_COUNT,pedestrianTrafficPose } from './traffic-flow';
+import { CITY_BENCH_PLACEMENTS,CITY_STREET_SIGN_PLACEMENTS,findStreetDecoration,type DecorationFootprint } from './city-placement';
+import { AvatarMotion } from './avatar-motion';
+import { cityLifeBudget,pedestrianReaction,type PedestrianVehicle } from './pedestrian-reaction';
 import { pathLength, samplePath } from './city-art';
 
 export interface CityEvent { id:string; title:string; target:Point; reward:number; expiresAt:number }
@@ -43,33 +46,9 @@ export function cityEventAt(seconds:number):CityEvent|null {
   return {id:`city-${cycle}-${event.kind}`,title:event.title,target:{...event.target},reward:event.reward,expiresAt:cycle*120+40};
 }
 
-interface PedestrianRoute {points:Point[];length:number}
-const pedestrianRoutes:PedestrianRoute[]=[];
-// Offset the same sampled street curves used by asphalt and traffic. Split a route
-// whenever a corner cannot provide a person's clearance beside an existing facade.
-for(const street of CITY_STREETS){
-  if(street.sidewalkWidth<1.2)continue;
-  const length=pathLength(street.points),offset=street.width/2+street.sidewalkWidth*.52;
-  for(const side of[-1,1]){
-    let points:Point[]=[];
-    const save=()=>{if(points.length>3){const routeLength=pathLength(points);if(routeLength>12)pedestrianRoutes.push({points,length:routeLength});}points=[];};
-    for(let distance=3;distance<length-2;distance+=3){
-      const sample=samplePath(street.points,distance),point={x:sample.x-sample.dz*offset*side,z:sample.z+sample.dx*offset*side};
-      if(BUILDINGS.some(b=>Math.abs(point.x-b.x)<b.halfX+.65&&Math.abs(point.z-b.z)<b.halfZ+.65)){save();continue;}
-      if(points.length&&!clearCitySegment(points[points.length-1],point,.65))save();
-      points.push(point);
-    }
-    save();
-  }
-}
-export const PEDESTRIAN_COUNT=64;
-export function pedestrianPose(index:number,seconds:number):Point&{heading:number} {
-  const person=((Math.floor(index)%PEDESTRIAN_COUNT)+PEDESTRIAN_COUNT)%PEDESTRIAN_COUNT;
-  const route=pedestrianRoutes[Math.floor(person*pedestrianRoutes.length/PEDESTRIAN_COUNT)];
-  const cycle=route.length*2,progress=(person*17+time(seconds)*(.85+person%4*.12))%cycle;
-  const returning=progress>route.length,sample=samplePath(route.points,returning?cycle-progress:progress),direction=returning?-1:1;
-  return{x:sample.x,z:sample.z,heading:Math.atan2(sample.dx*direction,-sample.dz*direction)};
-}
+export const PEDESTRIAN_COUNT=AMBIENT_PEDESTRIAN_COUNT;
+/** Both simulation and renderer read the exact same signalled sidewalk timeline. */
+export function pedestrianPose(index:number,seconds:number){return pedestrianTrafficPose(index,seconds);}
 
 /** Decorative city life adds no colliders, wallets or client-owned rewards. */
 export class CityLife {
@@ -79,6 +58,14 @@ export class CityLife {
   private readonly peopleColors:THREE.Color[][]=[[],[],[],[]];
   private readonly visiblePeople:number[]=[];
   private readonly rainMesh:THREE.InstancedMesh;
+  private quality:'low'|'medium'|'high';
+  private readonly pedestrianMotion=Array.from({length:PEDESTRIAN_COUNT},()=>new AvatarMotion());
+  private readonly reactions=Array.from({length:PEDESTRIAN_COUNT},()=>({alert:0,x:0,z:0}));
+  private readonly lampPoolMaterial=new THREE.ShaderMaterial({
+    uniforms:{strength:{value:0}},transparent:true,depthWrite:false,blending:THREE.AdditiveBlending,
+    vertexShader:'varying vec2 vUv;void main(){vUv=uv;gl_Position=projectionMatrix*modelViewMatrix*instanceMatrix*vec4(position,1.0);}',
+    fragmentShader:'uniform float strength;varying vec2 vUv;void main(){float r=length((vUv-.5)*2.0);float a=pow(max(0.0,1.0-r),2.3)*strength;gl_FragColor=vec4(.95,.69,.3,a);}'
+  });
   private readonly rainMaterial=new THREE.MeshBasicMaterial({color:0xc2e7ff,transparent:true,opacity:.5,depthWrite:false});
   private readonly lampMaterial=new THREE.MeshBasicMaterial({color:0xffe1a0});
   private readonly puddleMaterial=new THREE.MeshBasicMaterial({color:0x8cd4dc,transparent:true,opacity:0,depthWrite:false});
@@ -91,10 +78,10 @@ export class CityLife {
   private readonly part=new THREE.Object3D();
   private readonly matrix=new THREE.Matrix4();
   private lastEventId='';
-  private current={pedestrians:PEDESTRIAN_COUNT,rainDrops:0,rain:0,daylight:1,weather:'BEZCHMURNIE' as CityEnvironment['weather'],eventId:null as string|null,period:'ZACHÓD SŁOŃCA' as CityEnvironment['period']};
+  private current={pedestrians:PEDESTRIAN_COUNT,visiblePedestrians:0,reactingPedestrians:0,rainDrops:0,rain:0,daylight:1,weather:'BEZCHMURNIE' as CityEnvironment['weather'],eventId:null as string|null,period:'ZACHÓD SŁOŃCA' as CityEnvironment['period']};
 
   constructor(private readonly software:boolean) {
-    this.group.name='city-life';
+    this.group.name='city-life';this.quality=software?'low':'high';
     const material=new THREE.MeshLambertMaterial({color:0xffffff});
     const head=new THREE.SphereGeometry(.5,software?6:8,software?4:6),torso=new THREE.CapsuleGeometry(.5,.4,software?2:3,software?6:8).scale(1,1/1.4,1),limb=new THREE.CapsuleGeometry(.5,.55,software?2:3,6).scale(1,1/1.55,1);
     for(const [count,geometry] of [[PEDESTRIAN_COUNT,head],[PEDESTRIAN_COUNT,torso],[PEDESTRIAN_COUNT*2,limb],[PEDESTRIAN_COUNT*2,limb]] as const){
@@ -117,10 +104,11 @@ export class CityLife {
     this.eventRing=new THREE.Mesh(new THREE.TorusGeometry(2.9,.1,4,32),new THREE.MeshBasicMaterial({color:0x84dbff}));
     this.eventRing.rotation.x=-Math.PI/2;this.eventRing.position.y=.15;this.eventGroup.add(this.eventRing);
     this.box(this.eventGroup,.8,.8,.8,new THREE.MeshLambertMaterial({color:0xd2aa68}),0,.45,0);
-    this.group.add(this.eventGroup,this.lamps,this.reflections);
+    this.group.add(this.eventGroup,this.lamps,this.reflections);this.setQuality(this.quality);
   }
 
-  get snapshot(){return {...this.current};}
+  get snapshot(){return {...this.current,visibleIds:this.group.visible?[...this.visiblePeople]:[]};}
+  setQuality(quality:'low'|'medium'|'high'){this.quality=quality;this.rainMesh.count=cityLifeBudget(quality,this.software).rainDrops;}
   private box(parent:THREE.Object3D,w:number,h:number,d:number,material:THREE.Material,x=0,y=0,z=0){
     const mesh=new THREE.Mesh(this.geometry,material);mesh.scale.set(w,h,d);mesh.position.set(x,y,z);parent.add(mesh);return mesh;
   }
@@ -128,12 +116,14 @@ export class CityLife {
     const postMaterial=new THREE.MeshLambertMaterial({color:0x465e61});
     interface Detail {x:number;z:number;angle:number;side:number}
     const sectors=new Map<string,{lamps:Detail[];puddles:Detail[]}>();
+    const occupied:DecorationFootprint[]=[...CITY_BENCH_PLACEMENTS,...CITY_STREET_SIGN_PLACEMENTS];
     const sector=(x:number,z:number)=>{const key=`${Math.floor(x/64)},${Math.floor(z/64)}`;let value=sectors.get(key);if(!value){value={lamps:[],puddles:[]};sectors.set(key,value);}return value;};
     for(const street of CITY_STREETS){
       const length=pathLength(street.points);
       for(let distance=12,index=0;distance<length-5;distance+=street.kind==='alley'?38:28,index++){
-        const point=samplePath(street.points,distance),side=index%2?1:-1,offset=street.width/2+Math.max(.45,street.sidewalkWidth*.85),x=point.x-point.dz*offset*side,z=point.z+point.dx*offset*side;
-        if(!BUILDINGS.some(b=>Math.abs(x-b.x)<b.halfX+.4&&Math.abs(z-b.z)<b.halfZ+.4))sector(x,z).lamps.push({x,z,angle:Math.atan2(point.dz*side,-point.dx*side),side});
+        const point=samplePath(street.points,distance),side=index%2?1:-1;
+        const pole=findStreetDecoration(street,distance,.45,.45,{side,occupied,walkingPadding:.55});
+        if(pole){occupied.push(pole);sector(pole.x,pole.z).lamps.push({x:pole.x,z:pole.z,angle:Math.atan2(point.dz*side,-point.dx*side),side});}
         if(index%2===0){const x=point.x-point.dz*street.width*.22,z=point.z+point.dx*street.width*.22;sector(x,z).puddles.push({x,z,angle:Math.atan2(point.dx,point.dz),side});}
       }
     }
@@ -148,6 +138,9 @@ export class CityLife {
           this.dummy.position.y=5.68;this.dummy.scale.set(.42,.05,.74);this.dummy.updateMatrix();bulbs.setMatrixAt(index,this.dummy.matrix);
         });
         posts.computeBoundingSphere();bulbs.computeBoundingSphere();this.group.add(posts);this.lamps.add(bulbs);
+        const pools=new THREE.InstancedMesh(new THREE.PlaneGeometry(1,1).rotateX(-Math.PI/2),this.lampPoolMaterial,lamps.length);
+        lamps.forEach((point,index)=>{const armX=Math.sin(point.angle)*1.3,armZ=Math.cos(point.angle)*1.3;this.dummy.position.set(point.x+armX,.146,point.z+armZ);this.dummy.rotation.set(0,0,0);this.dummy.scale.set(6.5,1,6.5);this.dummy.updateMatrix();pools.setMatrixAt(index,this.dummy.matrix);});
+        pools.computeBoundingSphere();this.lamps.add(pools);
       }
       if(puddles.length){
         const mesh=new THREE.InstancedMesh(this.geometry,this.puddleMaterial,puddles.length);
@@ -177,32 +170,36 @@ export class CityLife {
     this.part.position.set(x,y,z);this.part.rotation.set(swing,0,0);this.part.scale.set(w,h,d);this.part.updateMatrix();
     this.matrix.multiplyMatrices(this.dummy.matrix,this.part.matrix);this.people[mesh].setMatrixAt(index,this.matrix);
   }
-  update(seconds:number,player:Point,indoors:boolean,_dt:number):{period:CityEnvironment['period'];weather:CityEnvironment['weather'];event?:CityEvent}{
-    const elapsed=time(seconds),environment=getCityEnvironment(elapsed),event=cityEventAt(elapsed);
+  update(seconds:number,player:Point,indoors:boolean,dt:number,vehicles:readonly PedestrianVehicle[]=[]):{period:CityEnvironment['period'];weather:CityEnvironment['weather'];event?:CityEvent}{
+    const elapsed=time(seconds),environment=getCityEnvironment(elapsed),event=cityEventAt(elapsed),budget=cityLifeBudget(this.quality,this.software);
     this.group.visible=!indoors;
-    this.current={pedestrians:PEDESTRIAN_COUNT,rainDrops:environment.rain>.01?this.rainMesh.count:0,rain:environment.rain,daylight:environment.daylight,weather:environment.weather,eventId:event?.id??null,period:environment.period};
+    this.current={pedestrians:PEDESTRIAN_COUNT,visiblePedestrians:0,reactingPedestrians:0,rainDrops:!indoors&&environment.rain>.01?this.rainMesh.count:0,rain:environment.rain,daylight:environment.daylight,weather:environment.weather,eventId:event?.id??null,period:environment.period};
     if(!indoors){
       let visible=0,colorsChanged=false;
       for(let i=0;i<PEDESTRIAN_COUNT;i++){
-        const pose=pedestrianPose(i,elapsed),stride=Math.sin(elapsed*5+i)*.38;
-        // The full city population keeps its route; software WebGL draws nearby people.
-        if(this.software&&(pose.x-player.x)**2+(pose.z-player.z)**2>10000)continue;
+        const pose=pedestrianPose(i,elapsed),avoid=pedestrianReaction(pose,vehicles),reaction=this.reactions[i],blend=1-Math.exp(-(Number.isFinite(dt)?Math.max(0,Math.min(.2,dt)):0)*12);
+        reaction.alert+=(avoid.alert-reaction.alert)*blend;reaction.x+=(avoid.x-reaction.x)*blend;reaction.z+=(avoid.z-reaction.z)*blend;
+        const moving=pose.speed>.08,motion=this.pedestrianMotion[i].update(moving,elapsed,{speed:pose.speed,heading:pose.heading,dt});
+        if(reaction.alert>.2)this.current.reactingPedestrians++;
+        // Every route advances at all presets. Quality only changes the visible subset.
+        if(visible>=budget.pedestrians||(pose.x-player.x)**2+(pose.z-player.z)**2>budget.range**2)continue;
         const index=visible++;
-        if(this.software&&this.visiblePeople[index]!==i){
+        if(this.visiblePeople[index]!==i){
           this.visiblePeople[index]=i;colorsChanged=true;
           for(let mesh=0;mesh<this.people.length;mesh++){
             const parts=mesh<2?1:2;
             for(let part=0;part<parts;part++)this.people[mesh].setColorAt(index*parts+part,this.peopleColors[mesh][i*parts+part]);
           }
         }
-        this.dummy.position.set(pose.x,.05,pose.z);this.dummy.rotation.set(0,-pose.heading,0);this.dummy.scale.set(1,1,1);this.dummy.updateMatrix();
+        this.dummy.position.set(pose.x+reaction.x,.05+motion.bob,pose.z+reaction.z);this.dummy.rotation.set(motion.lean,-pose.heading+motion.yawOffset,motion.roll);this.dummy.scale.set(1,1,1);this.dummy.updateMatrix();
         this.personPart(0,index,0,1.6,0,.4,.42,.4);this.personPart(1,index,0,1.09,0,.52,.7,.34);
         for(let side=0;side<2;side++){
-          const sign=side?1:-1;this.personPart(2,index*2+side,sign*.36,1.1,0,.17,.64,.22,stride*sign);
-          this.personPart(3,index*2+side,sign*.15,.4,0,.2,.8,.26,-stride*sign);
+          const sign=side?1:-1,arm=side?motion.rightArm:motion.leftArm,leg=side?motion.rightLeg:motion.leftLeg;
+          this.personPart(2,index*2+side,sign*.36,1.1,0,.17,.64,.22,arm-reaction.alert*.9);
+          this.personPart(3,index*2+side,sign*.15,.4,0,.2,.8,.26,leg);
         }
       }
-      this.visiblePeople.length=visible;
+      this.current.visiblePedestrians=visible;this.visiblePeople.length=visible;
       for(let index=0;index<this.people.length;index++){
         const mesh=this.people[index];mesh.count=visible*(index<2?1:2);mesh.instanceMatrix.needsUpdate=true;
         if(colorsChanged&&mesh.instanceColor)mesh.instanceColor.needsUpdate=true;
@@ -213,6 +210,7 @@ export class CityLife {
         this.dummy.position.set(player.x+x,1+y,player.z+z);this.dummy.rotation.set(0,0,-.12);this.dummy.scale.set(.018,1.15,.018);this.dummy.updateMatrix();this.rainMesh.setMatrixAt(i,this.dummy.matrix);
       }
       if(this.rainMesh.visible)this.rainMesh.instanceMatrix.needsUpdate=true;
+      this.lampPoolMaterial.uniforms.strength.value=clamp((.65-environment.daylight)/.65)*.22;
       this.lamps.visible=environment.daylight<.65;this.lampMaterial.color.setHex(environment.daylight<.2?0xffe6a8:0xe3caa0);
       this.puddleMaterial.opacity=environment.rain*(.13+(1-environment.daylight)*.12);this.reflections.visible=environment.rain>.01;
       this.neonMaterial.opacity=.7+(1-environment.daylight)*.3;

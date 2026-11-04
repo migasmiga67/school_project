@@ -8,7 +8,9 @@ Oryginalny, niewielki sandbox 3D w przeglądarce, inspirowany miejskimi grami ak
 
 - Miasto z cyklem dnia i nocy, deszczem, neonami i przechodniami: 35 ulic, 81 budynków, parki, place, parkingi, plaża, molo i powiększona zatoka. Obszar lądowy jest około 3,6 raza większy niż w pierwszej wersji.
 - Cztery nowe dzielnice: zielone Westwood, biurowe North Financial, przemysłowy Port Nelson i nadmorska South Bay, połączone przejezdnymi alejami.
-- Dokładniejsze elewacje, witryny, dachy, tekstury asfaltu i chodników, zaokrąglone nadwozia i sylwetki postaci oraz woda z odbiciem nieba i pianą przy brzegu.
+- Dokładniejsze elewacje, witryny, dachy, tekstury asfaltu i chodników, nawierzchnie ciemniejące od deszczu, zaokrąglone nadwozia i sylwetki postaci oraz woda z odbiciem nieba i pianą przy brzegu.
+- Ustawienia grafiki dostępne z menu i pauzy: Automatyczna, Niska, Średnia i Wysoka, z oddzielnymi limitami dla programowego WebGL.
+- Płynniejszy ruch nadwozia i zawieszenia, obrót kół, światła hamowania i reflektory rozświetlające ulicę po zmroku.
 - Auto sportowe i sedany, zaparkowane pojazdy i ruch uliczny; można wysiadać, chodzić, sprintować i przejmować auta.
 - Gaz, hamulec, jazda wstecz, ręczny, nitro i kolizje z zabudową oraz pojazdami.
 - Trzy typy zleceń: dostawa, wyścig przez punkty kontrolne, ucieczka przed policją.
@@ -72,13 +74,32 @@ Garaż solo zapisuje się razem z lokalnym profilem. W pokoju online masz osobny
 
 ## Żyjące miasto
 
-Pełna doba trwa **12 minut gry**. Zmieniają się oświetlenie, neony i pogoda; po chodnikach spaceruje **64 przechodniów**, a po ulicach porusza się **16 aut ruchu miejskiego**. Nowe dzielnice mają zabudowę, drzewa, oświetlenie i własne trasy ruchu. W pokoju online gracze korzystają ze wspólnego czasu miasta.
+Pełna doba trwa **12 minut gry**. Zmieniają się oświetlenie, neony i pogoda; miasto wyznacza trasy dla **64 przechodniów** i **16 aut ruchu miejskiego**. Jednocześnie w pobliżu gracza widać do **24 / 40 / 64 pieszych** na Niskiej / Średniej / Wysokiej jakości. Wszystkie trasy korzystają ze wspólnego czasu niezależnie od liczby widocznych postaci. Nowe dzielnice mają zabudowę, drzewa, oświetlenie i własne trasy ruchu. W pokoju online gracze korzystają ze wspólnego czasu miasta.
+
+Piesi płynnie przechodzą między marszem a postojem i czekają na sygnał przy przejściach. Na bliskie jadące auto reagują gestem i odsunięciem. Sygnalizacja na wybranych skrzyżowaniach korzysta z **54-sekundowego cyklu**, wspólnego dla świateł, ruchu aut i przechodniów; faza przejścia pieszych ma własne okno. Auta ruchu miejskiego zwalniają przed zatrzymaniem i ponownie nabierają prędkości po otwarciu przejazdu.
 
 Ulice mają różne szerokości, zakręty, skrzyżowania T, zaułki i ślepe zakończenia. Westwood ma zielone bulwary i niską zabudowę, North Financial biurowce i place, Port Nelson magazyny i place załadunkowe, a South Bay hotele i promenadę. Parkingi i alejki uzupełniają układ dzielnic.
 
+Ławki, latarnie i znaki są rozmieszczane z uwzględnieniem pełnych obrysów oraz wolnego pasa do chodzenia. Wejścia, przejścia dla pieszych i narożniki skrzyżowań pozostają dostępne.
+
 Minimapa podąża za graczem i pokazuje najbliższą okolicę; mapa w telefonie obejmuje całe miasto oraz zatokę. Drogi w świecie 3D, na obu mapach, w GPS i w ruchu miejskim korzystają ze wspólnego układu ulic. Wybierz jedną z czterech nowych dzielnic, aby GPS wyznaczył trasę przez rzeczywiste skrzyżowania i zakręty. Dawne miejsca, wnętrza i cele zleceń pozostają dostępne.
 
-Powierzchnie korzystają ze wspólnych tekstur generowanych lokalnie. Akceleracja sprzętowa dodaje mapy normalnych i chropowatości oraz cienie; renderer programowy używa lżejszych materiałów, uproszczonych odległych aut i krótszego zasięgu widzenia. Geometria i okna są grupowane w lokalne sektory, aby kamera nie musiała rysować całej rozbudowanej mapy naraz.
+Powierzchnie korzystają ze wspólnych tekstur generowanych lokalnie. Deszcz przyciemnia asfalt, bruk, elewacje i roślinność, a na akcelerowanej grafice zmienia również chropowatość materiałów. Szkło i mokre nawierzchnie korzystają ze wspólnej proceduralnej mapy otoczenia; odbicia nie przedstawiają bieżącej sceny i nie używają SSR. Niebo ma warstwy chmur, pasma światła o świcie i zachodzie oraz gwiazdy; pogoda zmienia także kolor i zasięg mgły.
+
+Nadwozia reagują na przyspieszanie, hamowanie i skręcanie, a światła stopu wzmacniają się podczas zwalniania. Po zmroku reflektory tworzą plamy światła na jezdni i delikatne stożki w powietrzu. W trybie sprzętowym ograniczona pula dodatkowych świateł obsługuje najbliższe auta; programowy WebGL korzysta z tańszych, grupowanych efektów.
+
+## Ustawienia grafiki
+
+Przycisk **GRAFIKA** znajduje się w menu początkowym i w pauzie. Wybór działa od razu, zachowuje bieżącą grę i zapisuje się lokalnie także po odświeżeniu strony. Zamknięcie ustawień otwartych z pauzy wraca do pauzy; wznowienie gry wymaga przycisku **WRÓĆ NA ULICE**. Ustawienia obsługują klawiaturę, **Tab / Shift+Tab** oraz **Esc**.
+
+- **Automatyczna** wybiera Niską przy programowym WebGL, Średnią na wąskim ekranie z akceleracją i Wysoką na większym ekranie z akceleracją.
+- **Niska** ogranicza rozdzielczość renderowania, zasięg widzenia i kosztowne efekty.
+- **Średnia** zwiększa zasięg i szczegółowość; przy akceleracji sprzętowej włącza cienie i reflektory dla najbliższego auta.
+- **Wysoka** zapewnia dalszy widok, większą rozdzielczość i dokładniejsze cienie; przy akceleracji sprzętowej dodatkowe reflektory obsługują dwa najbliższe auta.
+
+Programowy WebGL zachowuje ograniczenia także po ręcznym wybraniu Wysokiej: bez cieni i dodatkowych świateł reflektorów, z lżejszymi materiałami i zasięgiem widzenia do 245 m. Renderowany obraz ma maksymalnie około 450 tys. pikseli na Niskiej, 650 tys. na Średniej i 900 tys. na Wysokiej; rzeczywista rozdzielczość zależy też od rozmiaru okna. Geometria i okna są grupowane w lokalne sektory, a odległe auta korzystają z prostszych modeli. Przestawienie jakości nie zmienia fizyki, kolizji, pieniędzy ani postępu zleceń.
+
+## Wydarzenia miejskie
 
 Co **120 sekund** pojawia się wydarzenie dostępne przez **40 sekund**: zgubiona przesyłka, pomoc na poboczu albo pilna dostawa. Panel wydarzenia i minimapa pokazują cel. Dotrzyj do niego pieszo lub jako kierowca; nagroda **$150–$200** jest odbierana automatycznie w pobliżu, raz za dane wydarzenie w bieżącej sesji. Pasażer nie odbiera nagrody za samo przejechanie przez punkt. Online wypłatę rozlicza gospodarz do portfela pokoju.
 

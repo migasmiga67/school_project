@@ -1,5 +1,7 @@
 import { BUILDINGS, ROAD_NODES, WORLD_BOUNDS } from './model';
 import { CITY_TRAFFIC_LOOPS, nearestStreet, routeStreets } from './city-map';
+import { AMBIENT_PEDESTRIAN_COUNT,ambientTrafficPose,nextRouteGate,pedestrianTrafficPose,sampleTrafficPath,signalAwareProgress,trafficRoute } from './traffic-flow';
+import { nextSignalOpening } from './traffic-signals';
 import { CASINO } from './casino-location';
 import { BIKE_LOCATION, DOCK, advanceBikeFlight, advanceBoat, canBoardDockBoat, canDisembarkBoat, resetMobilityMotion } from './mobility';
 import type { GameEvent, GameState, Input, Point, Vehicle, PursuitState, Roadblock } from './model';
@@ -17,11 +19,12 @@ const clamp = (v: number, min: number, max: number) => Math.max(min, Math.min(ma
 const angle = (v: number) => Math.atan2(Math.sin(v), Math.cos(v));
 const vehicle = (id: string, kind: Vehicle['kind'], x: number, z: number, heading: number, color: number, parked: boolean, owned = false): Vehicle => ({ id, kind, x, z, heading, speed: 0, color, parked, health: 100, owned, steer: 0, wheelPhase: 0 });
 
-interface Runtime { traffic: Map<string, number>; policeRoutes: Map<string, { target: Point; path: Point[]; at: number }>; serial: number; lastSeen:Point|null; lastWanted:number; nextRoadblock:number; concealment:number }
+interface AmbientCar extends Vehicle {ambientProgress?:number;ambientClock?:number;ambientDelayed?:boolean}
+interface Runtime { trafficClock:number|null; externalTraffic:boolean; policeRoutes: Map<string, { target: Point; path: Point[]; at: number }>; serial: number; lastSeen:Point|null; lastWanted:number; nextRoadblock:number; concealment:number }
 const runtimes = new WeakMap<GameState, Runtime>();
 function runtime(s: GameState): Runtime {
   let r = runtimes.get(s);
-  if (!r) { r = { traffic: new Map(), policeRoutes: new Map(), serial: 0, lastSeen:null, lastWanted:0, nextRoadblock:0, concealment:0 }; runtimes.set(s, r); }
+  if (!r) { r = { trafficClock:null, externalTraffic:false, policeRoutes: new Map(), serial: 0, lastSeen:null, lastWanted:0, nextRoadblock:0, concealment:0 }; runtimes.set(s, r); }
   return r;
 }
 function pursuitState(s:GameState):PursuitState {
@@ -34,8 +37,6 @@ function roadblockHit(s:GameState,p:Point,radius:number):boolean {
   }));
 }
 const trafficLoops=CITY_TRAFFIC_LOOPS;
-const trafficSeed=(index:number)=>index<8?(index%2?index*31+45:index*59+50):(index-8)*61+24;
-const trafficLoop=(index:number)=>trafficLoops[index<8?index%2:2+(index-8)%3];
 function loopPose(points: readonly Point[], progress: number): Point & { heading: number } {
   const perimeter = points.reduce((sum, p, i) => sum + length(p, points[(i + 1) % points.length]), 0);
   let distance = ((progress % perimeter) + perimeter) % perimeter;
@@ -58,8 +59,8 @@ export function createGame(): GameState {
     {...vehicle('boat-1','boat',DOCK.mooring.x,DOCK.mooring.z,Math.PI/2,0xf0dfbd,true,true),label:'TideRunner · MOTORÓWKA'},
   ];
   for (let i = 0; i < 16; i++) {
-    const p = loopPose(trafficLoop(i),trafficSeed(i));
-    cars.push(vehicle(`traffic-${i}`, i % 3 === 0 ? 'sport' : 'sedan', p.x, p.z, p.heading, [0x51a89e, 0xe0b878, 0x926f9b, 0xa5b6c4][i % 4], false));
+    const p=ambientTrafficPose(i,0);
+    cars.push({...vehicle(`traffic-${i}`, i % 3 === 0 ? 'sport' : 'sedan', p.x, p.z, p.heading, [0x51a89e, 0xe0b878, 0x926f9b, 0xa5b6c4][i % 4], false),speed:p.speed,...{ambientProgress:p.progress,ambientClock:0,ambientDelayed:false}});
   }
   const s: GameState = {
     interior: null,
@@ -69,8 +70,7 @@ export function createGame(): GameState {
     missionsWon: 0, bestRace: null,
     mission: { kind: 'delivery', stage: 0, active: true, clock: 0, completed: 0, waypoint: { ...PICKUP }, title: 'Specjalna przesyłka', instruction: 'Podjedź do punktu odbioru w dzielnicy Downtown.', reward: 450 },
   };
-  const rt = runtime(s);
-  for (let i = 0; i < 16; i++) rt.traffic.set(`traffic-${i}`,trafficSeed(i));
+  runtime(s).trafficClock=0;
   return s;
 }
 
@@ -80,15 +80,14 @@ export function activeVehicle(s: GameState): Vehicle | undefined {
 /** Online rooms share a deterministic ambient traffic clock; claimed cars stay parked. */
 export function synchronizeOnlineTraffic(s: GameState, seconds: number) {
   if (!Number.isFinite(seconds) || seconds < 0) return;
-  const rt = runtime(s), own = activeVehicle(s);
-  for (let i = 0; i < 16; i++) {
-    const car = s.vehicles.find(item => item.id === `traffic-${i}`);
-    if (!car || car.parked || car === own) continue;
-    const speed = 8 + i % 4;
-    const progress = trafficSeed(i) + speed * seconds;
-    Object.assign(car, loopPose(trafficLoop(i), progress), { speed, wheelPhase: speed * seconds * 1.6 });
-    rt.traffic.set(car.id, progress);
+  const rt=runtime(s);rt.externalTraffic=true;const clocks=s.vehicles.filter(car=>/^traffic-\d+$/.test(car.id)).map(car=>(car as AmbientCar).ambientClock).filter((clock):clock is number=>Number.isFinite(clock));
+  const previous=rt.trafficClock??(clocks.length?Math.max(...clocks):seconds),difference=seconds-previous;
+  if(difference<-.1||difference>1){
+    for(const car of s.vehicles){if(car.parked||car===activeVehicle(s)||!/^traffic-\d+$/.test(car.id))continue;const pose=ambientTrafficPose(Number(car.id.slice(8)),seconds);Object.assign(car,pose,{ambientProgress:pose.progress,ambientClock:seconds,ambientDelayed:false,wheelPhase:pose.progress*1.6});}
+  }else if(difference>1e-7){
+    let at=previous;while(at<seconds-1e-7){const dt=Math.min(1/60,seconds-at);at+=dt;advanceTrafficFlow(s,at,dt);}
   }
+  rt.trafficClock=seconds;
 }
 export function nearestVehicle(s: GameState): Vehicle | undefined {
   if (s.interior) return undefined;
@@ -245,15 +244,47 @@ function walk(s: GameState, input: Input, dt: number) {
     }
   }
 }
+/** Local yielding keeps serializable route progress so detached forecasts retain it. */
+function advanceTrafficFlow(s:GameState,clock:number,dt:number){
+  const controlled=activeVehicle(s),cars=s.vehicles.filter(car=>/^traffic-\d+$/.test(car.id)&&car!==controlled&&!car.parked&&car.health>0)as AmbientCar[];
+  if(!cars.length)return;
+  const before=s.vehicles.map(car=>({...car}));
+  const pedestrians=Array.from({length:AMBIENT_PEDESTRIAN_COUNT},(_,index)=>pedestrianTrafficPose(index,clock));
+  for(const car of cars){
+    const index=Number(car.id.slice(8)),cruise=8+index%4,path=trafficRoute(index),base=ambientTrafficPose(index,clock),forward={x:Math.sin(car.heading),z:-Math.cos(car.heading)};
+    const progress=car.ambientProgress??base.progress;
+    let gap=Infinity;
+    const obstacle=(point:Point,radius:number)=>{const dx=point.x-car.x,dz=point.z-car.z,along=dx*forward.x+dz*forward.z,lateral=Math.abs(dx*forward.z-dz*forward.x);if(along>-.1&&lateral<radius)gap=Math.min(gap,Math.max(0,along));};
+    for(const other of before){
+      if(other.id===car.id||other.kind==='boat'||(other.airHeight??0)>1.5)continue;
+      // Opposite carriageways keep their own course; a crossing/parked car is an obstacle.
+      if(!other.parked&&other.id!==controlled?.id&&Math.cos(other.heading-car.heading)<-.5)continue;
+      obstacle(other,other.kind==='bike'?1.8:2.4);
+    }
+    if(s.player.mode==='foot'&&!s.interior)obstacle(s.player,1.8);
+    for(const person of pedestrians)if(Math.hypot(person.x-car.x,person.z-car.z)<13)obstacle(person,1.65);
+    const safeGap=4.6,stopping=car.speed*car.speed/(2*5)+safeGap;
+    const needsYield=gap<Math.max(11,stopping);
+    if(!car.ambientDelayed&&!needsYield){Object.assign(car,base,{ambientProgress:base.progress,ambientClock:clock,wheelPhase:base.progress*1.6});continue;}
+    car.ambientDelayed=true;
+    const gate=nextRouteGate(path,progress),closed=gate&&nextSignalOpening(gate.signalId,clock,gate.heading,'vehicle',gate.clearance/cruise+1)>clock+1e-6;
+    let desired=cruise;
+    if(needsYield)desired=Math.min(desired,Math.sqrt(2*5*Math.max(0,gap-safeGap)));
+    if(gate&&closed)desired=Math.min(desired,Math.sqrt(2*3.4*Math.max(0,gate.distance)));
+    const oldSpeed=Math.max(0,car.speed),change=desired>oldSpeed?3.4:gap<safeGap+2?12:5,newSpeed=Math.max(0,oldSpeed+clamp(desired-oldSpeed,-change*dt,change*dt));
+    let travel=(oldSpeed+newSpeed)*.5*dt;
+    if(needsYield)travel=Math.min(travel,Math.max(0,gap-safeGap));
+    if(gate&&closed)travel=Math.min(travel,gate.distance);
+    const next=progress+travel,pose=sampleTrafficPath(path,next);
+    Object.assign(car,pose,{speed:travel<1e-8?0:newSpeed,ambientProgress:next,ambientClock:clock,wheelPhase:next*1.6});
+  }
+}
 function traffic(s: GameState, dt: number, events: GameEvent[]) {
-  const rt = runtime(s), playerCar = activeVehicle(s);
+  const rt=runtime(s),playerCar=activeVehicle(s);
+  const clock=rt.externalTraffic?(rt.trafficClock??s.time-dt)+dt:s.time;
+  advanceTrafficFlow(s,clock,dt);rt.trafficClock=clock;
   for (const car of s.vehicles) {
-    if (car === playerCar || car.parked || car.health <= 0 || car.kind==='boat'||car.kind==='bike') continue;
-    const index = Number(car.id.split('-').at(-1)); if (!Number.isFinite(index)) continue;
-    const speed = 8 + index % 4;
-    const old = rt.traffic.get(car.id) ?? trafficSeed(index);
-    const next = old + speed * dt; rt.traffic.set(car.id, next);
-    const p = loopPose(trafficLoop(index), next); Object.assign(car, p, { speed }); car.wheelPhase += speed * dt;
+    if(car===playerCar||car.parked||car.health<=0||!/^traffic-\d+$/.test(car.id))continue;
     if (playerCar && playerCar.kind!=='boat'&&(playerCar.airHeight??0)<1.7&&length(car, playerCar) < (playerCar.kind==='bike'?2.2:3.05)) {
       const impact = Math.abs(playerCar.speed - car.speed) + 5;
       collision(s, playerCar, impact, events); playerCar.speed *= -.2; car.speed = 0; car.parked = true;

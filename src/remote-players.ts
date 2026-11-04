@@ -5,6 +5,7 @@ import type { OnlineMember } from './multiplayer-model';
 import type { VehicleKind } from './model';
 import { appearanceColors, type AppearanceState } from './appearance';
 import { createMobilityVehicle } from './mobility-view';
+import { AvatarMotion } from './avatar-motion';
 
 type LitMaterial = THREE.MeshLambertMaterial | THREE.MeshStandardMaterial;
 interface BodyPart { size: [number, number, number]; at: [number, number, number]; color: number; rotation?: [number, number, number]; shape?:'sphere'|'capsule'|'torso'|'hair'; rounding?:number }
@@ -31,6 +32,7 @@ interface RemoteVisual {
   heading: number;
   wheelPhase: number;
   phase: number;
+  motion: AvatarMotion;
   kind: VehicleKind;
   paintColor: number;
   location: 'casino' | null;
@@ -59,6 +61,7 @@ export class RemotePlayersView {
   private readonly shoeShape: THREE.BufferGeometry;
   private count = 0;
   private destroyed = false;
+  private clock=0;
 
   constructor(private readonly software: boolean) {
     this.group.name = 'Other online players';
@@ -137,7 +140,7 @@ export class RemotePlayersView {
       if(colors.accessoryStyle==='glasses'){for(const side of[-1,1])parts.push({shape:'sphere',size:[.155,.095,.028],at:[side*.095,1.83,-.19],color:colors.accessory});parts.push({size:[.06,.024,.025],at:[0,1.84,-.207],color:colors.accessory});}
       if(colors.accessoryStyle==='cap')parts.push({shape:'hair',size:[.472,.496,.4],at:[0,1.81,-.012],color:colors.accessory},{shape:'sphere',size:[.46,.035,.27],at:[0,1.965,-.22],color:colors.accessory});
       if(colors.crewOutfit)parts.push({size:[.09,.36,.018],at:[.14,1.18,-.176],color:0xdcece2,rotation:[0,0,.2]});
-      body = this.boxes(parts);
+      body = this.boxes(parts);body.translate(0,-1,0);
       this.avatarBodies.set(key, body);
     }
     let arm = this.armShapes.get(key);
@@ -219,6 +222,7 @@ export class RemotePlayersView {
     const root = new THREE.Group(); root.name = `Online player ${member.id}`; this.group.add(root);
     const avatar = new THREE.Group(); root.add(avatar);
     const body = this.mesh(shape.body, this.colored, avatar);
+    body.position.y=1;
     const pants=this.material(shape.colors.pants);
     const legs: THREE.Group[] = [], arms: THREE.Group[] = [];
     for (const side of [-1, 1]) {
@@ -237,7 +241,7 @@ export class RemotePlayersView {
     const labelTexture = this.nameTexture(member.name, slot);
     const label = new THREE.Sprite(new THREE.SpriteMaterial({ map: labelTexture, transparent: true, depthWrite: false }));
     label.scale.set(2.9, .635, 1); label.position.y = 2.65; root.add(label);
-    return { root, avatar, body, legs, arms, car, carBody, carDetails, paint,pants,appearanceKey:shape.key, wheels, frontSteers, label, labelTexture, name: member.name, slot, heading: 0, wheelPhase: 0, phase: 0, kind: 'sport', paintColor: SLOT_COLORS[slot], location: member.pose.interior, mode: member.pose.mode, passengerOf:member.pose.passengerOf??null, initialized: false };
+    return { root, avatar, body, legs, arms, car, carBody, carDetails, paint,pants,appearanceKey:shape.key, wheels, frontSteers, label, labelTexture, name: member.name, slot, heading: 0, wheelPhase: 0, phase: 0,motion:new AvatarMotion(), kind: 'sport', paintColor: SLOT_COLORS[slot], location: member.pose.interior, mode: member.pose.mode, passengerOf:member.pose.passengerOf??null, initialized: false };
   }
 
   private remove(id: string, visual: RemoteVisual) {
@@ -250,6 +254,7 @@ export class RemotePlayersView {
   update(members: OnlineMember[], selfId: string, interior: 'casino' | null, dt: number, hideVehicleOf?:string,homeId?:string|null) {
     if (this.destroyed) return;
     const step = Number.isFinite(dt) ? Math.min(.2, Math.max(0, dt)) : 0;
+    this.clock+=step;
     const blend = 1 - Math.exp(-step * 14);
     const present = new Set<string>(); this.count = 0;
     for (const member of members) {
@@ -280,7 +285,7 @@ export class RemotePlayersView {
       const heading = driving ? pose.vehicle!.heading : rideVehicle?.heading??pose.heading;
       const jump = !visual.initialized || visual.location !== pose.interior || visual.mode !== pose.mode || visual.passengerOf!==(pose.passengerOf??null) || Math.hypot(targetX - visual.root.position.x, targetZ - visual.root.position.z) > 18;
       const previousX = visual.root.position.x, previousZ = visual.root.position.z, oldHeading = visual.heading;
-      if (jump) { visual.root.position.set(targetX, driving||riding ? .05 : .1, targetZ); visual.heading = heading; }
+      if (jump) { visual.root.position.set(targetX, driving||riding ? .05 : .1, targetZ); visual.heading = heading;visual.motion.reset(); }
       else {
         visual.root.position.x += (targetX - visual.root.position.x) * blend;
         visual.root.position.z += (targetZ - visual.root.position.z) * blend;
@@ -318,9 +323,11 @@ export class RemotePlayersView {
         if(visual.mobility){visual.mobility.frontWheels.forEach(steer=>steer.rotation.y=turn);visual.mobility.group.rotation.z=vehicle.kind==='bike'?-turn*.8:0;}
       } else if(!riding) {
         const moving = travel > .0003;
-        if (moving) visual.phase += travel * 3.2;
-        visual.legs.forEach((leg, index) => { leg.rotation.x = moving ? Math.sin(visual.phase + index * Math.PI) * .52 : 0; });
-        visual.arms.forEach((arm, index) => { arm.rotation.x = moving ? -Math.sin(visual.phase + index * Math.PI) * .38 : 0; });
+        const gait=visual.motion.update(moving,this.clock,{speed:step>0?Math.min(8,travel/step):0,heading:visual.heading,dt:step});
+        visual.avatar.position.set(gait.sway,gait.bob,0);visual.avatar.rotation.y=-visual.heading+gait.yawOffset;
+        visual.body.rotation.set(gait.lean,gait.torsoYaw,gait.roll);
+        visual.legs.forEach((leg,index)=>leg.rotation.x=index===0?gait.leftLeg:gait.rightLeg);
+        visual.arms.forEach((arm,index)=>{arm.rotation.x=index===0?gait.leftArm:gait.rightArm;arm.rotation.z=(index===0?1:-1)*(.035+gait.strideWeight*.045);});
       }
     }
     for (const [id, visual] of this.visuals) if (!present.has(id)) this.remove(id, visual);

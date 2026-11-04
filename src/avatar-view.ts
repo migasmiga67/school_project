@@ -1,5 +1,6 @@
 import * as THREE from 'three';
 import { appearanceColors, createAppearance, type AppearanceState } from './appearance';
+import { AvatarMotion, type AvatarMotionInput } from './avatar-motion';
 
 type AvatarMaterial=THREE.MeshLambertMaterial|THREE.MeshStandardMaterial;
 /** One independently colored avatar. Parent sets world position and heading. */
@@ -15,11 +16,14 @@ export class AvatarView {
  private readonly hairstyles=new Map<string,THREE.Group>();
  private readonly accessories=new Map<string,THREE.Group>();
  private readonly crewStripe:THREE.Mesh;
+ private readonly upperBody=new THREE.Group();
+ private readonly headRoot=new THREE.Group();
+ private readonly motion=new AvatarMotion();
  private signature='';
  constructor(private readonly software=false){
   this.group.name='custom-player-avatar';
   this.shirt=this.material(0xd1c6ae);this.trousers=this.material(0x324654);this.skin=this.material(0xc19074);this.hair=this.material(0x303333);this.accessory=this.material(0x162b37);
-  const torso=new THREE.CylinderGeometry(.31,.25,.72,8);torso.scale(1,1,.59);this.part(this.group,torso,this.shirt,0,1.17,0);
+  const torso=new THREE.CylinderGeometry(.31,.25,.72,8);torso.scale(1,1,.59);this.part(this.group,torso,this.shirt,0,1.17,0).name='avatar-torso';
   this.round(this.group,.52,.3,.31,this.trousers,0,.87,0);this.round(this.group,.145,.17,.145,this.skin,0,1.58,0);
   this.oval(this.group,.38,.44,.35,this.skin,0,1.79,-.015);
   this.oval(this.group,.055,.105,.05,this.skin,-.19,1.78,0);this.oval(this.group,.055,.105,.05,this.skin,.19,1.78,0);this.oval(this.group,.05,.075,.06,this.skin,0,1.77,-.192);
@@ -33,6 +37,11 @@ export class AvatarView {
   const cap=new THREE.Group();this.hairCap(cap,1.18,1.24,this.accessory);this.oval(cap,.46,.035,.27,this.accessory,0,1.965,-.22);this.accessories.set('cap',cap);
   for(const object of[...this.hairstyles.values(),...this.accessories.values()])this.group.add(object);
   this.crewStripe=this.box(this.group,.09,.36,.018,this.material(0xdcece2),.14,1.18,-.176);this.crewStripe.rotation.z=.2;
+  // Keep the pelvis and feet planted while shoulders and head anticipate a turn.
+  const upper=this.group.children.filter(object=>this.arms.includes(object as THREE.Group)||[...this.hairstyles.values(),...this.accessories.values()].includes(object as THREE.Group)||object.position.y>=1);
+  this.upperBody.position.y=1;this.group.add(this.upperBody);
+  this.headRoot.position.y=.79;this.upperBody.add(this.headRoot);
+  for(const object of upper){const head=object.position.y>1.65||[...this.hairstyles.values(),...this.accessories.values()].includes(object as THREE.Group);object.position.y-=head?1.79:1;(head?this.headRoot:this.upperBody).add(object);}
   this.setAppearance(createAppearance());
  }
  private material(color:number):AvatarMaterial{return this.software?new THREE.MeshLambertMaterial({color}):new THREE.MeshStandardMaterial({color,roughness:.8,metalness:.02});}
@@ -49,6 +58,13 @@ export class AvatarView {
   for(const[style,object]of this.accessories)object.visible=style===colors.accessoryStyle;
   this.crewStripe.visible=colors.crewOutfit;
  }
- update(walking:boolean,seconds:number){const phase=Number.isFinite(seconds)?seconds*10:0;this.legs.forEach((leg,index)=>leg.rotation.x=walking?Math.sin(phase+index*Math.PI)*.45:0);this.arms.forEach((arm,index)=>arm.rotation.x=walking?-Math.sin(phase+index*Math.PI)*.38:0);}
+ get motionSnapshot(){return this.motion.snapshot;}
+ update(walking:boolean,seconds:number,input:AvatarMotionInput={}){
+  const pose=this.motion.update(walking,seconds,input);
+  this.legs.forEach((leg,index)=>{leg.rotation.x=index===0?pose.leftLeg:pose.rightLeg;leg.rotation.z=(index===0?1:-1)*Math.abs(Math.sin(pose.phase))*.014*pose.strideWeight;});
+  this.arms.forEach((arm,index)=>{arm.rotation.x=index===0?pose.leftArm:pose.rightArm;arm.rotation.z=(index===0?1:-1)*(.035+pose.strideWeight*.045);});
+  this.group.position.set(pose.sway,pose.bob,0);this.group.rotation.y=pose.yawOffset;
+  this.upperBody.rotation.set(pose.lean,pose.torsoYaw,pose.roll);this.headRoot.rotation.y=pose.headYaw;
+ }
  destroy(){const geometries=new Set<THREE.BufferGeometry>(),materials=new Set<THREE.Material>();this.group.traverse(object=>{if(object instanceof THREE.Mesh){geometries.add(object.geometry);for(const material of Array.isArray(object.material)?object.material:[object.material])materials.add(material);}});geometries.forEach(item=>item.dispose());materials.forEach(item=>item.dispose());this.group.removeFromParent();this.group.clear();}
 }

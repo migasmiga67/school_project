@@ -1,9 +1,9 @@
 import * as THREE from 'three';
-import { CITY_BUILDINGS, CITY_SPACES, CITY_STREETS, type CityBuilding } from './city-map';
+import { CITY_BUILDINGS, CITY_SPACES, CITY_STREETS, nearestStreet, type CityBuilding } from './city-map';
 import { CityArt, pathLength, samplePath } from './city-art';
-import type { Point } from './model';
 import type { SurfaceLibrary, SurfaceMaterial } from './surface-materials';
 import { WORLD_LANDMARKS } from './world-layout';
+import { CITY_ACCESS_CLEARANCES,CITY_BENCH_PLACEMENTS,CITY_PLACEMENT_CONTEXT,CITY_STREET_SIGN_PLACEMENTS,canPlaceDecoration,findStreetDecoration,type DecorationFootprint } from './city-placement';
 
 const HOME_COLORS=[0xe4c8a4,0xb8cbb5,0xd4ada1,0xb7c9ce,0xd3c692];
 const SHOP_NAMES=['PALM MARKET','CAFE AZUL','COAST RECORDS','SUNDOWN HOTEL','LA FLOR','NOVA STUDIO'];
@@ -12,12 +12,13 @@ const SHOP_NAMES=['PALM MARKET','CAFE AZUL','COAST RECORDS','SUNDOWN HOTEL','LA 
 export class CityDistrictsView {
   readonly art:CityArt;
   readonly occluders:THREE.Mesh[]=[];
+  private readonly placed:DecorationFootprint[]=[...CITY_BENCH_PLACEMENTS,...CITY_STREET_SIGN_PLACEMENTS];
   get group(){return this.art.group;}
   constructor(software:boolean,surfaces:SurfaceLibrary){
     this.art=new CityArt(software,surfaces);this.group.name='city-districts';
     CITY_BUILDINGS.forEach((building,index)=>this.building(building,index));
     this.landscaping();this.publicFurniture();
-    for(const landmark of WORLD_LANDMARKS)this.art.sign(landmark.name.toUpperCase(),landmark.point.x+7,3.5,landmark.point.z-6,10,1.15,0,'#e8e5cf');
+    this.landmarkSigns();
     this.art.finish();
   }
   private body(w:number,h:number,d:number,material:SurfaceMaterial,x:number,z:number,y=h/2+.18){
@@ -96,6 +97,7 @@ export class CityDistrictsView {
       if(b.style==='shop')this.awning(b.x,b.z+d/2+.2,w*.8,3.4,index);
       this.roofServices(b,w,d,h,index);
     }
+    this.facadeDetails(b,w,d,index);
   }
   private gable(x:number,y:number,z:number,w:number,d:number,rise:number,material:SurfaceMaterial){
     const positions=[-w/2,0,-d/2,w/2,0,-d/2,0,rise,-d/2,-w/2,0,d/2,0,rise,d/2,w/2,0,d/2,-w/2,0,-d/2,0,rise,-d/2,0,rise,d/2,-w/2,0,-d/2,0,rise,d/2,-w/2,0,d/2,w/2,0,-d/2,w/2,0,d/2,0,rise,d/2,w/2,0,-d/2,0,rise,d/2,0,rise,-d/2];
@@ -109,6 +111,56 @@ export class CityDistrictsView {
     const art=this.art,z=b.z+d/2+.045;this.door(b.x,z,b.height,w,index);
     for(const side of[-1,1])art.instance('box',art.surfaces.windowGlass,b.x+side*w*.29,1.75,z,Math.max(1,w*.24),2.35,.08);
     art.box(w*.85,.2,.8,art.surfaces.roof,b.x,3.3,z+.15);art.sign(name,b.x,4.12,z+.1,Math.min(12,w*.82),.85,0,b.district==='port'?'#e7d0a3':'#e7e6cf');
+  }
+  private facadeDetails(b:CityBuilding,w:number,d:number,index:number){
+    const art=this.art,metal=art.material(0x667a77),dark=art.material(0x31474b),trim=art.surfaces.concrete,z=b.z+d/2+.12;
+    const protectedFront=CITY_ACCESS_CLEARANCES.some(access=>Math.abs(access.x-b.x)<b.halfX+1&&Math.abs(access.z-z)<4);
+    if(!protectedFront){
+      // Flush entrance fittings add depth while preserving every doorway's clear floor area.
+      const doorWidth=Math.min(1.5,w*.25);
+      for(const side of[-1,1])art.instance('box',metal,b.x+side*(doorWidth/2+.09),1.46,z,.12,2.75,.12);
+      art.instance('box',metal,b.x,2.86,z,doorWidth+.3,.13,.12);
+      art.instance('box',art.surfaces.windowGlass,b.x,2.53,z+.025,doorWidth-.12,.42,.08);
+      art.instance('box',art.material(0xb8bca5),b.x+doorWidth*.3,1.35,z+.08,.055,.54,.08);
+      art.instance('box',dark,b.x,.4,z+.055,doorWidth-.1,.32,.08);
+      art.instance('box',art.material(0xe7d4ac,0x7b5627),b.x,3.02,z+.12,.66,.07,.2);
+      if(b.style==='villa'||b.style==='townhouse'){
+        art.instance('box',metal,b.x+doorWidth/2+.34,1.3,z+.07,.23,.34,.11);
+        art.instance('box',art.material(0xbaad88),b.x-doorWidth/2-.43,1.22,z+.09,.5,.37,.13);
+      }else{
+        const glassSpan=Math.max(1,w*.24);
+        for(const side of[-1,1]){
+          const x=b.x+side*w*.29;
+          for(const edge of[-1,1])art.instance('box',metal,x+edge*glassSpan/2,1.77,z,.075,2.38,.12);
+          art.instance('box',metal,x,1.74,z+.02,.065,2.3,.13);
+          art.instance('box',metal,x,.62,z,glassSpan,.12,.14);
+          art.instance('box',art.material(b.district==='financial'?0x809a9a:0xa39173),x,.35,z-.04,glassSpan,.42,.12);
+        }
+        if(b.district!=='port')art.sign(b.district==='financial'?'RECEPTION':index%2?'OPEN  /  WELCOME':'CAFE  /  LOCAL',b.x+w*.29,1.8,z+.07,Math.min(2.5,glassSpan*.8),.44,0,'#eee0b7','#354f56');
+      }
+    }
+    // District services are mounted above head height, never on a walking route.
+    const unitX=b.x+w/2+.22,unitZ=b.z-d*.18;
+    if(b.district==='westwood'||b.district==='port'||b.style==='hotel'){
+      art.instance('box',art.material(0xb2bab0),unitX,3.9,unitZ,.48,.82,1.2);
+      art.instance('sphere',dark,unitX+.25,3.9,unitZ,.035,.55,.55);
+      if(!art.software)for(let slat=0;slat<5;slat++)art.instance('box',metal,unitX+.26,3.64+slat*.13,unitZ+.36,.025,.035,.35);
+      art.instance('box',metal,unitX-.1,3.4,unitZ,.52,.075,1.32);
+    }
+    const pipeX=b.x-w/2+.23;
+    art.instance('cylinder',metal,pipeX,Math.min(b.height,9)/2+.4,b.z-d/2-.07,.09,Math.min(b.height,9),.09);
+    if(b.district==='port'){
+      for(const side of[-1,1])for(let stripe=0;stripe<6;stripe++)art.instance('box',art.material(stripe%2?0xd4b55f:0x36474a),b.x+side*Math.min(w*.4,5.5),.5+stripe*.38,z+.04,.22,.3,.09);
+      art.sign(index%2?'BAY 02':'BAY 01',b.x-w*.32,3.25,z+.02,2,.55,0,'#e5d5a4','#4b5d5b');
+    }else if(b.district==='financial'){
+      for(const side of[-1,1])art.instance('box',metal,b.x+side*(w/2-.4),1.9,z-.05,.22,3.4,.16);
+      art.instance('box',art.material(0xb2c6c1),b.x,3.2,z+.11,Math.min(w*.72,12),.09,.45);
+    }else if(b.district==='south-bay'){
+      for(const side of[-1,1]){
+        art.instance('box',art.material(0x9cae8b),b.x+side*w*.38,2.9,z+.04,.42,.32,.19);
+        art.instance('sphere',art.material(0x668866),b.x+side*w*.38,3.16,z+.04,.58,.4,.29);
+      }
+    }
   }
   private window(x:number,y:number,z:number,w:number,h:number,rotation:number,index:number){
     const art=this.art,material=index%6===0?art.surfaces.litWindow:art.surfaces.windowGlass;
@@ -139,6 +191,7 @@ export class CityDistrictsView {
     const art=this.art,material=art.material(hedge?0x5b7351:0xc7c8b1);
     for(const side of[-1,1]){
       const center=x+side*(width/4+1),span=Math.max(1,width/2-2.3);
+      if(!this.reserve({x:center,z,width:span+.1,depth:.14}))continue;
       for(const height of[.55,1.08])art.instance('box',material,center,height,z,span,.1,.1);
       for(let offset=-span/2;offset<=span/2;offset+=1.1)art.instance('box',material,center+offset,.7,z,.09,1.4,.1);
     }
@@ -160,8 +213,8 @@ export class CityDistrictsView {
     for(const street of CITY_STREETS){
       if(street.kind==='alley'||street.kind==='service'||street.sidewalkWidth<1.5)continue;
       const length=pathLength(street.points),step=street.district==='port'?42:24;
-      for(let distance=12;distance<length-8;distance+=step){const point=samplePath(street.points,distance),side=seed++%2?1:-1,offset=street.width/2+street.sidewalkWidth*.92,x=point.x-point.dz*offset*side,z=point.z+point.dx*offset*side;
-        if(this.clear({x,z},2))this.tree(x,z,seed,street.district==='south-bay'||street.district==='downtown');
+      for(let distance=12;distance<length-8;distance+=step){const point=samplePath(street.points,distance),side=seed++%2?1:-1,offset=street.width/2+Math.max(street.sidewalkWidth*.92,street.sidewalkWidth*.52+.82),x=point.x-point.dz*offset*side,z=point.z+point.dx*offset*side;
+        if(this.reserve({x,z,width:.7,depth:.7}))this.tree(x,z,seed,street.district==='south-bay'||street.district==='downtown');
       }
     }
     for(const space of CITY_SPACES){
@@ -169,7 +222,7 @@ export class CityDistrictsView {
       if(space.kind==='park'&&space.district==='westwood'){const minX=Math.min(...space.points.map(p=>p.x)),maxX=Math.max(...space.points.map(p=>p.x)),maxZ=Math.max(...space.points.map(p=>p.z));this.fence((minX+maxX)/2,maxZ-.25,maxX-minX-1,false);}
       for(let index=0;index<space.points.length;index++){
         const point=space.points[index],center=space.points.reduce((sum,p)=>({x:sum.x+p.x/space.points.length,z:sum.z+p.z/space.points.length}),{x:0,z:0}),x=point.x*.82+center.x*.18,z=point.z*.82+center.z*.18;
-        if(this.clear({x,z},1.7))this.tree(x,z,seed++,space.district==='south-bay');
+        if(this.reserve({x,z,width:.7,depth:.7}))this.tree(x,z,seed++,space.district==='south-bay');
       }
     }
     // The original square retains its fountain and open cross paths.
@@ -181,30 +234,48 @@ export class CityDistrictsView {
   }
   private publicFurniture(){
     const art=this.art,metal=art.material(0x4e6465),wood=art.material(0xa48b69);let seed=0;
-    for(const street of CITY_STREETS){
-      if(street.kind==='alley'||street.kind==='service')continue;
-      const length=pathLength(street.points);
-      for(let distance=25;distance<length-8;distance+=47){
-        const point=samplePath(street.points,distance),offset=street.width/2+street.sidewalkWidth*.92,x=point.x-point.dz*offset,z=point.z+point.dx*offset,rotation=Math.atan2(-point.dz,point.dx);
-        if(!this.clear({x,z},1.3))continue;
-        art.instance('box',wood,x,.78,z,2.8,.14,.65,rotation);
-        art.instance('box',wood,x-point.dz*.23,.99,z+point.dx*.23,2.8,.42,.1,rotation);
-        for(const side of[-1,1])art.instance('box',metal,x+side*point.dx,.4,z+side*point.dz,.12,.72,.55,rotation);
-        art.instance('cylinder',metal,x+point.dx*2.8,.56,z+point.dz*2.8,.58,1,.58);
-        if(seed++%3===0){art.instance('box',metal,x-point.dx*2.6,.7,z-point.dz*2.6,.14,1.25,.14);art.sign('BUS  /  NEON COAST',x-point.dx*2.6,2,z-point.dz*2.6,2.3,.65,rotation,'#e8e4bf','#46656b');}
+    for(const bench of CITY_BENCH_PLACEMENTS){
+      const {x,z,rotation=0}=bench,tx=Math.cos(rotation),tz=-Math.sin(rotation),nx=Math.sin(rotation),nz=Math.cos(rotation);
+      // Narrow timber slats and separate steel supports remain inside the tested OBB.
+      for(const offset of[-.27,-.09,.09,.27])art.instance('box',wood,x+nx*offset,.77,z+nz*offset,2.8,.12,.12,rotation);
+      for(const y of[1,1.21])art.instance('box',wood,x+nx*.32,y,z+nz*.32,2.8,.14,.1,rotation);
+      for(const side of[-1,1]){
+        art.instance('box',metal,x+tx*side*1.05,.42,z+tz*side*1.05,.12,.72,.65,rotation);
+        art.instance('box',metal,x+tx*side*1.05,.98,z+tz*side*1.05,.1,.12,.6,rotation);
       }
+      const bin={x:x+tx*2.45,z:z+tz*2.45,width:.65,depth:.65};
+      if(this.reserve(bin)){
+        art.instance('cylinder',metal,bin.x,.55,bin.z,.57,.95,.57);
+        art.instance('cylinder',art.material(0x2c4144),bin.x,1.04,bin.z,.62,.09,.62);
+        for(let rib=0;rib<6;rib++){const angle=rib/6*Math.PI*2;art.instance('box',art.material(0x82928b),bin.x+Math.cos(angle)*.27,.55,bin.z+Math.sin(angle)*.27,.035,.8,.035);}
+      }
+      seed++;
     }
     // Containers occupy the loading yard edges, leaving a broad approach through its centre.
     for(const space of CITY_SPACES.filter(space=>space.kind==='loading')){
       const minX=Math.min(...space.points.map(p=>p.x)),maxX=Math.max(...space.points.map(p=>p.x)),maxZ=Math.max(...space.points.map(p=>p.z));
       for(let x=minX+3;x<maxX-2;x+=5.5){
-        const z=maxZ-3;art.box(4.4,2.35,5.3,art.material(seed++%2?0x8c9f99:0xac8266),x,1.4,z);
+        const z=maxZ-3;if(!this.reserve({x,z,width:4.4,depth:5.3}))continue;art.box(4.4,2.35,5.3,art.material(seed++%2?0x8c9f99:0xac8266),x,1.4,z);
         for(let rib=0;rib<7;rib++)art.instance('box',metal,x-1.9+rib*.62,1.4,z+2.68,.065,2.2,.08);
-        art.instance('box',wood,x,.19,z-4,1.5,.28,1.3);
+        if(this.reserve({x,z:z-4,width:1.5,depth:1.3}))art.instance('box',wood,x,.19,z-4,1.5,.28,1.3);
       }
     }
     for(const district of['financial','port','south-bay'] as const){const b=CITY_BUILDINGS.find(building=>building.district===district);if(!b)continue;const y=b.height+4;for(const side of[-1,1])art.instance('box',metal,b.x+side*3.7,y-2,b.z,.18,4,.18);art.box(10,3,.3,metal,b.x,y,b.z);art.sign(district==='port'?'NELSON FREIGHT':district==='financial'?'AETHER / TOMORROW':'WELCOME TO SOUTH BAY',b.x,y,b.z+.17,9.6,2.6,0,'#efe2bd',district==='port'?'#724f41':'#315866');}
   }
-  private clear(point:Point,radius:number){return !CITY_BUILDINGS.some(b=>Math.abs(point.x-b.x)<b.halfX+radius&&Math.abs(point.z-b.z)<b.halfZ+radius);}
+  private reserve(footprint:DecorationFootprint){
+    if(!canPlaceDecoration(footprint,{...CITY_PLACEMENT_CONTEXT,occupied:this.placed},{walkingPadding:.45}))return false;
+    this.placed.push(footprint);return true;
+  }
+  private landmarkSigns(){
+    for(const landmark of WORLD_LANDMARKS){
+      const road=nearestStreet(landmark.point);if(!road)continue;
+      let distance=0;for(let index=1;index<=road.segment;index++)distance+=Math.hypot(road.street.points[index].x-road.street.points[index-1].x,road.street.points[index].z-road.street.points[index-1].z);
+      const a=road.street.points[road.segment],b=road.street.points[road.segment+1];distance+=Math.hypot(b.x-a.x,b.z-a.z)*road.t;
+      const placement=findStreetDecoration(road.street,distance,8,.2,{occupied:this.placed});if(!placement)continue;
+      this.placed.push(placement);const {x,z,rotation=0}=placement;
+      for(const side of[-1,1])this.art.instance('cylinder',this.art.material(0x506a66),x+Math.cos(rotation)*side*2.8,1.55,z-Math.sin(rotation)*side*2.8,.12,3.1,.12);
+      this.art.sign(landmark.name.toUpperCase(),x,3.25,z,8,1,rotation,'#e8e5cf');
+    }
+  }
   destroy(){this.art.destroy();}
 }

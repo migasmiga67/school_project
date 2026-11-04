@@ -4,12 +4,13 @@ import type { Point } from './model';
 import type { SurfaceLibrary, SurfaceMaterial } from './surface-materials';
 
 type Primitive = 'box' | 'cylinder' | 'sphere' | 'plane';
-interface InstanceBatch {geometry:THREE.BufferGeometry;material:THREE.Material;matrices:THREE.Matrix4[]}
+interface InstanceBatch {geometry:THREE.BufferGeometry;material:THREE.Material;matrices:THREE.Matrix4[];sector:string;x:number;z:number}
 
 /** A small shared palette and local instance batches keep street detail inexpensive. */
 export class CityArt {
   readonly group=new THREE.Group();
   private readonly palette=new Map<string,SurfaceMaterial>();
+  private readonly solidMaterials=new Set<SurfaceMaterial>();
   private readonly batches=new Map<string,InstanceBatch>();
   private readonly primitiveGeometries=new Map<Primitive,THREE.BufferGeometry>();
   private readonly dummy=new THREE.Object3D();
@@ -26,12 +27,12 @@ export class CityArt {
   }
   material(color:number,emissive=0):SurfaceMaterial {
     const key=`${color}:${emissive}`;let material=this.palette.get(key);
-    if(!material){material=this.software?new THREE.MeshLambertMaterial({color,emissive,emissiveIntensity:.65}):new THREE.MeshStandardMaterial({color,roughness:.8,emissive,emissiveIntensity:.65});this.palette.set(key,material);}
+    if(!material){material=this.software?new THREE.MeshLambertMaterial({color,emissive,emissiveIntensity:.65}):new THREE.MeshStandardMaterial({color,roughness:.8,emissive,emissiveIntensity:.65});this.palette.set(key,material);if(emissive===0)this.solidMaterials.add(material);}
     return material;
   }
   tinted(surface:SurfaceMaterial,color:number):SurfaceMaterial {
     const key=`${surface.uuid}:${color}`;let material=this.palette.get(key);
-    if(!material){material=surface.clone();material.color.setHex(color);this.palette.set(key,material);}
+    if(!material){material=surface.clone();material.color.setHex(color);this.surfaces.registerVariant(material,surface);this.palette.set(key,material);}
     return material;
   }
   mesh(geometry:THREE.BufferGeometry,material:THREE.Material,x=0,y=0,z=0,parent:THREE.Object3D=this.group){
@@ -66,7 +67,7 @@ export class CityArt {
     if(!batch){
       let geometry=this.primitiveGeometries.get(kind);
       if(!geometry){geometry=kind==='box'?new THREE.BoxGeometry(1,1,1):kind==='plane'?new THREE.PlaneGeometry(1,1):kind==='cylinder'?new THREE.CylinderGeometry(.5,.5,1,this.software?6:8):new THREE.SphereGeometry(.5,this.software?6:8,this.software?4:6);this.primitiveGeometries.set(kind,geometry);}
-      batch={geometry,material,matrices:[]};this.batches.set(key,batch);
+      batch={geometry,material,matrices:[],sector,x:Math.floor(x/64)*64+32,z:Math.floor(z/64)*64+32};this.batches.set(key,batch);
     }
     this.dummy.position.set(x,y,z);this.dummy.rotation.set(0,rotation,0);this.dummy.scale.set(w,h,d);this.dummy.updateMatrix();batch.matrices.push(this.dummy.matrix.clone());
   }
@@ -85,16 +86,45 @@ export class CityArt {
     const sector=`${Math.floor(x/64)},${Math.floor(z/64)}`;let signs=this.signs.get(sector);if(!signs){signs=[];this.signs.set(sector,signs);}signs.push(geometry);
   }
   finish(){
+    const packedMaterials=new Map<string,SurfaceMaterial>();
+    const sectors=new Map<string,{x:number;z:number;material:SurfaceMaterial;geometries:THREE.BufferGeometry[]}>();
     for(const batch of this.batches.values()){
+      const material=batch.material;
+      // These colours are immutable street-detail paint, unlike weather-driven
+      // facade variants, glowing windows and lamps. Bake them into vertices so
+      // different colours and primitive kinds need only one draw per sector.
+      if((material instanceof THREE.MeshLambertMaterial||material instanceof THREE.MeshStandardMaterial)
+        &&this.solidMaterials.has(material)&&!material.transparent&&material.opacity===1
+        &&!material.map&&!material.alphaMap&&!material.emissiveMap&&!material.envMap
+        &&!material.lightMap&&!material.aoMap&&material.emissive.getHex()===0&&!material.vertexColors
+        &&(!(material instanceof THREE.MeshStandardMaterial)||!material.normalMap&&!material.roughnessMap&&!material.metalnessMap&&!material.bumpMap&&!material.displacementMap)){
+        const properties={...material.toJSON()} as Record<string,unknown>;
+        for(const property of['metadata','uuid','name','color'])delete properties[property];
+        const signature=JSON.stringify(properties);
+        let packedMaterial=packedMaterials.get(signature);
+        if(!packedMaterial){packedMaterial=material.clone();packedMaterial.color.setHex(0xffffff);packedMaterial.vertexColors=true;packedMaterials.set(signature,packedMaterial);}
+        const key=`${batch.sector}:${signature}`;
+        let sector=sectors.get(key);if(!sector){sector={x:batch.x,z:batch.z,material:packedMaterial,geometries:[]};sectors.set(key,sector);}
+        const source=batch.geometry.clone(),count=source.getAttribute('position').count,colors=new Float32Array(count*3);
+        for(let vertex=0;vertex<count;vertex++){colors[vertex*3]=material.color.r;colors[vertex*3+1]=material.color.g;colors[vertex*3+2]=material.color.b;}
+        source.setAttribute('color',new THREE.BufferAttribute(colors,3));
+        for(const matrix of batch.matrices){const geometry=source.clone();geometry.applyMatrix4(matrix);geometry.translate(-sector.x,0,-sector.z);sector.geometries.push(geometry);}
+        source.dispose();continue;
+      }
       const mesh=new THREE.InstancedMesh(batch.geometry,batch.material,batch.matrices.length);
       batch.matrices.forEach((matrix,i)=>mesh.setMatrixAt(i,matrix));mesh.receiveShadow=true;mesh.castShadow=!this.software;mesh.computeBoundingSphere();this.group.add(mesh);
+    }
+    for(const sector of sectors.values()){
+      const geometry=mergeGeometries(sector.geometries);
+      if(geometry){const mesh=new THREE.Mesh(geometry,sector.material);mesh.name='city-solid-detail-sector';mesh.position.set(sector.x,0,sector.z);mesh.receiveShadow=true;mesh.castShadow=!this.software;geometry.computeBoundingSphere();this.group.add(mesh);}
+      sector.geometries.forEach(geometry=>geometry.dispose());
     }
     for(const geometries of this.signs.values()){
       const geometry=mergeGeometries(geometries);if(geometry){const mesh=new THREE.Mesh(geometry,this.atlasMaterial);this.group.add(mesh);}geometries.forEach(item=>item.dispose());
     }
     this.atlasMap.needsUpdate=true;this.batches.clear();this.signs.clear();
   }
-  destroy(){this.atlasMap.dispose();this.group.traverse(object=>{if(object instanceof THREE.InstancedMesh)object.dispose();});}
+  destroy(){this.atlasMap.dispose();this.group.traverse(object=>{if(object instanceof THREE.InstancedMesh)object.dispose();});this.primitiveGeometries.forEach(geometry=>geometry.dispose());}
 }
 
 export function polygon(points:readonly Point[],height:number):THREE.BufferGeometry {

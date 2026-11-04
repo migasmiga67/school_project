@@ -54,9 +54,10 @@ it('keeps nearby pedestrian poses and colours when the software view changes dis
     const fullPeople=meshes(full),lightPeople=meshes(light);
     for(const [seconds,player]of[[0,{x:0,z:0}],[35,{x:-180,z:20}],[66,{x:80,z:-160}]]as const){
       full.update(seconds,player,false,.016);light.update(seconds,player,false,.016);
-      const nearby=Array.from({length:PEDESTRIAN_COUNT},(_,i)=>i).filter(i=>{const p=pedestrianPose(i,seconds);return(p.x-player.x)**2+(p.z-player.z)**2<=10000;});
+      const nearby=Array.from({length:PEDESTRIAN_COUNT},(_,i)=>i).filter(i=>{const p=pedestrianPose(i,seconds);return(p.x-player.x)**2+(p.z-player.z)**2<=10000;}).slice(0,24);
       expect(nearby.length).toBeGreaterThan(0);expect(nearby.length).toBeLessThan(PEDESTRIAN_COUNT);
       expect(light.snapshot.pedestrians).toBe(PEDESTRIAN_COUNT);
+      expect(light.snapshot.visibleIds).toEqual(nearby);
       for(let part=0;part<4;part++){
         const limbs=part<2?1:2;
         expect(lightPeople[part].count).toBe(nearby.length*limbs);

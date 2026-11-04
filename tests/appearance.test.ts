@@ -64,7 +64,7 @@ describe('independent 3D avatars',()=>{
  it('customizing one model never recolors another player, and limb animation is independent',()=>{
   const one=new AvatarView(true),two=new AvatarView(true);
   try{
-   const shirt=(avatar:AvatarView)=>{const torso=avatar.group.children.find(object=>object instanceof THREE.Mesh&&Math.abs(object.position.y-1.17)<.001)as THREE.Mesh<THREE.BoxGeometry,THREE.MeshLambertMaterial>;return torso.material.color.getHex();};
+   const shirt=(avatar:AvatarView)=>{const torso=avatar.group.getObjectByName('avatar-torso')as THREE.Mesh<THREE.BufferGeometry,THREE.MeshLambertMaterial>;return torso.material.color.getHex();};
    one.setAppearance(success(createAppearance(),500,{type:'buy',item:'shirt-coral'}).appearance);
    expect(shirt(one)).toBe(0xdf8e76);expect(shirt(two)).toBe(0xd1c6ae);
    one.update(true,.12);two.update(false,.12);expect(one.legs[0].rotation.x).not.toBe(0);expect(two.legs[0].rotation.x).toBe(0);
