@@ -6,7 +6,7 @@ Oryginalny, niewielki sandbox 3D w przeglądarce, inspirowany miejskimi grami ak
 
 ## Zawartość
 
-- Miasto z cyklem dnia i nocy, deszczem, neonami i przechodniami: 67 bloków zabudowy, parki, plaża, molo i powiększona zatoka. Obszar lądowy jest około 3,6 raza większy niż w pierwszej wersji.
+- Miasto z cyklem dnia i nocy, deszczem, neonami i przechodniami: 35 ulic, 81 budynków, parki, place, parkingi, plaża, molo i powiększona zatoka. Obszar lądowy jest około 3,6 raza większy niż w pierwszej wersji.
 - Cztery nowe dzielnice: zielone Westwood, biurowe North Financial, przemysłowy Port Nelson i nadmorska South Bay, połączone przejezdnymi alejami.
 - Dokładniejsze elewacje, witryny, dachy, tekstury asfaltu i chodników, zaokrąglone nadwozia i sylwetki postaci oraz woda z odbiciem nieba i pianą przy brzegu.
 - Auto sportowe i sedany, zaparkowane pojazdy i ruch uliczny; można wysiadać, chodzić, sprintować i przejmować auta.
@@ -72,9 +72,11 @@ Garaż solo zapisuje się razem z lokalnym profilem. W pokoju online masz osobny
 
 ## Żyjące miasto
 
-Pełna doba trwa **12 minut gry**. Zmieniają się oświetlenie, neony i pogoda; po chodnikach spaceruje **40 przechodniów**, a po ulicach porusza się **16 aut ruchu miejskiego**. Nowe dzielnice mają zabudowę, drzewa, oświetlenie i własne trasy ruchu. W pokoju online gracze korzystają ze wspólnego czasu miasta.
+Pełna doba trwa **12 minut gry**. Zmieniają się oświetlenie, neony i pogoda; po chodnikach spaceruje **64 przechodniów**, a po ulicach porusza się **16 aut ruchu miejskiego**. Nowe dzielnice mają zabudowę, drzewa, oświetlenie i własne trasy ruchu. W pokoju online gracze korzystają ze wspólnego czasu miasta.
 
-Minimapa podąża za graczem i pokazuje najbliższą okolicę; mapa w telefonie obejmuje całe miasto oraz zatokę. Wybierz jedną z czterech nowych dzielnic, aby GPS wyznaczył trasę ulicami. Dawne miejsca, wnętrza i cele zleceń pozostają dostępne.
+Ulice mają różne szerokości, zakręty, skrzyżowania T, zaułki i ślepe zakończenia. Westwood ma zielone bulwary i niską zabudowę, North Financial biurowce i place, Port Nelson magazyny i place załadunkowe, a South Bay hotele i promenadę. Parkingi i alejki uzupełniają układ dzielnic.
+
+Minimapa podąża za graczem i pokazuje najbliższą okolicę; mapa w telefonie obejmuje całe miasto oraz zatokę. Drogi w świecie 3D, na obu mapach, w GPS i w ruchu miejskim korzystają ze wspólnego układu ulic. Wybierz jedną z czterech nowych dzielnic, aby GPS wyznaczył trasę przez rzeczywiste skrzyżowania i zakręty. Dawne miejsca, wnętrza i cele zleceń pozostają dostępne.
 
 Powierzchnie korzystają ze wspólnych tekstur generowanych lokalnie. Akceleracja sprzętowa dodaje mapy normalnych i chropowatości oraz cienie; renderer programowy używa lżejszych materiałów, uproszczonych odległych aut i krótszego zasięgu widzenia. Geometria i okna są grupowane w lokalne sektory, aby kamera nie musiała rysować całej rozbudowanej mapy naraz.
 
@@ -84,7 +86,11 @@ Co **120 sekund** pojawia się wydarzenie dostępne przez **40 sekund**: zgubion
 
 W sali są osobne stanowiska: **blackjack po lewej**, **ruletka po prawej**, **turniej przy lewej ścianie w głębi** i dotychczasowy stół pokerowy pośrodku. Podejdź i naciśnij **E** albo **K** przy dodatkowym stanowisku. Niewielki panel pozostawia widoczne wnętrze 3D.
 
-Blackjack i ruletka przyjmują **$10–$500**, co $10, z wirtualnego portfela. Blackjack obsługuje dobieranie, pozostanie i podwojenie; as może liczyć 1 lub 11, krupier stoi na 17, naturalny blackjack płaci 3:2. Zamknięcie panelu pozwala później dokończyć rozdanie; wyjście z kasyna albo odświeżenie strony oznacza utratę postawionego zakładu. Ruletka ma europejskie zero i zakłady czerwone/czarne, parzyste/nieparzyste albo konkretną liczbę. Wypłaty zawierają zwrot stawki: 2× dla prostych zakładów, 36× dla liczby; zero przegrywa zakłady proste.
+Blackjack i ruletka przyjmują **$10–$500**, co $10, z wirtualnego portfela. Blackjack obsługuje dobieranie, pozostanie i podwojenie; as może liczyć 1 lub 11, krupier stoi na 17, naturalny blackjack płaci 3:2. Zamknięcie panelu pozwala później dokończyć rozdanie blackjacka; wyjście z kasyna albo odświeżenie strony oznacza utratę jego postawionego zakładu.
+
+Ruletka europejska ma **37 kieszeni (0–36)**. Koło i kulka obracają się przez **7,2 sekundy**: rozpędzają się, zwalniają, a kulka wpada do kieszeni i zatrzymuje się przy zwycięskiej liczbie. Stawka jest pobierana przy starcie; zaakceptowany zakład i ponowne uruchomienie pozostają zablokowane do końca obrotu. Dopiero wtedy pojawiają się wynik, wpis historii i ewentualna wypłata zgodna z położeniem kulki. Zakłady obejmują czerwone/czarne, parzyste/nieparzyste i konkretną liczbę. Wypłaty zawierają zwrot stawki: 2× dla prostych zakładów, 36× dla liczby; zero przegrywa zakłady proste.
+
+Zamknięcie panelu ruletki nie przerywa obrotu; po ponownym otwarciu widać jego dalszy przebieg. W trybie solo obrót zapisuje się również przy odświeżeniu strony. Czas poza stroną jest uwzględniany, a zakończony obrót rozlicza się po powrocie dokładnie raz. W pokoju online wynik i wypłatę rozlicza gospodarz.
 
 Turniej wymaga **2–4 graczy online** przy stanowisku. Gospodarz otwiera zapisy; każdy osobno płaci **$250** i otrzymuje **1000 żetonów turniejowych**. Gospodarz rozpoczyna grę, ciemne rosną co trzy rozdania, a zwycięzca otrzymuje wspólną pulę. Po 24 rozdaniach wygrywa lider liczby żetonów, przy remisie pula jest dzielona. Nie ma ponownych wpisowych w trwającym turnieju. Wycofanie przed startem zwraca wpisowe; po starcie oznacza rezygnację z rywalizacji. Zamknięcie panelu podczas gry pozostawia postać przy stole; **K** przywraca panel. Na decyzję jest 30 sekund. Turniej ma osobny stan i żetony od zwykłego stołu.
 
@@ -205,7 +211,9 @@ npm run build
 npm run test:e2e
 ```
 
-W środowisku chmurowym można użyć `npm ci --cache /workspace/.npm-cache`. `src/game.ts` zawiera logikę i fizykę, `src/world.ts` scenę Three.js, a `src/main.ts` interfejs i wejście. `src/garage.ts` rozlicza zakupy i tuning, `src/city-life.ts` czas, pogodę i wydarzenia, a `src/online-jobs.ts` napad i wyścigi. `src/casino-view.ts` buduje kasyno; `src/poker.ts` odpowiada za zasady i boty, a `src/poker-ui.ts` za interfejs stołu. `src/room-authority.ts` prowadzi pokój, portfele, przejazdy i wspólny stół; `src/multiplayer-client.ts` obsługuje połączenia WebRTC.
+W środowisku chmurowym można użyć `npm ci --cache /workspace/.npm-cache`. `src/game.ts` zawiera logikę i fizykę, `src/world.ts` scenę Three.js, a `src/main.ts` interfejs i wejście. `src/city-map.ts` definiuje wspólne ulice, skrzyżowania, zabudowę i trasy; `src/city-streets.ts` rysuje jezdnie i chodniki, `src/city-districts.ts` zabudowę i miejsca dzielnic, a `src/city-art.ts` materiały i detale. `src/garage.ts` rozlicza zakupy i tuning, `src/city-life.ts` czas, pogodę i wydarzenia, a `src/online-jobs.ts` napad i wyścigi.
+
+`src/casino-view.ts` buduje kasyno; `src/roulette-motion.ts` definiuje wspólny przebieg obrotu i położenie zwycięskiej kieszeni, a `src/roulette-view.ts` animuje koło i kulkę w panelu. `src/casino-games.ts` rozlicza zakłady i zapis ruletki solo. `src/poker.ts` odpowiada za zasady i boty, a `src/poker-ui.ts` za interfejs stołu. `src/room-authority.ts` prowadzi pokój, portfele, przejazdy i wspólny stół; `src/multiplayer-client.ts` obsługuje połączenia WebRTC.
 
 Testy Playwright wymagają Chromium. Obsługiwany jest `CHROMIUM_PATH`, lokalne `/usr/bin/chromium` lub oficjalny browser z `npx playwright install chromium`. Domyślnie testowany jest **gotowy `dist` pod `/school_project/` na porcie 5185**. `NEON_BASE_URL` pozwala wskazać inny serwer. Grafika i audio powstają programowo; tryb solo nie wymaga zewnętrznych zasobów. Ślady awarii zachowują działania, DOM, sieć i źródła; ciągły zapis obrazu jest wyłączony, aby nie obciążać programowego WebGL. Jawne zrzuty i końcowe zrzuty awarii pozostają dostępne.
 

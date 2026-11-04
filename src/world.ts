@@ -3,12 +3,12 @@ import type { CameraPose } from './camera-controls';
 import { CasinoView } from './casino-view';
 import type { Point } from './model';
 import type { PokerState } from './poker-model';
+import type { RouletteSnapshot } from './casino-games';
 import type { OnlineMember } from './multiplayer-model';
 import { RemotePlayersView } from './remote-players';
 import { CityLife, getCityEnvironment } from './city-life';
 import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
-import { BUILDINGS, ROAD_X, ROAD_Z, WORLD_BOUNDS, NATURAL_BLOCKS, type GameState, type Vehicle } from './model';
-import { WORLD_LANDMARKS } from './world-layout';
+import { WORLD_BOUNDS, type GameState, type Vehicle } from './model';
 import { RoundedBoxGeometry } from 'three/addons/geometries/RoundedBoxGeometry.js';
 import { SurfaceLibrary, createWaterMaterial } from './surface-materials';
 import { AtmosphereView } from './atmosphere';
@@ -18,6 +18,8 @@ import { AvatarView } from './avatar-view';
 import type { AppearanceState } from './appearance';
 import { MobilityView } from './mobility-view';
 import { VehicleLodLibrary, type DistantCarVisual } from './vehicle-lod';
+import { CityStreetsView } from './city-streets';
+import { CityDistrictsView } from './city-districts';
 
 type LitMaterial = THREE.MeshStandardMaterial | THREE.MeshLambertMaterial;
 
@@ -53,7 +55,8 @@ export class CityView {
   private readonly surfaces:SurfaceLibrary;
   private readonly atmosphere:AtmosphereView;
   private readonly distantCars:VehicleLodLibrary|null;
-  private readonly palms: THREE.Group[] = [];
+  private streets!:CityStreetsView;
+  private districts!:CityDistrictsView;
   private readonly marker = new THREE.Group();
   private readonly markerRing: THREE.Mesh;
   private readonly markerArrow: THREE.Group;
@@ -258,151 +261,19 @@ export class CityView {
     const halo = this.solarHalo=new THREE.Sprite(new THREE.SpriteMaterial({ map: this.glowTexture, color: 0xffc995, transparent: true, opacity: 0.3, depthWrite: false, fog: false })); halo.position.copy(sun.position); halo.scale.set(140, 140, 1); this.scene.add(halo);
   }
   private ground() {
-    const sidewalk=this.surfaces.pavers,road=this.surfaces.asphalt,line=this.material(0xc9b48b),curb=this.surfaces.concrete;
-    // Distant terrain grounds the background skyline beyond the playable city.
-    // Its eastern edge meets the sea without changing movement bounds/colliders.
-    this.box(915,.55,1600,this.surfaces.grass,this.scene,-342.5,-.8,0);
-    const width=WORLD_BOUNDS.maxX-WORLD_BOUNDS.minX+16,depth=WORLD_BOUNDS.maxZ-WORLD_BOUNDS.minZ+16;
-    const centerX=(WORLD_BOUNDS.minX+WORLD_BOUNDS.maxX)/2,centerZ=(WORLD_BOUNDS.minZ+WORLD_BOUNDS.maxZ)/2;
-    this.box(width,.4,depth,this.material(0x89917a),this.scene,centerX,-.28,centerZ);
-    const yellowMarks:THREE.Matrix4[]=[],whiteMarks:THREE.Matrix4[]=[],dummy=new THREE.Object3D();
-    const mark=(list:THREE.Matrix4[],w:number,d:number,x:number,z:number)=>{dummy.position.set(x,.047,z);dummy.rotation.set(0,0,0);dummy.scale.set(w,.018,d);dummy.updateMatrix();list.push(dummy.matrix.clone());};
-    for(const x of ROAD_X){
-      this.box(12,.08,depth,road,this.scene,x,-.015,centerZ);
-      for(const side of[-1,1])this.box(.15,.018,depth,line,this.scene,x+side*5.3,.04,centerZ);
-      for(let z=WORLD_BOUNDS.minZ;z<WORLD_BOUNDS.maxZ;z+=7){if(ROAD_Z.some(cross=>Math.abs(cross-z)<9))continue;for(const side of[-1,1])mark(yellowMarks,.12,3.1,x+side*.18,z);}
-    }
-    for(const z of ROAD_Z){
-      this.box(width,.08,12,road,this.scene,centerX,-.012,z);
-      for(const side of[-1,1])this.box(width,.018,.15,line,this.scene,centerX,.04,z+side*5.3);
-      for(let x=WORLD_BOUNDS.minX;x<WORLD_BOUNDS.maxX;x+=7){if(ROAD_X.some(cross=>Math.abs(cross-x)<9))continue;for(const side of[-1,1])mark(yellowMarks,3.1,.12,x,z+side*.18);}
-    }
-    for(const x of ROAD_X)for(const z of ROAD_Z)for(let i=-4;i<=4;i+=1.5){mark(whiteMarks,.8,2,x+i,z+8);mark(whiteMarks,2,.8,x+8,z+i);}
-    for(const[list,material]of[[yellowMarks,line],[whiteMarks,this.material(0xd5d2c4)]]as const){const instances=new THREE.InstancedMesh(new THREE.BoxGeometry(1,1,1),material,list.length);list.forEach((matrix,index)=>instances.setMatrixAt(index,matrix));instances.receiveShadow=true;instances.computeBoundingSphere();this.scene.add(instances);}
-    for(const x of ROAD_X.slice(0,-1))for(const z of ROAD_Z.slice(0,-1)){
-      this.box(28,.22,28,sidewalk,this.scene,x+20,.015,z+20);
-      for(const side of[-1,1]){this.box(28,.18,.28,curb,this.scene,x+20,.07,z+20+side*14);this.box(.28,.18,28,curb,this.scene,x+20+side*14,.07,z+20);}
-    }
-    this.box(6,.22,depth,sidewalk,this.scene,90,0,centerZ);
-    this.box(7,.18,depth,curb,this.scene,WORLD_BOUNDS.minX+5,0,centerZ);
+    this.streets=new CityStreetsView(this.softwareRendering,this.surfaces);
+    this.scene.add(this.streets.group);
   }
-
   private city() {
-    const trim=this.surfaces.concrete,glass=this.surfaces.windowGlass,roof=this.surfaces.roof;
-    const windowGeo=this.softwareRendering?new THREE.PlaneGeometry(1.55,1.95):new THREE.BoxGeometry(1.55,1.95,.085);
-    const windowSectors=new Map<string,{windows:THREE.Matrix4[];litWindows:THREE.Matrix4[];frames:THREE.Matrix4[]}>();
-    const windowFrame=this.material(0x4a5051,{metalness:.35,roughness:.55});
-    const litGlass=this.surfaces.litWindow;
-    const dummy=new THREE.Object3D(),baseHeights=[17,30,12,36,22,14,29,18,40,16,25,12,33,21,19];
-    const doorMaterial=this.material(0x3d4c51,{metalness:.6,roughness:.26});
-    BUILDINGS.forEach((b,i)=>{
-      const sectorKey=`${Math.floor(b.x/80)},${Math.floor(b.z/80)}`;
-      let sector=windowSectors.get(sectorKey);
-      if(!sector){sector={windows:[],litWindows:[],frames:[]};windowSectors.set(sectorKey,sector);}
-      const{windows,litWindows,frames}=sector;
-      const western=b.x<-100,northern=b.z<-100,port=b.z>100;
-      const height=i<15?baseHeights[i%15]:western?7+(i%4)*2.2:port?8+(i%3)*3.4:northern?28+(i%5)*6:16+(i%4)*4;
-      const width=western?20:21+(i%3),depth=port?23:21+((i+1)%3);
-      const surface=western?this.surfaces.brick:port?this.surfaces.sandstone:northern?this.surfaces.office:this.surfaces.facades[i%this.surfaces.facades.length];
-      const building=this.mesh(new RoundedBoxGeometry(width,height,depth,1,.22),surface,this.scene,b.x,height/2+.18,b.z);this.occluders.push(building);
-      this.box(width+.35,.38,depth+.35,trim,this.scene,b.x,height+.36,b.z);
-      this.box(width-.45,.12,depth-.45,roof,this.scene,b.x,height+.61,b.z);
-      this.box(width+.12,.35,depth+.12,trim,this.scene,b.x,3.6,b.z);
-      // Real rooftop services and recessed shop fronts sit inside each collider.
-      this.box(western?2.4:5,western?.7:1.5,3,roof,this.scene,b.x+3,height+1.15,b.z-3);
-      const vent=this.mesh(new THREE.CylinderGeometry(.58,.58,.65,12),windowFrame,this.scene,b.x-4,height+.95,b.z+3);vent.rotation.y=i*.4;
-      this.box(2.7,2.8,.12,doorMaterial,this.scene,b.x,1.65,b.z+depth/2+.065);
-      this.box(.09,2.6,.14,trim,this.scene,b.x,1.65,b.z+depth/2+.14);
-      for(const side of[-1,1])this.box(5.2,2.2,.1,glass,this.scene,b.x+side*5.8,1.8,b.z+depth/2+.07);
-      this.box(15,.16,1.2,roof,this.scene,b.x,3.1,b.z+depth/2);
-      const step=western?4.6:3.8;
-      for(let y=5.4;surface!==this.surfaces.office&&y<height-1.3;y+=3.65)for(let offset=-7.6;offset<=7.6;offset+=step)for(const side of[0,1,2,3]){
-        dummy.position.set(side===1?b.x+width/2+.05:side===3?b.x-width/2-.05:b.x+offset,y,side===0?b.z+depth/2+.05:side===2?b.z-depth/2-.05:b.z+offset);
-        dummy.rotation.set(0,this.softwareRendering?side*Math.PI/2:side%2?Math.PI/2:0,0);dummy.scale.set(1,1,1);
-        // Single-sided glass faces outward and sits just ahead of its larger frame.
-        if(this.softwareRendering)dummy.translateZ(.015);
-        dummy.updateMatrix();
-        ((Math.round(y)+side+Math.round(offset)+i)%6===0?litWindows:windows).push(dummy.matrix.clone());
-        if(this.softwareRendering)dummy.translateZ(-.015);
-        dummy.scale.set(1.15,1.13,.65);dummy.updateMatrix();frames.push(dummy.matrix.clone());
-      }
-      if(i<15&&i%3===1)this.box(.28,height,depth+.08,trim,this.scene,b.x-width/2+2,height/2+.18,b.z);
-      if(port){
-        this.box(8,3.3,.15,roof,this.scene,b.x,1.85,b.z-depth/2-.06);
-        for(let stripe=0;stripe<5;stripe++)this.box(7.6,.055,.16,trim,this.scene,b.x,.6+stripe*.58,b.z-depth/2-.09);
-      }
-      const names=western?['WESTWOOD MARKET','HILL GARAGE','COAST HOMES']:port?['DOCK STORAGE','SOUTH PORT','HARBOR WORKS']:northern?['AETHER FINANCE','NORTH PLAZA','CITY OFFICES']:['PALM HOTEL','AZURE','NOVA','SEABREEZE','SUNDOWN','COASTAL','MARINA'];
-      if(i<15?i%2===0:i%5===0)this.sign(names[i%names.length],western?'#d4c2a0':port?'#d4b386':'#bed7d8',b.x,4.7,b.z+depth/2+.15,10,1.1);
-    });
-    // Thin window surrounds are instanced just like the glazing itself.
-    for(const{windows,litWindows,frames}of windowSectors.values())for(const[list,material]of[[frames,windowFrame],[windows,glass],[litWindows,litGlass]]as const){if(!list.length)continue;const mesh=new THREE.InstancedMesh(windowGeo,material,list.length);list.forEach((matrix,index)=>mesh.setMatrixAt(index,matrix));mesh.receiveShadow=true;mesh.computeBoundingSphere();this.scene.add(mesh);}
-    for(let z=-200;z<=200;z+=28)this.palm(90,z,8.2+(Math.abs(z)%3),z*.02);
-    for(const z of[-188,-148,-108,-68,-28,12,52,92,132,172])for(const x of[-208,-168,-128,-88,-48,-8,32,72]){
-      if(x<-110)this.tree(x,z,5.5+Math.abs(z%3));else if(z<100)this.palm(x,z,8.4,x*.04);
-    }
-    for(const x of ROAD_X.slice(0,-1).map(value=>value+7))for(const z of ROAD_Z.filter((_,i)=>i%2===0).map(value=>value+8))this.lamp(x,z);
-    this.park();this.districtDetails();
-  }
-
-  private tree(x:number,z:number,height:number){
-    const trunk=this.surfaces.bark,leaves=this.material(0x4d6552,{roughness:.95});
-    this.mesh(new THREE.CylinderGeometry(.12,.3,height*.64,9),trunk,this.scene,x,height*.32,z);
-    const canopy=this.mesh(new THREE.SphereGeometry(height*.32,10,7),leaves,this.scene,x,height*.8,z);canopy.scale.set(1,.8,.9);
-  }
-  private districtDetails(){
-    const paving=this.surfaces.pavers,metal=this.material(0x667273,{metalness:.55,roughness:.5}),wood=this.material(0x82705b),dark=this.material(0x313f45);
-    for(const block of NATURAL_BLOCKS){if(block.x===-20&&block.z===-20)continue;this.box(27,.09,27,this.surfaces.grass,this.scene,block.x,.17,block.z);this.box(3,.025,27,paving,this.scene,block.x,.23,block.z);for(let i=0;i<9;i++){const x=block.x-10+(i%3)*9,z=block.z-10+Math.floor(i/3)*9;if(Math.abs(x-block.x)>2)this.tree(x,z,7+(i%3));}}
-    // Street furniture stays on pavement and does not obstruct the road graph.
-    for(const x of[-194,-114,-34,46])for(const z of[-154,-74,6,86,166]){
-      this.box(3.2,.16,.7,wood,this.scene,x,.82,z);for(const side of[-1,1])this.box(.12,.74,.65,metal,this.scene,x+side*1.2,.42,z);
-      this.mesh(new THREE.CylinderGeometry(.38,.42,1.05,12),dark,this.scene,x+4,.55,z);
-    }
-    const containers=[this.material(0x70888b),this.material(0x9b6d56),this.material(0x928a6c)];
-    for(let i=0;i<9;i++){
-      const x=-211,z=128+i*7;
-      this.box(4.7,2.7,5.8,containers[i%3],this.scene,x,1.55,z);
-      for(let rib=0;rib<6;rib++)this.box(.07,2.55,.08,metal,this.scene,x-2+rib*.78,1.55,z+2.94);
-    }
-    for(const landmark of WORLD_LANDMARKS)this.sign(landmark.name.toUpperCase(),'#d9ddc5',landmark.point.x+7,3.8,landmark.point.z-6,12,1.6);
+    this.districts=new CityDistrictsView(this.softwareRendering,this.surfaces);
+    this.scene.add(this.districts.group);
+    this.occluders.push(...this.districts.occluders);
   }
   private sign(text: string, color: string, x: number, y: number, z: number, width: number, height: number) {
     const canvas = document.createElement('canvas'); canvas.width = 512; canvas.height = 96;
     const c = canvas.getContext('2d')!; c.fillStyle = '#263b49'; c.fillRect(0, 0, 512, 96); c.strokeStyle = color; c.lineWidth = 4; c.strokeRect(5, 5, 502, 86); c.font = 'bold 50px monospace'; c.textAlign = 'center'; c.textBaseline = 'middle'; c.fillStyle = color; c.fillText(text, 256, 49);
     const map = new THREE.CanvasTexture(canvas); map.colorSpace = THREE.SRGBColorSpace;
     this.mesh(new THREE.PlaneGeometry(width, height), new THREE.MeshStandardMaterial({ map, emissiveMap: map, emissive: 0xffffff, emissiveIntensity: 0.3, roughness: 0.7 }), this.scene, x, y, z);
-  }
-  private palm(x: number, z: number, height: number, angle: number) {
-    const tree = new THREE.Group(); tree.position.set(x, 0.1, z); tree.rotation.y = angle; this.scene.add(tree);
-    const trunk = this.mesh(new THREE.CylinderGeometry(0.2, 0.42, height, 9), this.surfaces.bark, tree, 0, height / 2, 0); trunk.rotation.z = 0.08;
-    const geometry = new THREE.BufferGeometry(); const vertices: number[] = [];
-    for (let i = 0; i < 7; i++) {
-      const a = i / 7 * Math.PI * 2; const dx = Math.cos(a), dz = Math.sin(a), px = -dz, pz = dx;
-      const start = [-height * 0.04, height, 0]; const mid = [start[0] + dx * 2.2, height + 0.35, dz * 2.2]; const tip = [start[0] + dx * 4.8, height - 1.45, dz * 4.8];
-      vertices.push(...start, mid[0] + px * 0.75, mid[1], mid[2] + pz * 0.75, ...tip);
-      vertices.push(...start, ...tip, mid[0] - px * 0.75, mid[1], mid[2] - pz * 0.75);
-    }
-    geometry.setAttribute('position', new THREE.Float32BufferAttribute(vertices, 3)); geometry.computeVertexNormals();
-    this.mesh(geometry, this.material(0x487764, { side: THREE.DoubleSide, flatShading: true }), tree);
-    this.palms.push(tree);
-  }
-  private lamp(x: number, z: number) {
-    const metal = this.material(0x5a666c); this.box(0.18, 6.8, 0.18, metal, this.scene, x, 3.4, z);
-    this.box(1.4, 0.15, 0.18, metal, this.scene, x + 0.6, 6.7, z);
-    this.box(0.9, 0.12, 0.5, this.material(0xffe3ac, { emissive: 0xffcc85, emissiveIntensity: 0.7 }), this.scene, x + 1.2, 6.6, z);
-  }
-  private park() {
-    this.box(25, 0.1, 25, this.surfaces.grass, this.scene, -20, 0.21, -20);
-    this.box(25, 0.05, 3, this.material(0xcfbba1), this.scene, -20, 0.29, -20);
-    this.box(3, 0.05, 25, this.material(0xcfbba1), this.scene, -20, 0.3, -20);
-    const fountain = new THREE.Mesh(new THREE.CylinderGeometry(3.8, 4.1, 0.7, 20), this.material(0xcac8b6)); fountain.position.set(-20, 0.65, -20); fountain.receiveShadow = true; this.scene.add(fountain);
-    this.mesh(new THREE.CylinderGeometry(3.4, 3.4, 0.12, 20), this.material(0x78bdbd, { roughness: 0.22 }), this.scene, -20, 1.05, -20);
-    this.mesh(new THREE.CylinderGeometry(0.2, 0.6, 1.7, 8), this.material(0xc8dbd2), this.scene, -20, 1.6, -20);
-    for (const x of [-28, -12]) for (const z of [-28, -12]) this.palm(x, z, 7, x);
-    for (const z of [-26, -14]) {
-      this.box(4, 0.2, 0.8, this.material(0x866851), this.scene, -20, 0.9, z);
-      this.box(0.15, 0.7, 0.7, this.material(0x5a666c), this.scene, -21.6, 0.55, z);
-      this.box(0.15, 0.7, 0.7, this.material(0x5a666c), this.scene, -18.4, 0.55, z);
-    }
   }
   private beach() {
     const length=WORLD_BOUNDS.maxZ-WORLD_BOUNDS.minZ+32;
@@ -542,6 +413,7 @@ export class CityView {
     this.seated = seated;
     this.casino.updatePoker(state, seated);
   }
+  setRoulette(state:RouletteSnapshot){this.casino.setRoulette(state);}
   update(state: GameState, dt: number, cameraMode: number, pose?: CameraPose, navigation?: Point, crewTarget=false, citySeconds=state.time) {
     if(this.homeGroup){this.updateHome(state,dt,cameraMode,pose);return;}
     const inside = state.interior === 'casino';
@@ -609,7 +481,6 @@ export class CityView {
     }
     const waypoint = inside ? null : navigation ?? (state.mission.active ? state.mission.waypoint : null); this.marker.visible = Boolean(waypoint); if (waypoint) { this.marker.position.set(waypoint.x, 0, waypoint.z); this.markerArrow.position.y = Math.sin(state.time * 2.5) * 0.4; this.markerArrow.rotation.y = state.time * 0.7; this.markerRing.rotation.z = state.time * 0.25; }
     this.waterMaterial.uniforms.uTime.value = citySeconds;
-    this.palms.forEach((palm, index) => { palm.rotation.z = Math.sin(state.time * 0.6 + index) * 0.009; });
     const heading = pose?.yaw ?? p.heading;
     const forward = new THREE.Vector3(Math.sin(heading), 0, -Math.cos(heading));
     const zoom = pose?.zoom ?? 1;
@@ -672,5 +543,5 @@ export class CityView {
     this.camera.lookAt(lookAt);this.renderer.render(this.homeScene,this.camera);this.renderFrames++;
   }
   resize() { const width = Math.max(1, this.parent.clientWidth), height = Math.max(1, this.parent.clientHeight); this.camera.aspect = width / height; this.camera.updateProjectionMatrix(); this.renderer.setSize(width, height, false); }
-  destroy() { this.observer.disconnect(); this.living.destroy(); this.remote.destroy(); this.casino.destroy();this.atmosphere.destroy(); this.scene.traverse(object => { if (object instanceof THREE.Mesh) { object.geometry.dispose(); for (const material of Array.isArray(object.material) ? object.material : [object.material]) material.dispose(); } });this.occluders.forEach(object=>object.geometry.dispose());this.surfaces.destroy();this.distantCars?.destroy(); if(this.cityBackground instanceof THREE.Texture)this.cityBackground.dispose();this.glowTexture.dispose(); this.smokeTexture.dispose(); this.renderer.dispose(); this.renderer.domElement.remove(); }
+  destroy() { this.observer.disconnect(); this.streets.destroy();this.districts.destroy();this.living.destroy(); this.remote.destroy(); this.casino.destroy();this.atmosphere.destroy(); this.scene.traverse(object => { if (object instanceof THREE.Mesh) { object.geometry.dispose(); for (const material of Array.isArray(object.material) ? object.material : [object.material]) material.dispose(); } });this.occluders.forEach(object=>object.geometry.dispose());this.surfaces.destroy();this.distantCars?.destroy(); if(this.cityBackground instanceof THREE.Texture)this.cityBackground.dispose();this.glowTexture.dispose(); this.smokeTexture.dispose(); this.renderer.dispose(); this.renderer.domElement.remove(); }
 }

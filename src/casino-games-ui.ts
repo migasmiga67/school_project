@@ -1,10 +1,11 @@
 import './casino-games.css';
 import type { CasinoGameAction, CasinoGamesSnapshot, RouletteChoice } from './casino-games';
-import { blackjackValue, ROULETTE_RED } from './casino-games';
+import { blackjackValue } from './casino-games';
 import type { CasinoStation } from './casino-games-location';
 import { legalActions } from './poker';
 import type { Card, PokerAction } from './poker-model';
 import type { TournamentAction, TournamentSnapshot } from './poker-tournament';
+import { RouletteView, rouletteColor, rouletteColorName } from './roulette-view';
 
 export interface CasinoGamesCallbacks {
  getState():CasinoGamesSnapshot;getWallet():number;onAction(action:CasinoGameAction):void;
@@ -29,6 +30,8 @@ export class CasinoGamesUI {
  private raise=20;
  private previousFocus:HTMLElement|null=null;
  private notice='';
+ private noticeVersion=0;
+ private readonly rouletteView=new RouletteView();
  constructor(private parent:HTMLElement,private callbacks:CasinoGamesCallbacks){}
  get active(){return this.root!==null;}
  get activeStation(){return this.active?this.station:null;}
@@ -48,26 +51,33 @@ export class CasinoGamesUI {
   });
   this.parent.append(this.root);this.callbacks.onOpen();this.refresh(true);this.root.querySelector<HTMLButtonElement>('#casino-games-close')?.focus();
  }
- close(){if(!this.root)return;this.root.remove();this.root=null;this.callbacks.onClose();if(this.previousFocus?.isConnected)this.previousFocus.focus({preventScroll:true});this.previousFocus=null;}
+ close(){if(!this.root)return;this.rouletteView.detach();this.root.remove();this.root=null;this.callbacks.onClose();if(this.previousFocus?.isConnected)this.previousFocus.focus({preventScroll:true});this.previousFocus=null;}
  handleEscape(){this.close();}
- report(message:string){this.notice=message;this.refresh();}
+ report(message:string){this.notice=message;this.noticeVersion=this.callbacks.getState().version;this.refresh();}
  refresh(force=false){
   if(!this.root)return;
   const state=this.callbacks.getState(),tournament=this.callbacks.getTournament(),wallet=this.callbacks.getWallet();
-  const signature=JSON.stringify([this.station,state,tournament,wallet,this.callbacks.isOnline(),this.callbacks.isHost(),this.notice]);
+  if(this.noticeVersion!==state.version)this.notice='';
+  if(this.station==='roulette')this.rouletteView.update(state.roulette);
+  // Motion updates the retained wheel above. Its clock must not replace focused
+  // inputs and buttons on every frame while a wager is running.
+  const panelState={...state,roulette:{...state.roulette,elapsedMs:0}};
+  const signature=JSON.stringify([this.station,panelState,tournament,wallet,this.callbacks.isOnline(),this.callbacks.isHost(),this.notice]);
   if(!force&&signature===this.signature)return;
   this.signature=signature;
   const focus=document.activeElement instanceof HTMLElement&&this.root.contains(document.activeElement)?document.activeElement.id:'';
   const scroll=this.root.querySelector('.casino-games-panel')?.scrollTop??0;
   const currentMessage=this.station==='blackjack'?state.blackjack.message:this.station==='roulette'?state.roulette.message:tournament?.message;
   const notice=this.notice&&this.notice!==currentMessage?this.notice:'';
-  this.root.innerHTML=`<section class="casino-games-panel"><header><div><span class="casino-games-eyebrow">SAPPHIRE CLUB · WIRTUALNE ŻETONY</span><h2 id="casino-games-title">${stationNames[this.station]}</h2></div><button id="casino-games-close" aria-label="Odejdź od stanowiska">×</button></header><div class="casino-games-wallet">${this.callbacks.isOnline()?'Portfel pokoju':'Twoja gotówka'} <strong>${cash(wallet)}</strong></div>${this.station==='blackjack'?this.blackjack(state):this.station==='roulette'?this.roulette(state):this.tournament(tournament)}${notice?`<p class="casino-games-notice" role="status">${safe(notice)}</p>`:''}<footer>Wyłącznie gotówka z gry. Bez wpłat i wypłat prawdziwych pieniędzy.</footer></section>`;
+  this.root.innerHTML=`<section class="casino-games-panel ${this.station==='roulette'?'casino-roulette-panel':''}"><header><div><span class="casino-games-eyebrow">SAPPHIRE CLUB · WIRTUALNE ŻETONY</span><h2 id="casino-games-title">${stationNames[this.station]}</h2></div><button id="casino-games-close" aria-label="Odejdź od stanowiska">×</button></header><div class="casino-games-wallet">${this.callbacks.isOnline()?'Portfel pokoju':'Twoja gotówka'} <strong>${cash(wallet)}</strong></div>${this.station==='blackjack'?this.blackjack(state):this.station==='roulette'?this.roulette(state):this.tournament(tournament)}${notice?`<p class="casino-games-notice" role="status">${safe(notice)}</p>`:''}<footer>Wyłącznie gotówka z gry. Bez wpłat i wypłat prawdziwych pieniędzy.</footer></section>`;
   const query=<T extends HTMLElement=HTMLElement>(selector:string)=>this.root!.querySelector<T>(selector);
   const on=(id:string,callback:()=>void)=>query<HTMLButtonElement>(id)?.addEventListener('click',callback);
+  const wheelMount=query('#roulette-wheel-mount');if(wheelMount)this.rouletteView.attach(wheelMount);else this.rouletteView.detach();
   on('#casino-games-close',()=>this.close());
-  const bet=query<HTMLInputElement>('#casino-bet');if(bet)bet.oninput=()=>{this.bet=Number(bet.value);};
-  const choice=query<HTMLSelectElement>('#roulette-choice');if(choice)choice.onchange=()=>{this.choice=choice.value as RouletteChoice;query('#roulette-number-wrap')?.classList.toggle('hidden',this.choice!=='straight');};
-  const straight=query<HTMLInputElement>('#roulette-number');if(straight)straight.oninput=()=>{this.straight=Number(straight.value);};
+  const preview=()=>{const text=`${this.wagerName(this.choice,this.straight)} · ${cash(this.bet)}`;const label=query('#roulette-selected-wager');if(label)label.textContent=text;if(state.roulette.status==='idle'){const summary=query('#roulette-locked-wager');if(summary)summary.textContent=text;}};
+  const bet=query<HTMLInputElement>('#casino-bet');if(bet)bet.oninput=()=>{this.bet=Number(bet.value);preview();};
+  const choice=query<HTMLSelectElement>('#roulette-choice');if(choice)choice.onchange=()=>{this.choice=choice.value as RouletteChoice;query('#roulette-number-wrap')?.classList.toggle('hidden',this.choice!=='straight');preview();};
+  const straight=query<HTMLInputElement>('#roulette-number');if(straight)straight.oninput=()=>{this.straight=Number(straight.value);preview();};
   const issue=(action:ActionInput)=>{this.notice='';this.callbacks.onAction({...action,version:this.callbacks.getState().version});this.refresh();};
   on('#blackjack-deal',()=>issue({kind:'blackjackDeal',bet:this.bet}));
   on('#blackjack-hit',()=>issue({kind:'blackjackHit'}));on('#blackjack-stand',()=>issue({kind:'blackjackStand'}));on('#blackjack-double',()=>issue({kind:'blackjackDouble'}));
@@ -81,14 +91,19 @@ export class CasinoGamesUI {
   const panel=query('.casino-games-panel');if(panel)panel.scrollTop=scroll;
   if(focus)query<HTMLElement>(`#${CSS.escape(focus)}`)?.focus({preventScroll:true});
  }
- private betInput(){return `<label class="casino-bet-label">Zakład ($10–$500, co $10)<input id="casino-bet" type="number" min="10" max="500" step="10" value="${Number.isFinite(this.bet)?this.bet:50}" inputmode="numeric"></label>`;}
+ private betInput(disabled=false,value=this.bet){return `<label class="casino-bet-label">Zakład ($10–$500, co $10)<input id="casino-bet" type="number" min="10" max="500" step="10" value="${Number.isFinite(value)?value:50}" inputmode="numeric" ${disabled?'disabled':''}></label>`;}
+ private wagerName(choice:RouletteChoice|null,number:number|null){return choice==='straight'?`Liczba ${number??0}`:choice?({red:'Czerwone',black:'Czarne',odd:'Nieparzyste',even:'Parzyste'} as const)[choice]:'Brak zakładu';}
  private blackjack(state:CasinoGamesSnapshot){
   const hand=state.blackjack,playing=hand.status==='playing';
-  return `<p class="casino-games-rules">Cel: wynik bliższy 21 niż krupier. As liczy się jako 1 lub 11. Krupier zostaje przy 17. Blackjack płaci 3:2.</p><div class="casino-card-row"><span>KRUPIER ${playing?'':hand.dealer.length?`· ${blackjackValue(hand.dealer)}`:''}</span><div>${cards(hand.dealer)}</div></div><div class="casino-card-row"><span>TY ${hand.player.length?`· ${blackjackValue(hand.player)}`:''}</span><div>${cards(hand.player)}</div></div><p id="blackjack-message" class="casino-games-result" role="status">${safe(hand.message)}</p>${playing?`<div class="casino-games-actions"><button id="blackjack-hit">Dobierz</button><button id="blackjack-stand">Zostań</button><button id="blackjack-double" ${!hand.canDouble||this.callbacks.getWallet()<hand.stake?'disabled':''}>Podwój · ${cash(hand.stake)}</button><button id="blackjack-forfeit" class="casino-game-secondary">Pas · stracisz zakład</button></div><small>Postawiono ${cash(hand.stake)}. Zamknięcie panelu pozostawia rozdanie otwarte; opuszczenie kasyna oznacza pas.</small>`:`${this.betInput()}<button class="casino-game-primary" id="blackjack-deal">${hand.status==='idle'?'Rozdaj karty':'Nowe rozdanie'}</button>${hand.status==='settled'?`<small>Zakład ${cash(hand.stake)} · wypłata ${cash(hand.payout)} (zawiera zwrot stawki).</small>`:''}`}`;
+  return `<p class="casino-games-rules">Cel: wynik bliższy 21 niż krupier. As liczy się jako 1 lub 11. Krupier zostaje przy 17. Blackjack płaci 3:2.</p><div class="casino-card-row"><span>KRUPIER ${playing?'':hand.dealer.length?`· ${blackjackValue(hand.dealer)}`:''}</span><div>${cards(hand.dealer)}</div></div><div class="casino-card-row"><span>TY ${hand.player.length?`· ${blackjackValue(hand.player)}`:''}</span><div>${cards(hand.player)}</div></div><p id="blackjack-message" class="casino-games-result" role="status">${safe(hand.message)}</p>${playing?`<div class="casino-games-actions"><button id="blackjack-hit">Dobierz</button><button id="blackjack-stand">Zostań</button><button id="blackjack-double" ${!hand.canDouble||this.callbacks.getWallet()<hand.stake?'disabled':''}>Podwój · ${cash(hand.stake)}</button><button id="blackjack-forfeit" class="casino-game-secondary">Pas · stracisz zakład</button></div><small>Postawiono ${cash(hand.stake)}. Zamknięcie panelu pozostawia rozdanie otwarte; opuszczenie kasyna oznacza pas.</small>`:`${this.betInput(state.roulette.status==='spinning')}<button class="casino-game-primary" id="blackjack-deal" ${state.roulette.status==='spinning'?'disabled':''}>${hand.status==='idle'?'Rozdaj karty':'Nowe rozdanie'}</button>${hand.status==='settled'?`<small>Zakład ${cash(hand.stake)} · wypłata ${cash(hand.payout)} (zawiera zwrot stawki).</small>`:''}`}`;
  }
  private roulette(state:CasinoGamesSnapshot){
   const spin=state.roulette;
-  return `<p class="casino-games-rules">Jedno zero. Kolor i parzystość: wypłata 2× stawka. Wybrana liczba: 36×. Zero przegrywa wszystkie zakłady poza zakładem na 0.</p><div class="roulette-wheel-result ${spin.number===0?'green':spin.number!==null&&ROULETTE_RED.has(spin.number)?'red':'black'}" aria-label="Wynik ruletki">${spin.number??'♧'}</div><p class="casino-games-result" role="status">${safe(spin.message)}</p><div class="casino-games-form">${this.betInput()}<label>Rodzaj zakładu<select id="roulette-choice">${([['red','Czerwone'],['black','Czarne'],['odd','Nieparzyste'],['even','Parzyste'],['straight','Konkretna liczba']] as const).map(([value,name])=>`<option value="${value}" ${this.choice===value?'selected':''}>${name}</option>`).join('')}</select></label><label id="roulette-number-wrap" class="${this.choice==='straight'?'':'hidden'}">Liczba (0–36)<input id="roulette-number" type="number" min="0" max="36" step="1" value="${Number.isFinite(this.straight)?this.straight:0}" inputmode="numeric"></label></div><button class="casino-game-primary" id="roulette-spin" ${state.blackjack.status==='playing'?'disabled':''}>Zakręć kołem</button><div class="roulette-history" aria-label="Ostatnie wyniki">${spin.history.map(number=>`<span class="${number===0?'green':ROULETTE_RED.has(number)?'red':'black'}">${number}</span>`).join('')}</div>`;
+  const spinning=spin.status==='spinning',settled=spin.status==='settled'&&spin.number!==null;
+  const choice=spinning?spin.choice??this.choice:this.choice,number=spinning?spin.betNumber??this.straight:this.straight;
+  const result=settled?`<div id="roulette-result" class="roulette-final-result ${rouletteColor(spin.number!)}"><strong>${spin.number}</strong><span>${rouletteColorName(spin.number!)}</span></div>`:`<div id="roulette-result" class="roulette-final-result pending"><strong>${spinning?'•••':'—'}</strong><span>${spinning?'Losowanie w toku':'Wybierz zakład'}</span></div>`;
+  const net=spin.payout-spin.stake;
+  return `<div class="roulette-game-layout"><div class="roulette-visual-column"><div id="roulette-wheel-mount"></div><div class="roulette-history" aria-label="Ostatnie wyniki">${spin.history.length?spin.history.map(number=>`<span class="${rouletteColor(number)}" aria-label="${number}, ${rouletteColorName(number)}">${number}</span>`).join(''):'<span class="roulette-history-empty">Ostatnie wyniki pojawią się tutaj.</span>'}</div></div><div class="roulette-betting-column"><div class="roulette-result-row">${result}<div class="roulette-wager-summary"><span>${spinning?'Zakład w grze':settled?'Rozliczony zakład':'Twój wybór'}</span><strong id="roulette-locked-wager">${safe(spinning||settled?this.wagerName(spin.choice,spin.betNumber):this.wagerName(this.choice,this.straight))} · ${cash(spinning||settled?spin.stake:this.bet)}</strong>${settled?`<span>Wypłata <b id="roulette-payout">${cash(spin.payout)}</b> · bilans <b id="roulette-net">${net>0?'+':net<0?'−':''}${cash(Math.abs(net))}</b></span><small>Wypłata zawiera zwrot stawki.</small>`:spinning?'<small>Stawka pobrana. Wynik po zatrzymaniu kulki.</small>':'<small>Wirtualna gotówka z gry.</small>'}</div></div><p id="roulette-message" class="casino-games-result" role="status" aria-live="polite">${safe(spin.message)}</p><div class="casino-games-form roulette-bet-form">${this.betInput(spinning,spinning?spin.stake:this.bet)}<label>Rodzaj zakładu<select id="roulette-choice" ${spinning?'disabled':''}>${([['red','Czerwone'],['black','Czarne'],['odd','Nieparzyste'],['even','Parzyste'],['straight','Konkretna liczba']] as const).map(([value,name])=>`<option value="${value}" ${choice===value?'selected':''}>${name}</option>`).join('')}</select></label><label id="roulette-number-wrap" class="${choice==='straight'?'':'hidden'}">Liczba (0–36)<input id="roulette-number" type="number" min="0" max="36" step="1" value="${Number.isFinite(number)?number:0}" inputmode="numeric" ${spinning?'disabled':''}></label></div><small class="roulette-selected">Wybrano: <span id="roulette-selected-wager">${safe(this.wagerName(choice,number))} · ${cash(spinning?spin.stake:this.bet)}</span></small><button class="casino-game-primary" id="roulette-spin" ${spinning||state.blackjack.status==='playing'?'disabled':''}>${spinning?'Koło wiruje…':settled?'Zakręć ponownie':'Zakręć kołem'}</button><p class="casino-games-rules roulette-rules">37 kieszeni · jedno zero. Kolor / parzystość: wypłata 2×; liczba: 36×. Zero wygrywa tylko zakład na 0.</p><small>Zamknięcie panelu nie przerywa losowania.</small></div></div>`;
  }
  private tournament(state:TournamentSnapshot|null){
   if(!this.callbacks.isOnline()||!state)return '<p>Turniej jest dostępny w pokoju online dla 2–4 osób. Utwórz pokój, zaproś znajomych i spotkajcie się przy tym stanowisku.</p>';

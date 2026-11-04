@@ -6,6 +6,8 @@ import type { GarageAction } from './garage';
 import type { JobAction } from './online-jobs';
 import type { CareerAction, CrewBaseAction } from './career';
 import type { CasinoGameAction } from './casino-games';
+import { roulettePayout, type RouletteChoice } from './casino-games';
+import { isRouletteSpin, rouletteMotion, rouletteNumberAtAngle, ROULETTE_SPIN_MS } from './roulette-motion';
 import type { TournamentAction } from './poker-tournament';
 import type { CityEventAction } from './city-events';
 import type { AppearanceAction } from './appearance';
@@ -185,6 +187,19 @@ function snapshot(value: unknown, hostId: string, youId: string, code: string): 
   const bj=games.blackjack,roulette=games.roulette;
   if(!['idle','playing','settled'].includes(String(bj.status))||!cardArray(bj.player,12)||!cardArray(bj.dealer,12)||!boundedInteger(bj.stake,1000)||!boundedInteger(bj.payout,2500)||![null,'win','loss','push','blackjack'].includes(bj.outcome as null|string)||typeof bj.canDouble!=='boolean'||!shortText(bj.message))return false;
   if(roulette.number!==null&&!boundedInteger(roulette.number,36)||![null,'red','black','odd','even','straight'].includes(roulette.choice as null|string)||!boundedInteger(roulette.stake,500)||!boundedInteger(roulette.payout,18000)||!Array.isArray(roulette.history)||roulette.history.length>12||!roulette.history.every(number=>boundedInteger(number,36))||!shortText(roulette.message))return false;
+  if(!['idle','spinning','settled'].includes(String(roulette.status))||!finiteNumber(roulette.elapsedMs)||roulette.elapsedMs<0||roulette.elapsedMs>ROULETTE_SPIN_MS)return false;
+  if(roulette.betNumber!==null&&!boundedInteger(roulette.betNumber,36)||roulette.choice==='straight'&&roulette.betNumber===null||roulette.choice!=='straight'&&roulette.betNumber!==null)return false;
+  if(roulette.status==='idle'){
+    if(roulette.spin!==null||roulette.elapsedMs!==0||roulette.number!==null||roulette.choice!==null||roulette.stake!==0||roulette.payout!==0||roulette.history.length!==0)return false;
+  }else{
+    if(!isRouletteSpin(roulette.spin)||roulette.choice===null||Number(roulette.stake)<10||Number(roulette.stake)%10!==0)return false;
+    if(roulette.status==='spinning'){
+      if(roulette.elapsedMs>=ROULETTE_SPIN_MS||roulette.number!==null||roulette.payout!==0)return false;
+    }else{
+      const final=rouletteMotion(roulette.spin,roulette.spin.durationMs);
+      if(roulette.elapsedMs!==ROULETTE_SPIN_MS||roulette.number!==rouletteNumberAtAngle(final.ballAngle-final.wheelAngle)||roulette.history[0]!==roulette.number||roulette.payout!==roulettePayout(Number(roulette.number),roulette.choice as RouletteChoice,Number(roulette.stake),roulette.betNumber===null?undefined:Number(roulette.betNumber)))return false;
+    }
+  }
   const tournament=value.tournament;
   if(!record(tournament)||!['idle','registration','playing','completed'].includes(String(tournament.status))||!integer(tournament.version)||tournament.buyIn!==250||!boundedInteger(tournament.pot,1000)||!boundedInteger(tournament.level,8)||tournament.handLimit!==24||!Array.isArray(tournament.participants)||tournament.participants.length>4||!shortText(tournament.message)||(tournament.turnDeadline!==null&&!finiteNumber(tournament.turnDeadline))||!Array.isArray(tournament.winnerIds)||tournament.winnerIds.length>4||!tournament.winnerIds.every(idValue)||!publicHand(tournament.poker))return false;
   for(const person of tournament.participants)if(!record(person)||!idValue(person.id)||!shortText(person.name,18)||!boundedInteger(person.chips,4000)||!['registered','playing','eliminated','withdrawn','winner'].includes(String(person.status)))return false;

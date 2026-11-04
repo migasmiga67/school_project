@@ -1,6 +1,7 @@
 import { describe,expect,it,vi } from 'vitest';
 import * as THREE from 'three';
 import { BUILDINGS } from '../src/model';
+import { CITY_STREETS, nearestStreet } from '../src/city-map';
 import { CityLife,cityEventAt,getCityEnvironment,pedestrianPose,PEDESTRIAN_COUNT } from '../src/city-life';
 
 describe('shared city clock and opportunities',()=>{
@@ -29,11 +30,19 @@ describe('shared city clock and opportunities',()=>{
       const target=cityEventAt(seconds)!.target;
       expect(BUILDINGS.some(b=>Math.abs(target.x-b.x)<b.halfX&&Math.abs(target.z-b.z)<b.halfZ)).toBe(false);
     }
-    for(let i=0;i<PEDESTRIAN_COUNT;i++)for(let seconds=0;seconds<150;seconds+=3){
+    for(let i=0;i<PEDESTRIAN_COUNT;i++)for(let seconds=0;seconds<900;seconds+=7){
       const p=pedestrianPose(i,seconds);
       expect(BUILDINGS.some(b=>Math.abs(p.x-b.x)<b.halfX+.55&&Math.abs(p.z-b.z)<b.halfZ+.55)).toBe(false);
+      const onPavement=CITY_STREETS.some(road=>road.points.slice(1).some((b,index)=>{
+        const a=road.points[index],dx=b.x-a.x,dz=b.z-a.z,t=Math.max(0,Math.min(1,((p.x-a.x)*dx+(p.z-a.z)*dz)/(dx*dx+dz*dz)));
+        return Math.hypot(p.x-a.x-dx*t,p.z-a.z-dz*t)<=road.width/2+road.sidewalkWidth+.3;
+      }));expect(onPavement).toBe(true);
       expect(p.heading).toBeGreaterThanOrEqual(-Math.PI);expect(p.heading).toBeLessThanOrEqual(Math.PI);
     }
+  });
+  it('populates the curved neighborhoods as well as the historic core',()=>{
+    const districts=new Set(Array.from({length:PEDESTRIAN_COUNT},(_,index)=>nearestStreet(pedestrianPose(index,40))!.street.district));
+    expect([...districts]).toEqual(expect.arrayContaining(['downtown','westwood','financial','port','south-bay']));
   });
 });
 

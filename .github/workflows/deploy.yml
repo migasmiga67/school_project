@@ -45,7 +45,7 @@ jobs:
       matrix:
         include:
           - group: core
-            specs: tests/browser.spec.ts tests/expanded-world.browser.spec.ts tests/mobility.browser.spec.ts tests/career.browser.spec.ts
+            specs: tests/browser.spec.ts tests/expanded-world.browser.spec.ts tests/city-design.browser.spec.ts tests/mobility.browser.spec.ts tests/career.browser.spec.ts
           - group: city
             specs: tests/casino.browser.spec.ts tests/stories.browser.spec.ts tests/tournament.browser.spec.ts
           - group: multiplayer

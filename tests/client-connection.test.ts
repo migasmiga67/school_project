@@ -3,6 +3,8 @@ import { MultiplayerClient } from '../src/multiplayer-client';
 import { RoomAuthority } from '../src/room-authority';
 import { ROOM_PROTOCOL } from '../src/multiplayer-model';
 import { CASINO_GAMES } from '../src/casino-games-location';
+import type { RouletteSnapshot } from '../src/casino-games';
+import { ROULETTE_SPIN_MS } from '../src/roulette-motion';
 
 const transport = vi.hoisted(() => {
   class Events {
@@ -66,6 +68,35 @@ function welcome(peer: InstanceType<typeof transport.Peer>, protocol = ROOM_PROT
 function hello(sequence = 1) { return { type: 'hello', protocol: ROOM_PROTOCOL, name: 'Przyjaciel', seq: sequence }; }
 
 describe('expanded room snapshots across the transport boundary',()=>{
+  it('accepts an in-flight roulette timeline and its host-settled result without an early credit',async()=>{
+    const {client,peer,result}=joining();peer.openSignaling();const connection=peer.connections[0];connection.openChannel();
+    const room=new RoomAuthority(CODE,HOST,'Gospodarz');expect(room.join(peer.id,'Przyjaciel').ok).toBe(true);
+    expect(room.command(peer.id,{type:'pose',pose:{...CASINO_GAMES.roulette,heading:0,mode:'foot',interior:'casino',seated:false,vehicle:null}},0).ok).toBe(true);
+    expect(room.command(peer.id,{type:'casinoGame',action:{kind:'rouletteSpin',bet:100,choice:'straight',number:0,version:0}},0).ok).toBe(true);
+    room.tick(2000);connection.receive({type:'snapshot',protocol:ROOM_PROTOCOL,seq:1,snapshot:room.snapshot(peer.id)});
+    expect(await result).toBeNull();expect(client.state.snapshot).toMatchObject({wallet:1150,casinoGames:{roulette:{status:'spinning',elapsedMs:2000,number:null,payout:0,betNumber:0}}});
+    const spin=client.state.snapshot!.casinoGames.roulette.spin;
+    room.tick(ROULETTE_SPIN_MS);const settled=room.snapshot(peer.id);connection.receive({type:'snapshot',protocol:ROOM_PROTOCOL,seq:2,snapshot:settled});
+    expect(client.state.status).toBe('online');expect(client.state.snapshot?.casinoGames.roulette).toMatchObject({status:'settled',spin,elapsedMs:ROULETTE_SPIN_MS});expect(client.state.snapshot?.wallet).toBe(1150+settled.casinoGames.roulette.payout);
+  });
+
+  it.each([
+    ['premature result',(roulette:RouletteSnapshot)=>{roulette.number=0;}],
+    ['premature credit',(roulette:RouletteSnapshot)=>{roulette.payout=3600;}],
+    ['invalid duration',(roulette:RouletteSnapshot)=>{roulette.spin!.durationMs=1;}],
+    ['non-finite angle',(roulette:RouletteSnapshot)=>{roulette.spin!.ballTravel=Infinity;}],
+    ['ball outside the pocket centre',(roulette:RouletteSnapshot)=>{roulette.spin!.ballTravel+=.03;}],
+    ['invalid elapsed time',(roulette:RouletteSnapshot)=>{roulette.elapsedMs=ROULETTE_SPIN_MS;}],
+    ['missing straight wager',(roulette:RouletteSnapshot)=>{roulette.betNumber=null;}],
+  ] as const)('rejects roulette snapshots with %s',async(_name,mutate)=>{
+    const {client,peer,result}=joining();peer.openSignaling();const connection=peer.connections[0];connection.openChannel();
+    const room=new RoomAuthority(CODE,HOST,'Gospodarz');expect(room.join(peer.id,'Przyjaciel').ok).toBe(true);
+    room.command(peer.id,{type:'pose',pose:{...CASINO_GAMES.roulette,heading:0,mode:'foot',interior:'casino',seated:false,vehicle:null}},0);
+    room.command(peer.id,{type:'casinoGame',action:{kind:'rouletteSpin',bet:100,choice:'straight',number:0,version:0}},0);
+    const snapshot=room.snapshot(peer.id);mutate(snapshot.casinoGames.roulette);connection.receive({type:'snapshot',protocol:ROOM_PROTOCOL,seq:1,snapshot});
+    expect((await result)?.message).toMatch(/Dane pokoju/);expect(client.state.status).toBe('error');expect(connection.closed).toBe(true);
+  });
+
   it('accepts a legally earned elite garage without rejecting the whole multiplayer snapshot',async()=>{
     const {client,peer,result}=joining();peer.openSignaling();const connection=peer.connections[0];connection.openChannel();
     const room=new RoomAuthority(CODE,HOST,'Gospodarz');expect(room.join(peer.id,'Przyjaciel').ok).toBe(true);

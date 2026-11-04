@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { activeVehicle, createGame, POLICE_SAFEHOUSE, step } from '../src/game';
 import { BUILDINGS, type GameState, type Input, type Vehicle } from '../src/model';
+import { CITY_STREETS } from '../src/city-map';
 
 const idle:Input={throttle:false,brake:false,left:false,right:false,handbrake:false,boost:false,sprint:false,interact:false,nextMission:false,reset:false};
 const cop=(id:string,x:number,z:number):Vehicle=>({id,kind:'police',x,z,heading:0,speed:0,color:0xffffff,parked:false,health:100,owned:false,steer:0,wheelPhase:0});
@@ -41,6 +42,23 @@ describe('expanded police pursuits',()=>{
     place(state,block.x+6,block.z+5,15);const car=activeVehicle(state)!,before=car.z;
     advance(state,.5);
     expect(car.z).toBeLessThan(before-2);expect(car.health).toBe(100);
+  });
+  it('rotates barrier collisions with a diagonal boulevard and keeps its shoulder open',()=>{
+    const road=CITY_STREETS.find(road=>road.id==='financial-ring')!;
+    const index=road.points.findIndex(p=>p.x> -70&&p.x< -30&&p.z< -185),a=road.points[index],b=road.points[index+1];
+    const center={x:(a.x+b.x)/2,z:(a.z+b.z)/2},heading=Math.atan2(b.x-a.x,-(b.z-a.z)),rotation=-heading;
+    const create=(side:number)=>{
+      const state=emptyCity(),car=activeVehicle(state)!;
+      const x=center.x-Math.sin(heading)*5+Math.cos(heading)*side,z=center.z+Math.cos(heading)*5+Math.sin(heading)*side;
+      Object.assign(car,{x,z,heading,speed:15});Object.assign(state.player,{x,z,heading});state.wanted=2;
+      state.police=[cop('one',80,80),cop('two',80,-80)];
+      const c=Math.abs(Math.cos(rotation)),s=Math.abs(Math.sin(rotation));
+      state.pursuit!.roadblocks=[{...center,id:'diagonal-block',heading:rotation,halfX:3.8*c+.65*s,halfZ:3.8*s+.65*c,expiresAt:30}];
+      return state;
+    };
+    const blocked=create(0);advance(blocked,.5);expect(activeVehicle(blocked)!.health).toBeLessThan(100);
+    const shoulder=create(6.2),car=activeVehicle(shoulder)!,before={x:car.x,z:car.z};advance(shoulder,.5);
+    expect(Math.hypot(car.x-before.x,car.z-before.z)).toBeGreaterThan(4);expect(car.health).toBe(100);
   });
   it('uses the helicopter to spot a suspect and respects building cover',()=>{
     const visible=emptyCity();place(visible,0,40);visible.wanted=3;

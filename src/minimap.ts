@@ -1,5 +1,6 @@
 import { CASINO } from './casino-location';
-import { BUILDINGS, ROAD_X, ROAD_Z, WORLD_BOUNDS, NATURAL_BLOCKS, type GameState, type Point } from './model';
+import { WORLD_BOUNDS, type GameState, type Point } from './model';
+import { CITY_BUILDINGS, CITY_SPACES, CITY_STREETS, routeStreets } from './city-map';
 import type { OnlineMember } from './multiplayer-model';
 import { GARAGE_LOCATION } from './garage';
 import { HOMES, CREW_BASE } from './career';
@@ -18,78 +19,15 @@ export interface MinimapOptions {
   cityEvent?: {target:Point}|null;
 }
 
-interface Projection { point: Point; axis: 'x' | 'z' }
-const distance = (a: Point, b: Point) => Math.abs(a.x - b.x) + Math.abs(a.z - b.z);
-const equal = (a: Point, b: Point) => Math.abs(a.x - b.x) + Math.abs(a.z - b.z) < 1e-7;
-const finite = (p: Point) => Number.isFinite(p.x) && Number.isFinite(p.z);
 /** Keep the neighborhood readable as the overall world grows. North stays up. */
 export function neighborhoodProjection(center:Point,span=200){
   const scale=224/span;
   return(point:Point)=>({x:112+(point.x-center.x)*scale,y:100+(point.z-center.z)*scale});
 }
 
-/** Both the approach to a road and the final walk to a doorway avoid buildings. */
-function clearSegment(a: Point, b: Point) {
-  return !BUILDINGS.some(building => {
-    if (a.x === b.x) return Math.abs(a.x - building.x) < building.halfX &&
-      Math.max(a.z, b.z) > building.z - building.halfZ && Math.min(a.z, b.z) < building.z + building.halfZ;
-    return Math.abs(a.z - building.z) < building.halfZ &&
-      Math.max(a.x, b.x) > building.x - building.halfX && Math.min(a.x, b.x) < building.x + building.halfX;
-  });
-}
-
-function entrances(point: Point): Projection[] {
-  const candidates: Projection[] = [
-    ...ROAD_X.map(road=>({point:{x:road,z:point.z},axis:'x' as const})),
-    ...ROAD_Z.map(road=>({point:{x:point.x,z:road},axis:'z' as const})),
-  ].filter(candidate => clearSegment(point, candidate.point));
-  const nearest = Math.min(...candidates.map(candidate => distance(point, candidate.point)));
-  // Keep road connectors short. In particular, the casino entrance is reached
-  // from the boulevard at z=80, rather than by a long line across its block.
-  return candidates.filter(candidate => distance(point, candidate.point) <= nearest + 1e-7);
-}
-
-function simplify(points: Point[]) {
-  const result: Point[] = [];
-  for (const point of points) {
-    if (result.length && equal(result[result.length - 1], point)) continue;
-    while (result.length >= 2) {
-      const a = result[result.length - 2], b = result[result.length - 1];
-      const ab = { x: b.x - a.x, z: b.z - a.z }, bc = { x: point.x - b.x, z: point.z - b.z };
-      if (Math.abs(ab.x * bc.z - ab.z * bc.x) > 1e-7 || ab.x * bc.x + ab.z * bc.z < 0) break;
-      result.pop();
-    }
-    result.push({ ...point });
-  }
-  return result;
-}
-
-/** GPS follows the connected street grid, with only short endpoint connectors. */
+/** GPS uses the shared street graph, including bends, alleys and dead ends. */
 export function planRoadRoute(start: Point, target: Point): Point[] {
-  if (!finite(start) || !finite(target)) return [];
-  if (equal(start, target)) return [{ ...start }];
-  let best: Point[] = [], bestDistance = Infinity;
-  for (const from of entrances(start)) for (const to of entrances(target)) {
-    const a = from.point, b = to.point;
-    let middle: Point[];
-    if (from.axis !== to.axis) {
-      middle = [a, from.axis === 'x' ? { x: a.x, z: b.z } : { x: b.x, z: a.z }, b];
-    } else if ((from.axis === 'x' && a.x === b.x) || (from.axis === 'z' && a.z === b.z)) middle = [a, b];
-    else {
-      const coordinate = from.axis === 'x' ? 'z' : 'x';
-      const crossings=from.axis==='x'?ROAD_Z:ROAD_X;
-      const crossing = crossings.reduce((best, road) =>
-        Math.abs(a[coordinate] - road) + Math.abs(b[coordinate] - road) <
-        Math.abs(a[coordinate] - best) + Math.abs(b[coordinate] - best) ? road : best);
-      middle = from.axis === 'x'
-        ? [a, { x: a.x, z: crossing }, { x: b.x, z: crossing }, b]
-        : [a, { x: crossing, z: a.z }, { x: crossing, z: b.z }, b];
-    }
-    const points = simplify([start, ...middle, target]);
-    const length = points.slice(1).reduce((sum, point, index) => sum + distance(points[index], point), 0);
-    if (length < bestDistance) { bestDistance = length; best = points; }
-  }
-  return best;
+  return routeStreets(start, target);
 }
 
 function arrow(ctx: CanvasRenderingContext2D, point: {x:number;y:number}, heading: number) {
@@ -152,18 +90,23 @@ export function renderMinimap(ctx: CanvasRenderingContext2D, state: GameState, o
   ctx.fillStyle='#b09f7e';ctx.fillRect(beach,0,coast-beach,200);
   const landStart=mapPoint({x:WORLD_BOUNDS.minX,z:WORLD_BOUNDS.minZ}),landEnd=mapPoint({x:94,z:WORLD_BOUNDS.maxZ});
   ctx.fillStyle='#515e54';ctx.fillRect(landStart.x,landStart.y,landEnd.x-landStart.x,landEnd.y-landStart.y);
-  const streets=(color:string,width:number)=>{
-    ctx.strokeStyle=color;ctx.lineWidth=width;
-    for(const road of ROAD_X){const from=mapPoint({x:road,z:WORLD_BOUNDS.minZ}),to=mapPoint({x:road,z:WORLD_BOUNDS.maxZ});ctx.beginPath();ctx.moveTo(from.x,from.y);ctx.lineTo(to.x,to.y);ctx.stroke();}
-    for(const road of ROAD_Z){const from=mapPoint({x:WORLD_BOUNDS.minX,z:road}),to=mapPoint({x:WORLD_BOUNDS.maxX,z:road});ctx.beginPath();ctx.moveTo(from.x,from.y);ctx.lineTo(to.x,to.y);ctx.stroke();}
-  };
-  streets('#84918c',14*scale);streets('#303c42',11*scale);
-  for(const area of NATURAL_BLOCKS){const park=mapPoint({x:area.x-14,z:area.z-14});ctx.fillStyle='#426b54';ctx.fillRect(park.x,park.y,28*scale,28*scale);}
-  for (const building of BUILDINGS) {
+  for(const area of CITY_SPACES){
+    ctx.fillStyle={park:'#426b54',plaza:'#8d9381',parking:'#657170',loading:'#766e5e'}[area.kind];
+    ctx.beginPath();area.points.map(mapPoint).forEach((point,index)=>index?ctx.lineTo(point.x,point.y):ctx.moveTo(point.x,point.y));ctx.closePath();ctx.fill();
+  }
+  ctx.lineJoin='round';ctx.lineCap='round';
+  for(const pavement of [true,false])for(const street of CITY_STREETS){
+    ctx.strokeStyle=pavement?'#84918c':street.kind==='alley'||street.kind==='service'?'#495452':'#303c42';
+    ctx.lineWidth=(street.width+(pavement?street.sidewalkWidth*2:0))*scale;
+    ctx.beginPath();street.points.map(mapPoint).forEach((point,index)=>index?ctx.lineTo(point.x,point.y):ctx.moveTo(point.x,point.y));ctx.stroke();
+  }
+  for (const building of CITY_BUILDINGS) {
     const p = mapPoint({ x: building.x - building.halfX, z: building.z - building.halfZ });
-    if(!visible(p,32))continue;
-    ctx.fillStyle='#9ba59c';ctx.fillRect(p.x,p.y,building.halfX*2*scale,building.halfZ*2*scale);
-    ctx.fillStyle='#707e77';ctx.fillRect(p.x+2,p.y+2,building.halfX*2*scale-4,building.halfZ*2*scale-4);
+    const width=building.halfX*2*scale,height=building.halfZ*2*scale;
+    if(p.x+width<0||p.x>224||p.y+height<0||p.y>200)continue;
+    ctx.fillStyle='#9ba59c';ctx.fillRect(p.x,p.y,width,height);
+    const inset=Math.min(2,building.halfX*scale*.3,building.halfZ*scale*.3);
+    ctx.fillStyle='#707e77';ctx.fillRect(p.x+inset,p.y+inset,width-inset*2,height-inset*2);
   }
   const target = options.target === undefined ? options.casinoNavigation ? CASINO.door : state.mission.waypoint : options.target;
   const route = target ? planRoadRoute(state.player, target) : [];

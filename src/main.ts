@@ -25,7 +25,7 @@ import { districtAt } from './world-layout';
 
 const $=<T extends HTMLElement=HTMLElement>(selector:string)=>document.querySelector<T>(selector)!;
 const SAVE_KEY='neon-coast-profile-v1';
-let expansion:CityExpansion|undefined,loadedCareer:unknown,stories:CityStories|undefined,loadedStories:unknown;
+let expansion:CityExpansion|undefined,loadedCareer:unknown,stories:CityStories|undefined,loadedStories:unknown,loadedRoulette:unknown;
 let muted=true, cameraMode=0, profileMoney=1250, recordWins=0, bestRace:number|null=null;
 let saveAvailable=true;
 let casinoReserve=0,escrowOpen=false,casinoNavigation=false,recoveredCasino=0;
@@ -37,7 +37,7 @@ let soloGarage=createGarage(),garageNavigation=false,panelWasPaused=false,cityCl
 const soloCityClaims=new Set<string>();
 try {
  const raw=localStorage.getItem(SAVE_KEY);
-  if(raw){const data=JSON.parse(raw);if(typeof data.muted==='boolean')muted=data.muted;if(Number.isFinite(data.money)&&data.money>=0&&data.money<1e8)profileMoney=data.money;if(Number.isSafeInteger(data.wins)&&data.wins>=0)recordWins=data.wins;if(typeof data.bestRace==='number'&&data.bestRace>0)bestRace=data.bestRace;if(Number.isSafeInteger(data.pokerReserve)&&data.pokerReserve>=0&&data.pokerReserve<1e8)recoveredCasino=data.pokerReserve;soloGarage=parseGarage(data.garage);loadedCareer=data.career;loadedStories=data.stories;}
+  if(raw){const data=JSON.parse(raw);if(typeof data.muted==='boolean')muted=data.muted;if(Number.isFinite(data.money)&&data.money>=0&&data.money<1e8)profileMoney=data.money;if(Number.isSafeInteger(data.wins)&&data.wins>=0)recordWins=data.wins;if(typeof data.bestRace==='number'&&data.bestRace>0)bestRace=data.bestRace;if(Number.isSafeInteger(data.pokerReserve)&&data.pokerReserve>=0&&data.pokerReserve<1e8)recoveredCasino=data.pokerReserve;soloGarage=parseGarage(data.garage);loadedCareer=data.career;loadedStories=data.stories;loadedRoulette=data.roulette;}
 }catch{saveAvailable=false;}
 let state=createGame();state.money=profileMoney+recoveredCasino;state.missionsWon=recordWins;state.bestRace=bestRace;applyGarage(state,soloGarage);
 const held=new Set<string>();
@@ -90,7 +90,7 @@ expansion=new CityExpansion({
  onOpen:panelOpen,onClose:panelClose,onMessage:notify,onSave:persist,
  onRoute:()=>{casinoNavigation=false;garageNavigation=false;eventNavigationId='';},onPlanning:()=>activitiesUI.open(),
  onInterior:()=>{held.clear();pulse={interact:false,nextMission:false,reset:false};cameraMode=0;orbit.setMode(0,state.player.heading);},
-},loadedCareer);
+},loadedCareer,loadedRoulette);
 stories=new CityStories({
  getState:()=>state,getRoom:()=>onlineState,session:room,view,getPose:currentPose,getGarage:()=>onlineState.snapshot?.garage??soloGarage,
  getTime:worldSeconds,getStarted:()=>started,getPaused:()=>paused,getHome:()=>expansion?.homeId??null,getReputation:()=>expansion?.career.reputation??0,
@@ -317,7 +317,7 @@ function openPoker(){if(state.interior!=='casino'||poker.active)return;held.clea
 function updateMouseHint(){ $('#mouse-hint').classList.toggle('hidden',mouse.locked);view.renderer.domElement.classList.toggle('mouse-locked',mouse.locked); }
 function fatal(message:string){const box=document.createElement('div');box.className='fatal';box.setAttribute('role','alert');box.textContent=message;const button=document.createElement('button');button.className='primary';button.textContent='Odśwież stronę';button.onclick=()=>location.reload();box.append(button);document.body.append(box);}
 function notify(message:string){clearTimeout(notificationTimer);$('#toast').textContent=message;$('#toast').classList.add('show');notificationTimer=setTimeout(()=>$('#toast').classList.remove('show'),4200);}
-function persist(){const saved=soloState??state;try{localStorage.setItem(SAVE_KEY,JSON.stringify({money:saved.money,wins:saved.missionsWon,bestRace:saved.bestRace,muted,pokerReserve:casinoReserve,garage:soloGarage,career:expansion?.savedCareer??loadedCareer,stories:stories?.saved??loadedStories}));saveAvailable=true;}catch{saveAvailable=false;}}
+function persist(){const saved=soloState??state;try{localStorage.setItem(SAVE_KEY,JSON.stringify({money:saved.money,wins:saved.missionsWon,bestRace:saved.bestRace,muted,pokerReserve:casinoReserve,garage:soloGarage,career:expansion?.savedCareer??loadedCareer,stories:stories?.saved??loadedStories,roulette:expansion?.savedRoulette??loadedRoulette}));saveAvailable=true;}catch{saveAvailable=false;}}
 async function toggleSound(){muted=!muted;await audio.toggle(!muted);if(!muted&&audio.muted){muted=true;notify('Audio jest niedostępne. Gra działa bez dźwięku.');}persist();updateHUD();}
 function district(p:Point):string{return state.interior==='casino'?CASINO.name:districtAt(p);}
 function updateCasinoHUD(){

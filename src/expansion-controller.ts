@@ -52,8 +52,9 @@ export class CityExpansion {
  private readonly homeHint:HTMLElement;
  private readonly contactHud:HTMLElement;
 
- constructor(private readonly ctx:ExpansionContext,initialCareer:unknown){
+ constructor(private readonly ctx:ExpansionContext,initialCareer:unknown,initialRoulette?:unknown){
   this.soloCareer=parseCareer(initialCareer);
+  this.casino.restoreRoulette(initialRoulette,Date.now());
   const storedHome=this.soloCareer.storedCars[ctx.getGarage().selected],storedCar=ctx.getState().vehicles.find(car=>car.id==='stratus');
   if(storedHome&&storedCar){Object.assign(storedCar,HOMES[storedHome].parking,{speed:0,parked:true});if(ctx.getState().player.vehicleId==='stratus')Object.assign(ctx.getState().player,{x:storedCar.x+3,z:storedCar.z,mode:'foot',vehicleId:null});}
   this.homeView=new HomeView(ctx.view.softwareRendering);ctx.view.addCityObject(this.eventsView.group);
@@ -92,6 +93,7 @@ export class CityExpansion {
  get isHost(){const room=this.ctx.getRoom().snapshot;return Boolean(room&&room.youId===room.hostId);}
  get career(){return this.ctx.getRoom().snapshot?.career??this.soloCareer;}
  get savedCareer(){return this.soloCareer;}
+ get savedRoulette(){return this.casino.saveRoulette();}
  get hasExplicitRoute(){return Boolean(this.route||this.eventRoute);}
  awardSolo(source:string,reputation:number){if(!this.online){this.soloCareer=awardReputation(this.soloCareer,source,reputation);}}
  get homeId():VisitHomeId|null {const room=this.ctx.getRoom().snapshot;if(this.online&&room){const value=room.members.find(member=>member.id===room.youId)?.pose.homeId;return visitHome(value)?value:null;}return this.soloHome;}
@@ -142,7 +144,7 @@ export class CityExpansion {
  private casinoAction(action:CasinoGameAction){
   if(this.online){this.ctx.session.casinoGame(action);return;}
   const state=this.ctx.getState();if(state.interior!=='casino')return;
-  const result=this.casino.command(action,state.money);if(!result.ok){this.casinoUI.report(result.reason);return;}
+  const result=this.casino.command(action,state.money,Date.now());if(!result.ok){this.casinoUI.report(result.reason);return;}
   state.money=result.wallet;this.ctx.onSave();this.casinoUI.report(result.message);
  }
  private eventAction(action:CityEventAction){
@@ -217,6 +219,12 @@ export class CityExpansion {
    if(n){const move=(axis:'x'|'z',amount:number)=>{const value=state.player[axis]+amount;const next={...state.player,[axis]:value};const b=HOME_ROOM.bounds;const blocked=homeColliders(home,this.career,this.ctx.getRoom().snapshot?.crewBase).some(c=>Math.abs(next.x-c.x)<c.halfX+.45&&Math.abs(next.z-c.z)<c.halfZ+.45);if(!blocked&&next.x>b.minX+.5&&next.x<b.maxX-.5&&next.z>b.minZ+.5&&next.z<b.maxZ-.5)state.player[axis]=value;};move('x',x/n*speed*dt);move('z',z/n*speed*dt);state.player.heading=Math.atan2(x,-z);}
   }
   if(!this.online){
+   // Casino time continues while its betting panel pauses walking/the city.
+   const spin=this.casino.update(Date.now());
+   if(spin.changed){
+    state.money+=spin.payout;this.ctx.onSave();
+    if(this.ctx.getStarted())this.ctx.onMessage(this.casino.snapshot().roulette.message);
+   }
    this.events.update(this.soloMembers(),this.ctx.getTime()*1000);
    for(const credit of this.events.drainCredits()){state.money+=credit.amount;this.soloCareer=awardReputation(this.soloCareer,`event:${this.sessionKey}:${credit.eventId}`,80);this.ctx.onMessage(`Wydarzenie ukończone: +$${credit.amount}, +80 reputacji.`);this.ctx.onSave();}
    const contract=this.soloCareer.activeContract;
@@ -227,6 +235,7 @@ export class CityExpansion {
   if(this.eventRoute&&(activity.status==='completed'||activity.status==='expired'))this.clearRoute();
   if(activity.id!==this.lastEventId&&activity.id){this.lastEventId=activity.id;if(this.ctx.getStarted())this.ctx.onMessage(`${activity.title} · nagroda $${activity.reward}. Naciśnij B, aby dołączyć.`);}
   this.eventsView.update(activity,Boolean(home||state.interior),dt);
+  this.ctx.view.setRoulette((this.ctx.getRoom().snapshot?.casinoGames??this.casino.snapshot()).roulette);
   this.syncHome();
   if(this.casinoUI.active&&this.casinoUI.activeStation==='tournament'){const hand=this.ctx.getRoom().snapshot?.tournament.poker;this.ctx.view.setPoker(hand??null,Boolean(hand));}
  }

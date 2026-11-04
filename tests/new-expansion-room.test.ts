@@ -5,6 +5,7 @@ import { CREW_BASE, HOME_ROOM, HOMES } from '../src/career';
 import { CITY_ACTIVITY_FIRST_MS, CITY_ACTIVITY_PERIOD_MS, WANTED_VEHICLE_ID } from '../src/city-events';
 import { legalActions } from '../src/poker';
 import type { OnlinePose, RoomCommand } from '../src/multiplayer-model';
+import { rouletteMotion, rouletteNumberAtAngle, ROULETTE_SPIN_MS } from '../src/roulette-motion';
 
 const create=(count=2)=>{const room=new RoomAuthority('ABCDEFGH','host','Gospodarz',123);for(const [index,id] of ['friend','third','fourth'].slice(0,count-1).entries())expect(room.join(id,`Gracz ${index+2}`).ok).toBe(true);room.tick(0);return room;};
 function accept(room:RoomAuthority,id:string,command:RoomCommand,now=0){const result=room.command(id,command,now);if(!result.ok)throw new Error(result.reason);}
@@ -15,7 +16,7 @@ function contract(room:RoomAuthority,id='host',now=0){accept(room,id,{type:'care
 const casino=(room:RoomAuthority,id:string,station:keyof typeof CASINO_GAMES)=>{const point=CASINO_GAMES[station];foot(room,id,point.x,point.z,0,'casino');};
 
 describe('host-owned casino expansion',()=>{
- it('requires the real station, settles atomic bets once, and keeps blackjack hole cards private',()=>{
+ it('requires the real station, settles wagers once, and keeps blackjack hole cards private',()=>{
   const room=create();
   expect(room.command('host',{type:'casinoGame',action:{kind:'blackjackDeal',bet:100,version:0}},0).ok).toBe(false);
   casino(room,'host','blackjack');
@@ -34,8 +35,24 @@ describe('host-owned casino expansion',()=>{
   casino(room,'host','roulette');
   const version=room.snapshot('host').casinoGames.version;
   accept(room,'host',{type:'casinoGame',action:{kind:'rouletteSpin',bet:100,choice:'straight',number:0,version}});
-  expect(room.snapshot('host').wallet).toBe(previous-100+room.snapshot('host').casinoGames.roulette.payout);
+  expect(room.snapshot('host').wallet).toBe(previous-100);expect(room.snapshot('host').casinoGames.roulette).toMatchObject({status:'spinning',number:null,payout:0,history:[]});
   expect(room.command('host',{type:'casinoGame',action:{kind:'rouletteSpin',bet:100,choice:'straight',number:0,version}},0).ok).toBe(false);
+  expect(room.command('host',{type:'casinoGame',action:{kind:'rouletteSpin',bet:100,choice:'red',version:room.snapshot('host').casinoGames.version}},ROULETTE_SPIN_MS-1).ok).toBe(false);
+  expect(room.snapshot('host').wallet).toBe(previous-100);
+  room.tick(ROULETTE_SPIN_MS);const settled=room.snapshot('host'),pose=rouletteMotion(settled.casinoGames.roulette.spin!,ROULETTE_SPIN_MS);
+  expect(settled.casinoGames.roulette.number).toBe(rouletteNumberAtAngle(pose.ballAngle-pose.wheelAngle));
+  expect(settled.wallet).toBe(previous-100+settled.casinoGames.roulette.payout);expect(settled.casinoGames.roulette.status).toBe('settled');
+  room.tick(ROULETTE_SPIN_MS+1);room.tick(ROULETTE_SPIN_MS*2);expect(room.snapshot('host').wallet).toBe(settled.wallet);expect(room.snapshot('friend').wallet).toBe(1250);
+ });
+ it('finishes an accepted spin after leaving the casino and never redirects a disconnected player payout',()=>{
+  const room=create();casino(room,'host','roulette');casino(room,'friend','roulette');
+  for(const id of ['host','friend'])accept(room,id,{type:'casinoGame',action:{kind:'rouletteSpin',bet:100,choice:'red',version:0}});
+  const spin=room.snapshot('host').casinoGames.roulette.spin;
+  foot(room,'host',20,76,1000);room.leave('friend');
+  room.tick(4000);expect(room.snapshot('host').casinoGames.roulette).toMatchObject({status:'spinning',spin,elapsedMs:4000,number:null});expect(room.snapshot('host').wallet).toBe(1150);
+  room.tick(ROULETTE_SPIN_MS);const settled=room.snapshot('host');expect(settled.casinoGames.roulette.status).toBe('settled');expect(settled.wallet).toBe(1150+settled.casinoGames.roulette.payout);
+  expect(room.join('friend','Powrót').ok).toBe(true);room.tick(ROULETTE_SPIN_MS*3);
+  expect(room.snapshot('friend').wallet).toBe(1250);expect(room.snapshot('friend').casinoGames.roulette.status).toBe('idle');expect(room.snapshot('host').wallet).toBe(settled.wallet);
  });
  it('forfeits an unfinished blackjack when leaving the casino without a refund',()=>{
   // A natural can settle immediately. Open another legal hand until one needs a decision.

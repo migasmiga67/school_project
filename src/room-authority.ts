@@ -181,7 +181,7 @@ export class RoomAuthority {
         if(!action||typeof action!=='object'||pose.interior!=='casino'||pose.homeId||pose.mode!=='foot'||pose.seated||pose.passengerOf||this.tournament.contains(id))return no('Podejdź do wolnego stanowiska w kasynie.');
         const target=action.kind==='rouletteSpin'?CASINO_GAMES.roulette:CASINO_GAMES.blackjack;
         if((action.kind==='blackjackDeal'||action.kind==='rouletteSpin')&&Math.hypot(pose.x-target.x,pose.z-target.z)>2.8)return no('Podejdź do odpowiedniego stołu gry.');
-        const result=member.casinoGames.command(action,member.wallet);
+        const result=member.casinoGames.command(action,member.wallet,this.now);
         if(!result.ok)return no(result.reason);member.wallet=result.wallet;return yes;
       }
       case 'tournament': {
@@ -232,7 +232,12 @@ export class RoomAuthority {
     if(!finite(now)||now<0)return false;
     this.now=Math.max(this.now,now);
     if(this.epoch===null)this.epoch=this.now;
-    let changed=this.updateJobs();changed=this.updateExpansions()||changed;
+    let changed=false;
+    for(const member of this.people.values()){
+      const roulette=member.casinoGames.update(this.now);
+      member.wallet+=roulette.payout;changed=roulette.changed||changed;
+    }
+    changed=this.updateJobs()||changed;changed=this.updateExpansions()||changed;
     if(this.challengeStatus==='active'&&this.now>=this.challengeDeadline) {
       this.challengeStatus='failed';this.challengeReadyAt=this.challengeDeadline+CREW_COOLDOWN_MS;changed=true;
     }

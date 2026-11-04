@@ -4,6 +4,9 @@ import { CASINO } from './casino-location';
 import { CASINO_GAMES } from './casino-games-location';
 import { PokerTableView } from './poker-view';
 import type { PokerState } from './poker-model';
+import type { RouletteSnapshot } from './casino-games';
+import { ROULETTE_POCKETS, ROULETTE_STEP, rouletteMotion } from './roulette-motion';
+import { RoulettePlayback, rouletteColor } from './roulette-view';
 
 type LitMaterial = THREE.MeshLambertMaterial | THREE.MeshStandardMaterial;
 
@@ -17,6 +20,11 @@ export class CasinoView {
   private readonly tableRing: THREE.Mesh;
   private readonly software: boolean;
   private readonly poker: PokerTableView;
+  private readonly rouletteRotor = new THREE.Group();
+  private readonly rouletteClock = new RoulettePlayback();
+  private rouletteBall: THREE.Mesh | null = null;
+  private rouletteState: RouletteSnapshot | null = null;
+  private readonly reducedMotion = window.matchMedia('(prefers-reduced-motion: reduce)');
 
   constructor(software: boolean) {
     this.software = software;
@@ -36,6 +44,8 @@ export class CasinoView {
     this.interior.visible = false;
     this.compact(this.exterior);
     this.compact(this.interior);
+    // Moving parts are added after static geometry batching.
+    this.makeRouletteWheel();
     this.poker = new PokerTableView();
     this.poker.group.position.set(CASINO.table.x, 0, CASINO.table.z);
     this.interior.add(this.poker.group);
@@ -202,13 +212,6 @@ export class CasinoView {
     this.box(2.7, .24, 1.7, wood, roulette, 0, 1.05, 0);
     this.box(2.5, .05, 1.5, green, roulette, 0, 1.2, 0);
     this.box(.8, .95, .8, dark, roulette, 0, .54, 0);
-    const wheel=this.mesh(new THREE.CylinderGeometry(.62,.62,.12,37),gold,roulette,-.52,1.3,0);
-    const wheelFelt=this.mesh(new THREE.CylinderGeometry(.52,.52,.13,37),dark,roulette,-.52,1.33,0);
-    wheelFelt.rotation.y=Math.PI/37;
-    for(let index=0;index<12;index++){
-      const angle=index*Math.PI/6,marker=this.box(.1,.02,.23,index%2?red:gold,roulette,-.52+Math.cos(angle)*.39,1.41,Math.sin(angle)*.39);marker.rotation.y=-angle;
-    }
-    this.mesh(new THREE.SphereGeometry(.055,7,5),blue,roulette,-.28,1.46,.3);
     for(let row=0;row<3;row++)for(let col=0;col<4;col++)this.box(.19,.02,.25,(row+col)%2?red:dark,roulette,.4+col*.24,1.245,-.4+row*.29);
     this.label('ROULETTE · 0–36', '#e9dbad', 2.8, .57, roulette, 0, 2.1, -.7);
     // The tournament registration stand is clear of the normal poker approach.
@@ -275,6 +278,56 @@ export class CasinoView {
     this.tableRing.visible=!seated;
   }
 
+  private makeRouletteWheel() {
+    const root=new THREE.Group();root.name='European roulette wheel · 37 pockets';
+    root.position.set(CASINO_GAMES.roulette.x-.52,1.3,CASINO_GAMES.roulette.z-1.4);
+    this.interior.add(root);
+    const gold=this.material(0xd8bd7d),wood=this.material(0x4e2d25),dark=this.material(0x183b36);
+    this.mesh(new THREE.CylinderGeometry(.64,.65,.13,74),wood,root);
+    this.mesh(new THREE.CylinderGeometry(.59,.59,.045,74),gold,root,0,.075);
+    this.mesh(new THREE.CylinderGeometry(.57,.57,.047,74),dark,root,0,.09);
+    const rim=this.mesh(new THREE.TorusGeometry(.61,.025,6,74),gold,root,0,.11);rim.rotation.x=-Math.PI/2;
+    const track=this.mesh(new THREE.TorusGeometry(.548,.012,5,74),gold,root,0,.122);track.rotation.x=-Math.PI/2;
+    this.rouletteRotor.name='Roulette rotor · clockwise European pocket order';
+    this.rouletteRotor.position.y=.13;root.add(this.rouletteRotor);
+
+    // A single texture keeps every number legible without 37 extra draw calls.
+    const canvas=document.createElement('canvas');canvas.width=1024;canvas.height=1024;
+    const ctx=canvas.getContext('2d')!;ctx.translate(512,512);
+    for(const [index,number] of ROULETTE_POCKETS.entries()){
+      const angle=index*ROULETTE_STEP,start=angle-Math.PI/2-ROULETTE_STEP/2,end=start+ROULETTE_STEP;
+      ctx.beginPath();ctx.arc(0,0,505,start,end);ctx.arc(0,0,278,end,start,true);ctx.closePath();
+      ctx.fillStyle=({red:'#a72f47',black:'#142027',green:'#23765b'} as const)[rouletteColor(number)];ctx.fill();
+      ctx.strokeStyle='#e2ca8a';ctx.lineWidth=3;ctx.stroke();
+      ctx.save();ctx.rotate(angle);ctx.fillStyle='#fff3d6';ctx.font='bold 45px Arial, sans-serif';ctx.textAlign='center';ctx.textBaseline='middle';ctx.fillText(String(number),0,-450);ctx.restore();
+    }
+    ctx.beginPath();ctx.arc(0,0,278,0,Math.PI*2);ctx.fillStyle='#31534c';ctx.fill();ctx.strokeStyle='#dbc48a';ctx.lineWidth=9;ctx.stroke();
+    const texture=new THREE.CanvasTexture(canvas);texture.colorSpace=THREE.SRGBColorSpace;this.textures.add(texture);
+    const face=this.mesh(new THREE.PlaneGeometry(1.04,1.04),new THREE.MeshBasicMaterial({map:texture,transparent:true,side:THREE.DoubleSide}),this.rouletteRotor,0,.002);
+    face.rotation.x=-Math.PI/2;face.castShadow=false;
+    this.mesh(new THREE.CylinderGeometry(.245,.27,.065,37),dark,this.rouletteRotor,0,.033);
+    this.mesh(new THREE.CylinderGeometry(.07,.09,.11,16),gold,this.rouletteRotor,0,.11);
+    this.box(.33,.025,.027,gold,this.rouletteRotor,0,.085,0);this.box(.027,.025,.33,gold,this.rouletteRotor,0,.085,0);
+    this.mesh(new THREE.SphereGeometry(.045,12,8),gold,this.rouletteRotor,0,.185);
+    this.rouletteBall=this.mesh(new THREE.SphereGeometry(.022,12,8),this.material(0xfff7de),root,0,.16,-.375*1.45);
+    this.rouletteBall.name='Roulette ivory ball';
+  }
+
+  setRoulette(state:RouletteSnapshot) {
+    this.rouletteClock.update(state);this.rouletteState=state;
+    this.updateRoulette();
+  }
+
+  private updateRoulette() {
+    const state=this.rouletteState;if(!this.rouletteBall)return;
+    if(!state?.spin){this.rouletteRotor.rotation.y=0;this.rouletteBall.position.set(0,.16,-.375*1.45);return;}
+    let elapsed=Math.min(state.spin.durationMs,this.rouletteClock.time());
+    if(this.reducedMotion.matches&&state.status==='spinning')elapsed=Math.floor(elapsed/360)*360;
+    const motion=rouletteMotion(state.spin,elapsed);
+    this.rouletteRotor.rotation.y=-motion.wheelAngle;
+    this.rouletteBall.position.set(Math.sin(motion.ballAngle)*motion.ballRadius*.375,.16+motion.ballHeight*.3,-Math.cos(motion.ballAngle)*motion.ballRadius*.375);
+  }
+
   /** Batch opaque meshes by material so low-end/software WebGL stays inexpensive. */
   private compact(root: THREE.Group) {
     root.updateMatrixWorld(true);
@@ -306,6 +359,7 @@ export class CasinoView {
     if (!Number.isFinite(time)) return;
     this.animatedMaterials.forEach((material, index) => { material.emissiveIntensity = 0.55 + Math.sin(time * 2 + index) * 0.16; });
     this.tableRing.scale.setScalar(1 + Math.sin(time * 1.8) * 0.04);
+    this.updateRoulette();
   }
 
   destroy() {

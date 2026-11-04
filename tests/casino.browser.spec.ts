@@ -12,6 +12,12 @@ type Snapshot = {
   rendering: { view: 'city' | 'casino' | 'poker'; frames: number; calls: number };
   expansion: {casinoOpen:boolean;casinoStation:string|null;casinoGames:CasinoGamesSnapshot};
 };
+type RouletteFrame = {
+  phase: string; status: string; elapsedMs: number; spinId: number; version: number;
+  durationMs: number; wallet: number; number: number | null; payout: number; history: number[]; locked: boolean; sameSvg: boolean;
+  rotor: string | null; x: string | null; y: string | null;
+};
+type RouletteObservation = { frames: RouletteFrame[]; done: boolean };
 
 async function snapshot(page: Page): Promise<Snapshot> {
   return page.evaluate(() => (window as unknown as { __NEON_TEST__: Snapshot }).__NEON_TEST__);
@@ -203,41 +209,202 @@ test('odświeżenie stołu zwraca niewykorzystane żetony dokładnie raz', async
   expect((await snapshot(page)).casino.reserve).toBe(0);
 });
 
-test('blackjack i ruletka działają przy osobnych stołach w widocznym kasynie',async({page},testInfo)=>{
- test.setTimeout(120000);
- const errors:string[]=[];page.on('pageerror',error=>errors.push(error.message));
- await page.goto('./');await expect(page.locator('#world canvas')).toBeVisible();await page.locator('#start-game').click();
- await page.keyboard.press('e');await expect.poll(async()=>(await snapshot(page)).state.player.mode).toBe('foot');
- await walkUntil(page,'s','z',75,true);await walkUntil(page,'d','x',18.5,true);await walkUntil(page,'w','z',74.5,false);
- await page.keyboard.press('e');await expect.poll(async()=>(await snapshot(page)).state.interior).toBe('casino');
- // Normal walking from the entrance reaches the left-hand blackjack station.
- await walkUntil(page,'a','x',-6.8,false);await walkUntil(page,'w','z',3.2,false);await page.keyboard.press('e');
- await expect(page.locator('#casino-games-dialog')).toBeVisible();await expect(page.locator('#casino-games-title')).toHaveText(/BLACKJACK/);
- await expectCasinoView(page,'casino');
- await page.locator('#casino-bet').fill('100');const before=(await snapshot(page)).state.money;
- await page.locator('#blackjack-deal').click();
- await expect.poll(async()=>(await snapshot(page)).expansion.casinoGames.version).toBeGreaterThan(0);
- let hand=(await snapshot(page)).expansion.casinoGames.blackjack;
- if(hand.status==='playing'){
-  expect((await snapshot(page)).state.money).toBe(before-100);expect(hand.dealer[1].rank).toBe(0);
-  await page.locator('#blackjack-stand').click();
- }
- await expect.poll(async()=>(await snapshot(page)).expansion.casinoGames.blackjack.status).toBe('settled');
- hand=(await snapshot(page)).expansion.casinoGames.blackjack;
- expect((await snapshot(page)).state.money).toBe(before-100+hand.payout);expect(hand.dealer.every(card=>card.rank>0)).toBe(true);
- await page.screenshot({path:testInfo.outputPath('blackjack-casino.png'),fullPage:true});
- await page.locator('#casino-games-close').click();await expect.poll(async()=>(await snapshot(page)).paused).toBe(false);
- // Cross the open south side, clear of the physical poker table collider.
- await walkUntil(page,'d','x',6.8,true);await page.keyboard.press('e');
- await expect(page.locator('#casino-games-title')).toHaveText(/RULETKA/);
- await page.locator('#casino-bet').fill('20');await page.locator('#roulette-choice').selectOption('straight');await page.locator('#roulette-number').fill('0');
- const prior=(await snapshot(page)).state.money,version=(await snapshot(page)).expansion.casinoGames.version;
- await page.locator('#roulette-spin').click();await expect.poll(async()=>(await snapshot(page)).expansion.casinoGames.version).toBeGreaterThan(version);
- const spin=(await snapshot(page)).expansion.casinoGames.roulette;
- expect(spin.number).toBeGreaterThanOrEqual(0);expect(spin.number).toBeLessThanOrEqual(36);expect((await snapshot(page)).state.money).toBe(prior-20+spin.payout);expect(spin.payout).toBe(spin.number===0?720:0);
- await page.setViewportSize({width:390,height:844});await expect(page.locator('#roulette-spin')).toBeInViewport();
- expect(await page.locator('.casino-games-panel').evaluate(element=>element.scrollWidth<=element.clientWidth)).toBe(true);
- await page.screenshot({path:testInfo.outputPath('roulette-mobile.png'),fullPage:true});
- await page.keyboard.press('Escape');await expect(page.locator('#casino-games-dialog')).toHaveCount(0);await expect.poll(async()=>(await snapshot(page)).paused).toBe(false);
- expect(errors).toEqual([]);
+test('blackjack i pełny obrót ruletki działają przy osobnych stołach w widocznym kasynie', async ({ page }, testInfo) => {
+  test.setTimeout(120000);
+  const errors: string[] = [];
+  page.on('pageerror', error => errors.push(error.message));
+  await page.goto('./');
+  await expect(page.locator('#world canvas')).toBeVisible();
+  await page.locator('#start-game').click();
+  await page.keyboard.press('e');
+  await expect.poll(async () => (await snapshot(page)).state.player.mode).toBe('foot');
+  await walkUntil(page, 's', 'z', 75, true);
+  await walkUntil(page, 'd', 'x', 18.5, true);
+  await walkUntil(page, 'w', 'z', 74.5, false);
+  await page.keyboard.press('e');
+  await expect.poll(async () => (await snapshot(page)).state.interior).toBe('casino');
+  // Normal walking from the entrance reaches the left-hand blackjack station.
+  await walkUntil(page, 'a', 'x', -6.8, false);
+  await walkUntil(page, 'w', 'z', 3.2, false);
+  await page.keyboard.press('e');
+  await expect(page.locator('#casino-games-dialog')).toBeVisible();
+  await expect(page.locator('#casino-games-title')).toHaveText(/BLACKJACK/);
+  await expectCasinoView(page, 'casino');
+  await page.locator('#casino-bet').fill('100');
+  const before = (await snapshot(page)).state.money;
+  await page.locator('#blackjack-deal').click();
+  await expect.poll(async () => (await snapshot(page)).expansion.casinoGames.version).toBeGreaterThan(0);
+  let hand = (await snapshot(page)).expansion.casinoGames.blackjack;
+  if (hand.status === 'playing') {
+    expect((await snapshot(page)).state.money).toBe(before - 100);
+    expect(hand.dealer[1].rank).toBe(0);
+    await page.locator('#blackjack-stand').click();
+  }
+  await expect.poll(async () => (await snapshot(page)).expansion.casinoGames.blackjack.status).toBe('settled');
+  hand = (await snapshot(page)).expansion.casinoGames.blackjack;
+  expect((await snapshot(page)).state.money).toBe(before - 100 + hand.payout);
+  expect(hand.dealer.every(card => card.rank > 0)).toBe(true);
+  await page.screenshot({ path: testInfo.outputPath('blackjack-casino.png'), fullPage: true });
+  await page.locator('#casino-games-close').click();
+  await expect.poll(async () => (await snapshot(page)).paused).toBe(false);
+  // Cross the open south side, clear of the physical poker table collider.
+  await walkUntil(page, 'd', 'x', 6.8, true);
+  await page.keyboard.press('e');
+  await expect(page.locator('#casino-games-title')).toHaveText(/RULETKA/);
+  await expect(page.locator('#roulette-wheel svg')).toBeVisible();
+  await expect(page.locator('.roulette-pocket')).toHaveCount(37);
+  const numbers = await page.locator('.roulette-pocket').evaluateAll(pockets =>
+    pockets.map(pocket => Number(pocket.getAttribute('data-pocket-number'))).sort((a, b) => a - b));
+  expect(numbers).toEqual(Array.from({ length: 37 }, (_, number) => number));
+  await page.locator('#casino-bet').fill('20');
+  await page.locator('#roulette-choice').selectOption('straight');
+  await page.locator('#roulette-number').fill('0');
+  await page.screenshot({ path: testInfo.outputPath('roulette-ready.png'), fullPage: true });
+  const prior = await snapshot(page);
+  // Record DOM poses passively inside the page. CDP calls and screenshots must
+  // not determine whether a short dropping or settling phase is observed.
+  await page.evaluate(() => {
+    const scope = window as unknown as { __NEON_TEST__: Snapshot; __ROULETTE_QA__: RouletteObservation };
+    const observation: RouletteObservation = { frames: [], done: false };
+    scope.__ROULETTE_QA__ = observation;
+    const originalSvg = document.querySelector('#roulette-wheel svg');
+    const observe = () => {
+      const wheel = document.querySelector<HTMLElement>('#roulette-wheel');
+      const snapshot = scope.__NEON_TEST__;
+      const state = snapshot.expansion.casinoGames.roulette;
+      if (wheel && state.status !== 'idle' && wheel.dataset.status === state.status) {
+        observation.frames.push({
+          phase: wheel.dataset.phase!, status: state.status, elapsedMs: state.elapsedMs,
+          spinId: state.spin!.id, durationMs: state.spin!.durationMs, version: snapshot.expansion.casinoGames.version,
+          wallet: snapshot.state.money, number: state.number, payout: state.payout, history: [...state.history],
+          locked: ['#casino-bet', '#roulette-choice', '#roulette-number', '#roulette-spin']
+            .every(selector => document.querySelector<HTMLInputElement>(selector)?.disabled === true),
+          sameSvg: originalSvg === wheel.querySelector('svg'),
+          rotor: wheel.querySelector('.roulette-rotor')!.getAttribute('transform'),
+          x: wheel.querySelector('.roulette-ball')!.getAttribute('cx'),
+          y: wheel.querySelector('.roulette-ball')!.getAttribute('cy'),
+        });
+        if (state.status === 'settled') { observation.done = true; return; }
+      }
+      requestAnimationFrame(observe);
+    };
+    requestAnimationFrame(observe);
+  });
+  const startedAt = Date.now();
+  await page.locator('#roulette-spin').click();
+  await page.screenshot({ path: testInfo.outputPath('roulette-spinning.png'), fullPage: true });
+  const frames = await page.evaluate(async () => {
+    const observation = (window as unknown as { __ROULETTE_QA__: RouletteObservation }).__ROULETTE_QA__;
+    while (!observation.done) await new Promise<void>(resolve => requestAnimationFrame(() => resolve()));
+    return observation.frames;
+  });
+  expect(Date.now() - startedAt).toBeGreaterThanOrEqual(6800);
+  await expect(page.locator('#roulette-wheel')).toHaveAttribute('data-status', 'settled');
+  const phaseOrder = ['accelerating', 'spinning', 'slowing', 'dropping', 'settling', 'settled'];
+  const observedPhases = [...new Set(frames.map(frame => frame.phase))];
+  expect(observedPhases).toContain('spinning');
+  expect(observedPhases).toContain('slowing');
+  expect(observedPhases.at(-1)).toBe('settled');
+  expect(frames.every((frame, index) => index === 0
+    || phaseOrder.indexOf(frame.phase) >= phaseOrder.indexOf(frames[index - 1].phase))).toBe(true);
+  const moving = frames.filter(frame => frame.status === 'spinning');
+  expect(new Set(moving.map(frame => frame.rotor)).size).toBeGreaterThan(5);
+  expect(new Set(moving.map(frame => `${frame.x},${frame.y}`)).size).toBeGreaterThan(5);
+  expect(moving.every(frame => frame.sameSvg && frame.locked && frame.number === null && frame.payout === 0
+    && frame.durationMs === 7200 && frame.wallet === prior.state.money - 20
+    && frame.history.length === prior.expansion.casinoGames.roulette.history.length)).toBe(true);
+  expect(new Set(moving.map(frame => frame.spinId)).size).toBe(1);
+  expect(new Set(moving.map(frame => frame.version)).size).toBe(1);
+  await testInfo.attach('roulette-motion-observations', { body: JSON.stringify(frames, null, 2), contentType: 'application/json' });
+  // Reconstruct the pocket from the rendered rotor matrix and ball coordinates.
+  // This deliberately does not call the shared motion or outcome helpers.
+  const visiblePocket = await page.locator('#roulette-wheel svg').evaluate(element => {
+    const rotor = element.querySelector<SVGGElement>('.roulette-rotor')!;
+    const matrix = rotor.transform.baseVal.consolidate()!.matrix;
+    const wheelAngle = Math.atan2(matrix.b, matrix.a);
+    const ball = element.querySelector<SVGCircleElement>('.roulette-ball')!;
+    const ballAngle = Math.atan2(ball.cx.baseVal.value, -ball.cy.baseVal.value);
+    const turn = Math.PI * 2;
+    const relative = ((ballAngle - wheelAngle) % turn + turn) % turn;
+    const order = [0, 32, 15, 19, 4, 21, 2, 25, 17, 34, 6, 27, 13, 36, 11, 30, 8, 23, 10, 5, 24, 16, 33, 1, 20, 14, 31, 9, 22, 18, 29, 7, 28, 12, 35, 3, 26];
+    return order[Math.round(relative / (turn / 37)) % 37];
+  });
+  const settled = await snapshot(page);
+  const outcome = settled.expansion.casinoGames.roulette;
+  expect(outcome.number).toBe(visiblePocket);
+  expect(outcome.payout).toBe(visiblePocket === 0 ? 720 : 0);
+  expect(outcome.history).toEqual([visiblePocket, ...prior.expansion.casinoGames.roulette.history].slice(0, 12));
+  expect(settled.state.money).toBe(prior.state.money - 20 + outcome.payout);
+  await expect(page.locator('#roulette-result strong')).toHaveText(String(visiblePocket));
+  await expect(page.locator('#roulette-message')).toContainText(`Wypadło ${visiblePocket}`);
+  await expect(page.locator('#roulette-payout')).toHaveText(visiblePocket === 0 ? '$720' : '$0');
+  await expect(page.locator('#roulette-net')).toHaveText(visiblePocket === 0 ? '+$700' : '−$20');
+  await expect(page.locator('.roulette-pocket-winner')).toHaveCount(1);
+  await expect(page.locator('.roulette-pocket-winner')).toHaveAttribute('data-pocket-number', String(visiblePocket));
+  await expect(page.locator('.roulette-history span').first()).toHaveText(String(visiblePocket));
+  await expect(page.locator('#roulette-spin')).toBeEnabled();
+  await page.screenshot({ path: testInfo.outputPath('roulette-settled.png'), fullPage: true });
+  await expect.poll(async () => (await snapshot(page)).rendering.frames).toBeGreaterThan(settled.rendering.frames + 5);
+  const afterSettlement = await snapshot(page);
+  expect(afterSettlement.expansion.casinoGames.version).toBe(settled.expansion.casinoGames.version);
+  expect(afterSettlement.expansion.casinoGames.roulette.history).toEqual(outcome.history);
+  expect(afterSettlement.state.money).toBe(settled.state.money);
+
+  // Check mobile controls while the first wager is already settled, so layout
+  // assertions do not compete with the animation's short phases.
+  await page.setViewportSize({ width: 390, height: 844 });
+  for (const control of ['#casino-games-close', '#casino-bet', '#roulette-choice', '#roulette-number', '#roulette-spin']) {
+    await expect(page.locator(control)).toBeInViewport();
+  }
+  expect(await page.locator('.casino-games-panel').evaluate(element => element.scrollWidth <= element.clientWidth)).toBe(true);
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
+  await page.screenshot({ path: testInfo.outputPath('roulette-mobile.png'), fullPage: true });
+
+  // A second real wager isolates close/reopen continuity from visual QA. The
+  // probe only records normal clicks; it never sends actions or changes state.
+  type ContinuityProbe = { accepted?: { id: number; elapsed: number }; closed?: { id: number; elapsed: number } };
+  await page.evaluate(() => {
+    const scope = window as unknown as { __NEON_TEST__: Snapshot; __ROULETTE_CONTINUITY__: ContinuityProbe };
+    const probe: ContinuityProbe = {};
+    scope.__ROULETTE_CONTINUITY__ = probe;
+    const record = (event: MouseEvent) => {
+      const target = event.target as HTMLElement;
+      const state = scope.__NEON_TEST__.expansion.casinoGames.roulette;
+      if (target.closest('#roulette-spin') && state.spin) probe.accepted = { id: state.spin.id, elapsed: state.elapsedMs };
+      if (target.closest('#casino-games-close') && state.spin) probe.closed = { id: state.spin.id, elapsed: state.elapsedMs };
+      if (probe.accepted && probe.closed) document.removeEventListener('click', record);
+    };
+    document.addEventListener('click', record);
+  });
+  const secondStartedAt = Date.now();
+  await page.locator('#roulette-spin').click();
+  await page.locator('#casino-games-close').click();
+  await page.keyboard.press('e');
+  const reopened = await page.evaluate(() => {
+    const scope = window as unknown as { __NEON_TEST__: Snapshot; __ROULETTE_CONTINUITY__: ContinuityProbe };
+    return { probe: scope.__ROULETTE_CONTINUITY__, state: scope.__NEON_TEST__,
+      open: document.querySelector('#casino-games-title')?.textContent?.includes('RULETKA') === true };
+  });
+  expect(reopened.open).toBe(true);
+  expect(reopened.probe.accepted?.id).toBe(outcome.spin!.id + 1);
+  expect(reopened.probe.closed?.id).toBe(reopened.probe.accepted!.id);
+  const continuing = reopened.state.expansion.casinoGames.roulette;
+  expect(continuing.spin!.id).toBe(reopened.probe.accepted!.id);
+  expect(continuing.elapsedMs).toBeGreaterThan(reopened.probe.closed!.elapsed);
+  expect(['spinning', 'settled']).toContain(continuing.status);
+  if (continuing.status === 'settled') expect(Date.now() - secondStartedAt).toBeGreaterThanOrEqual(6800);
+  else expect(reopened.state.state.money).toBe(settled.state.money - 20);
+  const completed = await page.evaluate(async () => {
+    const scope = window as unknown as { __NEON_TEST__: Snapshot };
+    while (scope.__NEON_TEST__.expansion.casinoGames.roulette.status !== 'settled') {
+      await new Promise<void>(resolve => requestAnimationFrame(() => resolve()));
+    }
+    return scope.__NEON_TEST__;
+  });
+  expect(completed.state.money).toBe(settled.state.money - 20 + completed.expansion.casinoGames.roulette.payout);
+  expect(completed.expansion.casinoGames.roulette.history).toHaveLength(outcome.history.length + 1);
+  await page.keyboard.press('Escape');
+  await expect(page.locator('#casino-games-dialog')).toHaveCount(0);
+  await expect.poll(async () => (await snapshot(page)).paused).toBe(false);
+  expect(errors).toEqual([]);
 });

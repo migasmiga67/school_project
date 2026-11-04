@@ -1,7 +1,8 @@
 import { describe,expect,it } from 'vitest';
-import { BUILDINGS,ROADS,WORLD_BOUNDS } from '../src/model';
+import { WORLD_BOUNDS } from '../src/model';
+import { CITY_BUILDINGS,CITY_SPACES,CITY_STREETS,nearestStreet } from '../src/city-map';
 import { WATER_BOUNDS } from '../src/mobility';
-import { PHONE_DESTINATIONS,projectPhoneMap } from '../src/phone-ui';
+import { PHONE_DESTINATIONS,projectPhoneMap,renderPhoneMapSvg } from '../src/phone-ui';
 import { WORLD_LANDMARKS } from '../src/world-layout';
 import { HostPhone,getPhoneDeliveryPoint,PHONE_CHAT_LIMIT,PHONE_DELIVERY_PRICE,PHONE_INVITE_DURATION_MS,type PhoneAction,type PhoneMember,type PhoneDeliveryContext } from '../src/phone';
 
@@ -21,6 +22,25 @@ describe('expanded phone map',()=>{
   for(const point of points){const pixel=projectPhoneMap(point);expect(pixel.x).toBeGreaterThan(0);expect(pixel.x).toBeLessThan(280);expect(pixel.y).toBeGreaterThan(0);expect(pixel.y).toBeLessThan(230);}
   expect(projectPhoneMap({x:0,z:-160}).y).toBeLessThan(projectPhoneMap({x:0,z:160}).y);
   expect(projectPhoneMap({x:-160,z:0}).x).toBeLessThan(projectPhoneMap({x:80,z:0}).x);
+ });
+ it('draws the actual curved streets, spaces and building footprints at their world positions',()=>{
+  const svg=renderPhoneMapSvg(PHONE_DESTINATIONS);
+  const scale=projectPhoneMap({x:1,z:0}).x-projectPhoneMap({x:0,z:0}).x;
+  const strokes=[...svg.matchAll(/<path data-city-street="([^"]+)"[^>]*stroke-width="([^"]+)"/g)];
+  for(const street of CITY_STREETS){
+   const path=street.points.map((point,index)=>{const p=projectPhoneMap(point);return`${index?'L':'M'}${p.x} ${p.y}`;}).join('');
+   expect(svg).toContain(`data-city-street="${street.id}" d="${path}"`);
+   const widths=strokes.filter(stroke=>stroke[1]===street.id).map(stroke=>Number(stroke[2]));
+   expect(widths).toHaveLength(2);expect(widths[0]).toBeCloseTo((street.width+street.sidewalkWidth*2)*scale);expect(widths[1]).toBeCloseTo(street.width*scale);
+  }
+  for(const space of CITY_SPACES)expect(svg).toContain(`data-city-space="${space.id}"`);
+  for(const building of CITY_BUILDINGS){const p=projectPhoneMap({x:building.x-building.halfX,z:building.z-building.halfZ});expect(svg).toContain(`data-city-building="${building.id}" x="${p.x}" y="${p.y}"`);}
+ });
+ it('keeps all destination markers keyboard reachable and escapes map labels',()=>{
+  const svg=renderPhoneMapSvg([...PHONE_DESTINATIONS,{id:'custom',name:'<img onerror="alert(1)">',point:{x:0,z:68},icon:'<&'}]);
+  for(const place of PHONE_DESTINATIONS)expect(svg).toContain(`id="phone-map-${place.id}" role="button" tabindex="0" data-map-destination="${place.id}"`);
+  expect(svg).toContain('aria-label="Wyznacz trasę: &lt;img onerror=&quot;alert(1)&quot;&gt;"');
+  expect(svg).not.toContain('<img');expect(svg).toContain('&lt;&amp;</text>');
  });
 });
 
@@ -92,8 +112,9 @@ describe('own vehicle delivery',()=>{
   expect(delivered.wallet).toBe(1250-PHONE_DELIVERY_PRICE);expect(delivered.delivery).toBeDefined();
   const target=delivered.delivery!;expect(Math.hypot(target.x-host.pose.x,target.z-host.pose.z)).toBeGreaterThanOrEqual(4.5);
   expect(Math.hypot(target.x-host.pose.x,target.z-host.pose.z)).toBeLessThanOrEqual(20);
-  expect(ROADS.includes(target.x)||ROADS.includes(target.z)).toBe(true);
-  expect(BUILDINGS.some(building=>Math.abs(target.x-building.x)<building.halfX+2&&Math.abs(target.z-building.z)<building.halfZ+3)).toBe(false);
+  const street=nearestStreet(target)!;expect(street.distance).toBeLessThan(1e-5);
+  expect(Math.abs(Math.cos(target.heading-street.heading))).toBeCloseTo(1);
+  expect(CITY_BUILDINGS.some(building=>Math.abs(target.x-building.x)<building.halfX+2&&Math.abs(target.z-building.z)<building.halfZ+3)).toBe(false);
   expect(phone.command('host',{kind:'requestCar'},members,1200,1,context).ok).toBe(false);
   expect(phone.snapshot('host').deliveryCooldownMs).toBe(59999);
   expect(accept(phone,members,'friend',{kind:'requestCar'},1,1250,context).wallet).toBe(1200);
@@ -110,7 +131,7 @@ describe('own vehicle delivery',()=>{
   expect(phone.snapshot('host').deliveryCooldownMs).toBe(0);
  });
  it('does not invent a destination outside the land bounds or deep inside a city block',()=>{
-  for(const point of [{x:NaN,z:0},{x:130,z:0},{x:0,z:999},{x:-60,z:60}])expect(getPhoneDeliveryPoint(point)).toBeNull();
-  expect(getPhoneDeliveryPoint({x:20,z:74})).not.toBeNull();
+  for(const point of [{x:NaN,z:0},{x:130,z:0},{x:0,z:999},CITY_BUILDINGS[0]])expect(getPhoneDeliveryPoint(point)).toBeNull();
+  expect(getPhoneDeliveryPoint({x:0,z:68})).not.toBeNull();
  });
 });

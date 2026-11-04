@@ -1,4 +1,5 @@
-import { BUILDINGS, ROAD_X, ROAD_Z, ROAD_NODES, WORLD_BOUNDS } from './model';
+import { BUILDINGS, ROAD_NODES, WORLD_BOUNDS } from './model';
+import { CITY_TRAFFIC_LOOPS, nearestStreet, routeStreets } from './city-map';
 import { CASINO } from './casino-location';
 import { BIKE_LOCATION, DOCK, advanceBikeFlight, advanceBoat, canBoardDockBoat, canDisembarkBoat, resetMobilityMotion } from './mobility';
 import type { GameEvent, GameState, Input, Point, Vehicle, PursuitState, Roadblock } from './model';
@@ -27,18 +28,15 @@ function pursuitState(s:GameState):PursuitState {
   return s.pursuit??=( {status:'clear',visible:false,hidden:false,searchSeconds:0,concealmentSeconds:0,patrols:[],roadblocks:[],helicopter:null} );
 }
 function roadblockHit(s:GameState,p:Point,radius:number):boolean {
-  return s.wanted>=2&&Boolean(s.pursuit?.roadblocks.some(b=>s.time<b.expiresAt&&Math.abs(p.x-b.x)<b.halfX+radius&&Math.abs(p.z-b.z)<b.halfZ+radius));
+  return s.wanted>=2&&Boolean(s.pursuit?.roadblocks.some(b=>{
+    const dx=p.x-b.x,dz=p.z-b.z,c=Math.cos(b.heading),sin=Math.sin(b.heading);
+    return s.time<b.expiresAt&&Math.abs(dx*c-dz*sin)<3.8+radius&&Math.abs(dx*sin+dz*c)<.65+radius;
+  }));
 }
-const trafficLoops: Point[][] = [
-  [{ x: -80, z: -80 }, { x: 80, z: -80 }, { x: 80, z: 80 }, { x: -80, z: 80 }],
-  [{ x: -40, z: -40 }, { x: -40, z: 40 }, { x: 40, z: 40 }, { x: 40, z: -40 }],
-  [{x:-200,z:-80},{x:-120,z:-80},{x:-120,z:80},{x:-200,z:80}],
-  [{x:-80,z:-200},{x:80,z:-200},{x:80,z:-120},{x:-80,z:-120}],
-  [{x:-160,z:120},{x:80,z:120},{x:80,z:200},{x:-160,z:200}],
-];
+const trafficLoops=CITY_TRAFFIC_LOOPS;
 const trafficSeed=(index:number)=>index<8?(index%2?index*31+45:index*59+50):(index-8)*61+24;
 const trafficLoop=(index:number)=>trafficLoops[index<8?index%2:2+(index-8)%3];
-function loopPose(points: Point[], progress: number): Point & { heading: number } {
+function loopPose(points: readonly Point[], progress: number): Point & { heading: number } {
   const perimeter = points.reduce((sum, p, i) => sum + length(p, points[(i + 1) % points.length]), 0);
   let distance = ((progress % perimeter) + perimeter) % perimeter;
   for (let i = 0; i < points.length; i++) {
@@ -274,38 +272,6 @@ function traffic(s: GameState, dt: number, events: GameEvent[]) {
   }
 }
 
-function roadPoint(p: Point): Point {
-  const x = ROAD_X.reduce((a, b) => Math.abs(b - p.x) < Math.abs(a - p.x) ? b : a);
-  const z = ROAD_Z.reduce((a, b) => Math.abs(b - p.z) < Math.abs(a - p.z) ? b : a);
-  return Math.abs(x - p.x) < Math.abs(z - p.z) ? { x, z: clamp(p.z, ROAD_Z[0], ROAD_Z.at(-1)!) } : { x: clamp(p.x, ROAD_X[0], ROAD_X.at(-1)!), z };
-}
-/** Small Dijkstra graph with virtual points on road segments avoids cutting across buildings. */
-function roadRoute(from: Point, target: Point): Point[] {
-  const start = roadPoint(from), goal = roadPoint(target);
-  const nodes: Point[] = [...ROAD_NODES,start,goal];
-  const startIndex = nodes.length - 2, goalIndex = nodes.length - 1, distances = nodes.map(() => Infinity), previous = nodes.map(() => -1), visited = new Set<number>(); distances[startIndex] = 0;
-  for (let count = 0; count < nodes.length; count++) {
-    let current = -1;
-    for (let i = 0; i < nodes.length; i++) if (!visited.has(i) && (current < 0 || distances[i] < distances[current])) current = i;
-    if (current < 0 || !Number.isFinite(distances[current])) break;
-    if (current === goalIndex) break; visited.add(current);
-    for (let i = 0; i < nodes.length; i++) {
-      if (i === current || visited.has(i)) continue;
-      // Virtual start/goal points can share an off-grid coordinate. Alignment
-      // alone would connect parallel streets straight through a building.
-      const verticalRoad = Math.abs(nodes[i].x - nodes[current].x) < .01 && ROAD_X.some(road => Math.abs(road - nodes[current].x) < .01);
-      const horizontalRoad = Math.abs(nodes[i].z - nodes[current].z) < .01 && ROAD_Z.some(road => Math.abs(road - nodes[current].z) < .01);
-      if (!verticalRoad && !horizontalRoad) continue;
-      const cost = distances[current] + length(nodes[current], nodes[i]);
-      if (cost < distances[i]) { distances[i] = cost; previous[i] = current; }
-    }
-  }
-  const route: Point[] = []; let i = goalIndex;
-  while (i !== startIndex && i >= 0) { route.unshift({ ...nodes[i] }); i = previous[i]; }
-  if (length(from, start) > .5) route.unshift(start);
-  if (length(goal, target) > .5 && clearSight(goal, target)) route.push({ ...target });
-  return route;
-}
 function spawnPolice(s: GameState) {
   const rt = runtime(s);
   while (s.police.length < s.wanted) {
@@ -342,8 +308,8 @@ function updateRoadblocks(s:GameState,events:GameEvent[]){
   });
   const point=candidates[0];rt.nextRoadblock=s.time+24;
   if(!point)return;
-  const horizontal=Math.abs(direction.z)>=Math.abs(direction.x);
-  const block:Roadblock={...point,id:`block-${++rt.serial}`,halfX:horizontal?3.8:.65,halfZ:horizontal?.65:3.8,heading:horizontal?0:Math.PI/2,expiresAt:s.time+22};
+  const blockHeading=-(nearestStreet(point)?.heading??heading),c=Math.abs(Math.cos(blockHeading)),sin=Math.abs(Math.sin(blockHeading));
+  const block:Roadblock={...point,id:`block-${++rt.serial}`,halfX:c*3.8+sin*.65,halfZ:sin*3.8+c*.65,heading:blockHeading,expiresAt:s.time+22};
   state.roadblocks.push(block);
   events.push({kind:'wanted',text:'Policja ustawiła blokadę na skrzyżowaniu. Omiń barierę poboczem albo wybierz inną ulicę.'});
 }
@@ -387,7 +353,7 @@ function pursuit(s: GameState, dt: number, events: GameEvent[]) {
   for (const cop of s.police) {
     let route = rt.policeRoutes.get(cop.id);
     if (!route || s.time >= route.at || length(route.target, suspect) > 8) {
-      route = { target: { ...suspect }, path: roadRoute(cop, suspect), at: s.time + 1.2 }; rt.policeRoutes.set(cop.id, route);
+      route = { target: { ...suspect }, path: routeStreets(cop, suspect), at: s.time + 1.2 }; rt.policeRoutes.set(cop.id, route);
     }
     while (route.path.length && length(cop, route.path[0]) < .5) route.path.shift();
     const target = route.path[0];

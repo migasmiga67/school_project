@@ -1,4 +1,6 @@
 import type { Card, Suit } from './poker-model';
+import { createRouletteSpin, isRouletteSpin, rouletteMotion, rouletteNumberAtAngle, ROULETTE_SPIN_MS, type RouletteSpin } from './roulette-motion';
+export type { RouletteSpin } from './roulette-motion';
 
 export type RouletteChoice = 'red' | 'black' | 'odd' | 'even' | 'straight';
 export type CasinoGameAction = { version: number } & (
@@ -12,8 +14,12 @@ export interface BlackjackSnapshot {
   canDouble: boolean; message: string;
 }
 export interface RouletteSnapshot {
+  status:'idle'|'spinning'|'settled'; spin:RouletteSpin|null; elapsedMs:number;
+  betNumber:number|null;
   number: number | null; choice: RouletteChoice | null; stake: number; payout: number; history: number[]; message: string;
 }
+/** Persist atomically with the solo wallet: its stake has already been debited. */
+export interface SavedRoulette { version:1; roulette:RouletteSnapshot; startedAt:number|null }
 export interface CasinoGamesSnapshot { version: number; blackjack: BlackjackSnapshot; roulette: RouletteSnapshot }
 export type CasinoGameResult = { ok: true; wallet: number; message: string } | { ok: false; reason: string };
 export const CASINO_MIN_BET = 10;
@@ -22,6 +28,22 @@ export const ROULETTE_RED = new Set([1,3,5,7,9,12,14,16,18,19,21,23,25,27,30,32,
 const SUITS: Suit[] = ['♠','♥','♦','♣'];
 const no = (reason: string): CasinoGameResult => ({ok:false,reason});
 const clone = <T>(value:T):T => structuredClone(value);
+const record = (value:unknown):value is Record<string,unknown> => Boolean(value&&typeof value==='object'&&!Array.isArray(value));
+const integer = (value:unknown,max:number):value is number => typeof value==='number'&&Number.isSafeInteger(value)&&value>=0&&value<=max;
+
+function savedRoulette(value:unknown):value is SavedRoulette {
+  if(!record(value)||value.version!==1||!record(value.roulette))return false;
+  const spin=value.roulette;
+  if(!['idle','spinning','settled'].includes(String(spin.status))||typeof spin.elapsedMs!=='number'||!Number.isFinite(spin.elapsedMs)||spin.elapsedMs<0||spin.elapsedMs>ROULETTE_SPIN_MS)return false;
+  if(spin.number!==null&&!integer(spin.number,36)||![null,'red','black','odd','even','straight'].includes(spin.choice as null|string)||!integer(spin.stake,500)||!integer(spin.payout,18000)||!Array.isArray(spin.history)||spin.history.length>12||!spin.history.every(number=>integer(number,36))||typeof spin.message!=='string'||spin.message.length>600)return false;
+  if(spin.betNumber!==null&&!integer(spin.betNumber,36)||spin.choice==='straight'&&spin.betNumber===null||spin.choice!=='straight'&&spin.betNumber!==null)return false;
+  if(spin.status==='idle')return value.startedAt===null&&spin.spin===null&&spin.elapsedMs===0&&spin.number===null&&spin.choice===null&&spin.stake===0&&spin.payout===0&&spin.history.length===0;
+  if(typeof value.startedAt!=='number'||!Number.isFinite(value.startedAt)||value.startedAt<0||!isRouletteSpin(spin.spin)||spin.spin.id>=Number.MAX_SAFE_INTEGER||spin.choice===null||spin.stake<CASINO_MIN_BET||spin.stake%10!==0)return false;
+  if(spin.status==='spinning')return spin.elapsedMs<ROULETTE_SPIN_MS&&spin.number===null&&spin.payout===0;
+  const pose=rouletteMotion(spin.spin,spin.spin.durationMs);
+  return spin.elapsedMs===ROULETTE_SPIN_MS&&spin.number===rouletteNumberAtAngle(pose.ballAngle-pose.wheelAngle)&&spin.history[0]===spin.number
+    &&spin.payout===roulettePayout(Number(spin.number),spin.choice as RouletteChoice,spin.stake,spin.betNumber===null?undefined:Number(spin.betNumber));
+}
 
 /** Aces become one as needed; the dealer stands on every seventeen. */
 export function blackjackValue(cards: readonly Card[]): number {
@@ -41,8 +63,13 @@ export class CasinoGames {
   private revision=0;
   private seed:number;
   private deck:Card[]=[];
+  private now=0;
+  private rouletteStartedAt=0;
+  private rouletteResumeAt=0;
+  private rouletteResumeElapsed=0;
+  private spinId=0;
   private blackjack:BlackjackSnapshot={status:'idle',player:[],dealer:[],stake:0,payout:0,outcome:null,canDouble:false,message:'Postaw zakład i spróbuj zbliżyć się do 21.'};
-  private roulette:RouletteSnapshot={number:null,choice:null,stake:0,payout:0,history:[],message:'Ruletka europejska: jedno zero. Wybierz zakład.'};
+  private roulette:RouletteSnapshot={status:'idle',spin:null,elapsedMs:0,betNumber:null,number:null,choice:null,stake:0,payout:0,history:[],message:'Ruletka europejska: jedno zero. Wybierz zakład.'};
 
   constructor(seed?:number){
     this.seed=(seed??crypto.getRandomValues(new Uint32Array(1))[0])>>>0||0x9e3779b9;
@@ -52,10 +79,39 @@ export class CasinoGames {
     if(blackjack.status==='playing')blackjack.dealer=blackjack.dealer.map((card,index)=>index===0?card:{rank:0,suit:'♠'});
     return {version:this.revision,blackjack,roulette:clone(this.roulette)};
   }
-  command(action:CasinoGameAction,wallet:number):CasinoGameResult {
+  saveRoulette():SavedRoulette {
+    return {version:1,roulette:clone(this.roulette),startedAt:this.roulette.status==='idle'?null:this.rouletteStartedAt};
+  }
+  /** Restore only into a fresh controller. The next update consumes any credit. */
+  restoreRoulette(value:unknown,now=Date.now()):boolean {
+    if(this.revision!==0||!Number.isFinite(now)||now<0||!savedRoulette(value))return false;
+    const roulette=value.roulette,spin=roulette.spin;
+    this.roulette={status:roulette.status,spin:spin?{id:spin.id,durationMs:spin.durationMs,wheelStart:spin.wheelStart,wheelTravel:spin.wheelTravel,ballStart:spin.ballStart,ballTravel:spin.ballTravel}:null,elapsedMs:roulette.elapsedMs,betNumber:roulette.betNumber,number:roulette.number,choice:roulette.choice,stake:roulette.stake,payout:roulette.payout,history:[...roulette.history],message:roulette.message};
+    this.rouletteStartedAt=value.startedAt??0;this.now=Math.max(this.now,now);
+    this.rouletteResumeAt=this.now;this.rouletteResumeElapsed=roulette.elapsedMs;
+    this.spinId=Math.max(this.spinId,spin?.id??0);this.revision++;
+    return true;
+  }
+  /** Settlement is consumed once by the wallet owner, including losing spins. */
+  update(now=Date.now()):{changed:boolean;payout:number} {
+    if(!Number.isFinite(now)||now<0)return {changed:false,payout:0};
+    this.now=Math.max(this.now,now);
+    const spin=this.roulette.spin;
+    if(this.roulette.status!=='spinning'||!spin)return {changed:false,payout:0};
+    this.roulette.elapsedMs=Math.min(spin.durationMs,Math.max(this.roulette.elapsedMs,this.now-this.rouletteStartedAt,this.rouletteResumeElapsed+this.now-this.rouletteResumeAt));
+    if(this.roulette.elapsedMs<spin.durationMs)return {changed:false,payout:0};
+    const pose=rouletteMotion(spin,spin.durationMs);
+    const number=rouletteNumberAtAngle(pose.ballAngle-pose.wheelAngle);
+    const payout=roulettePayout(number,this.roulette.choice!,this.roulette.stake,this.roulette.betNumber??undefined);
+    Object.assign(this.roulette,{status:'settled',number,payout,history:[number,...this.roulette.history].slice(0,12),message:`Wypadło ${number}${number===0?' · zero':ROULETTE_RED.has(number)?' · czerwone':' · czarne'}. ${payout?`Wypłata $${payout}.`:'Zakład przegrywa.'}`});
+    this.revision++;
+    return {changed:true,payout};
+  }
+  command(action:CasinoGameAction,wallet:number,now=Date.now()):CasinoGameResult {
     if(!Number.isSafeInteger(wallet)||wallet<0)return no('Niepoprawny portfel.');
     if(!action||typeof action!=='object'||!Number.isSafeInteger(action.version)||action.version!==this.revision)return no('Stan gry się zmienił. Wybierz akcję ponownie.');
     if(!['blackjackDeal','blackjackHit','blackjackStand','blackjackDouble','blackjackForfeit','rouletteSpin'].includes(action.kind))return no('Nieznana gra kasyna.');
+    if(this.roulette.status==='spinning')return no('Koło wciąż się kręci. Poczekaj, aż kulka zatrzyma się w kieszeni.');
     const active=this.blackjack.status==='playing';
     if(action.kind==='blackjackDeal'||action.kind==='rouletteSpin'){
       if(active)return no('Dokończ bieżące rozdanie blackjacka.');
@@ -64,9 +120,11 @@ export class CasinoGames {
       if(action.kind==='rouletteSpin'){
         if(!['red','black','odd','even','straight'].includes(action.choice))return no('Niepoprawny rodzaj zakładu.');
         if(action.choice==='straight'&&(!Number.isInteger(action.number)||action.number! < 0||action.number! > 36))return no('Wybierz liczbę od 0 do 36.');
-        const number=Math.floor(this.random()*37),payout=roulettePayout(number,action.choice,action.bet,action.number);
-        this.roulette={number,choice:action.choice,stake:action.bet,payout,history:[number,...this.roulette.history].slice(0,12),message:`Wypadło ${number}${number===0?' · zero':ROULETTE_RED.has(number)?' · czerwone':' · czarne'}. ${payout?`Wypłata $${payout}.`:'Zakład przegrywa.'}`};
-        this.revision++;return {ok:true,wallet:wallet-action.bet+payout,message:this.roulette.message};
+        if(!Number.isFinite(now)||now<0)return no('Niepoprawny zegar gry.');
+        this.now=now;this.rouletteStartedAt=now;this.rouletteResumeAt=now;this.rouletteResumeElapsed=0;
+        const spin=createRouletteSpin(++this.spinId,()=>this.random(),this.roulette.spin);
+        this.roulette={status:'spinning',spin,elapsedMs:0,betNumber:action.choice==='straight'?action.number!:null,number:null,choice:action.choice,stake:action.bet,payout:0,history:[...this.roulette.history],message:'Koło nabiera prędkości. Zakład przyjęty — poczekaj na kulkę.'};
+        this.revision++;return {ok:true,wallet:wallet-action.bet,message:this.roulette.message};
       }
       this.shuffle();
       this.blackjack={status:'playing',player:[this.draw(),this.draw()],dealer:[this.draw(),this.draw()],stake:action.bet,payout:0,outcome:null,canDouble:true,message:'Dobierz kartę, zostań albo podwój zakład.'};

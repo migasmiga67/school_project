@@ -1,6 +1,8 @@
 import * as THREE from 'three';
 import type { Point } from './model';
-import { ROAD_NODES } from './model';
+import { BUILDINGS } from './model';
+import { CITY_STREETS, clearCitySegment } from './city-map';
+import { pathLength, samplePath } from './city-art';
 
 export interface CityEvent { id:string; title:string; target:Point; reward:number; expiresAt:number }
 export interface CityEnvironment {
@@ -41,14 +43,32 @@ export function cityEventAt(seconds:number):CityEvent|null {
   return {id:`city-${cycle}-${event.kind}`,title:event.title,target:{...event.target},reward:event.reward,expiresAt:cycle*120+40};
 }
 
-const BLOCKS=[{x:-20,z:-20},{x:20,z:-20},{x:-60,z:20},{x:60,z:60},{x:-180,z:-20},{x:-140,z:60},{x:20,z:-180},{x:-60,z:-140},{x:-140,z:140},{x:20,z:180}];
-export const PEDESTRIAN_COUNT=BLOCKS.length*4;
+interface PedestrianRoute {points:Point[];length:number}
+const pedestrianRoutes:PedestrianRoute[]=[];
+// Offset the same sampled street curves used by asphalt and traffic. Split a route
+// whenever a corner cannot provide a person's clearance beside an existing facade.
+for(const street of CITY_STREETS){
+  if(street.sidewalkWidth<1.2)continue;
+  const length=pathLength(street.points),offset=street.width/2+street.sidewalkWidth*.52;
+  for(const side of[-1,1]){
+    let points:Point[]=[];
+    const save=()=>{if(points.length>3){const routeLength=pathLength(points);if(routeLength>12)pedestrianRoutes.push({points,length:routeLength});}points=[];};
+    for(let distance=3;distance<length-2;distance+=3){
+      const sample=samplePath(street.points,distance),point={x:sample.x-sample.dz*offset*side,z:sample.z+sample.dx*offset*side};
+      if(BUILDINGS.some(b=>Math.abs(point.x-b.x)<b.halfX+.65&&Math.abs(point.z-b.z)<b.halfZ+.65)){save();continue;}
+      if(points.length&&!clearCitySegment(points[points.length-1],point,.65))save();
+      points.push(point);
+    }
+    save();
+  }
+}
+export const PEDESTRIAN_COUNT=64;
 export function pedestrianPose(index:number,seconds:number):Point&{heading:number} {
-  const block=BLOCKS[((Math.floor(index/4)%BLOCKS.length)+BLOCKS.length)%BLOCKS.length],half=13.5;
-  const route=[{x:block.x-half,z:block.z-half},{x:block.x+half,z:block.z-half},{x:block.x+half,z:block.z+half},{x:block.x-half,z:block.z+half}];
-  const progress=((index*17+time(seconds)*(.85+index%4*.12))%108+108)%108;
-  const side=Math.floor(progress/27),from=route[side],to=route[(side+1)%4],part=(progress-side*27)/27;
-  return {x:from.x+(to.x-from.x)*part,z:from.z+(to.z-from.z)*part,heading:Math.atan2(to.x-from.x,-(to.z-from.z))};
+  const person=((Math.floor(index)%PEDESTRIAN_COUNT)+PEDESTRIAN_COUNT)%PEDESTRIAN_COUNT;
+  const route=pedestrianRoutes[Math.floor(person*pedestrianRoutes.length/PEDESTRIAN_COUNT)];
+  const cycle=route.length*2,progress=(person*17+time(seconds)*(.85+person%4*.12))%cycle;
+  const returning=progress>route.length,sample=samplePath(route.points,returning?cycle-progress:progress),direction=returning?-1:1;
+  return{x:sample.x,z:sample.z,heading:Math.atan2(sample.dx*direction,-sample.dz*direction)};
 }
 
 /** Decorative city life adds no colliders, wallets or client-owned rewards. */
@@ -105,19 +125,35 @@ export class CityLife {
     const mesh=new THREE.Mesh(this.geometry,material);mesh.scale.set(w,h,d);mesh.position.set(x,y,z);parent.add(mesh);return mesh;
   }
   private streetLights(){
-    const postMaterial=new THREE.MeshLambertMaterial({color:0x334a54});
-    const posts=new THREE.InstancedMesh(this.geometry,postMaterial,ROAD_NODES.length),bulbs=new THREE.InstancedMesh(this.geometry,this.lampMaterial,ROAD_NODES.length);
-    let index=0;
-    for(const {x,z} of ROAD_NODES){
-      this.dummy.position.set(x+6.6,2.45,z+6.6);this.dummy.rotation.set(0,0,0);this.dummy.scale.set(.15,4.8,.15);this.dummy.updateMatrix();posts.setMatrixAt(index,this.dummy.matrix);
-      this.dummy.position.y=4.9;this.dummy.scale.set(.65,.18,.65);this.dummy.updateMatrix();bulbs.setMatrixAt(index,this.dummy.matrix);index++;
+    const postMaterial=new THREE.MeshLambertMaterial({color:0x465e61});
+    interface Detail {x:number;z:number;angle:number;side:number}
+    const sectors=new Map<string,{lamps:Detail[];puddles:Detail[]}>();
+    const sector=(x:number,z:number)=>{const key=`${Math.floor(x/64)},${Math.floor(z/64)}`;let value=sectors.get(key);if(!value){value={lamps:[],puddles:[]};sectors.set(key,value);}return value;};
+    for(const street of CITY_STREETS){
+      const length=pathLength(street.points);
+      for(let distance=12,index=0;distance<length-5;distance+=street.kind==='alley'?38:28,index++){
+        const point=samplePath(street.points,distance),side=index%2?1:-1,offset=street.width/2+Math.max(.45,street.sidewalkWidth*.85),x=point.x-point.dz*offset*side,z=point.z+point.dx*offset*side;
+        if(!BUILDINGS.some(b=>Math.abs(x-b.x)<b.halfX+.4&&Math.abs(z-b.z)<b.halfZ+.4))sector(x,z).lamps.push({x,z,angle:Math.atan2(point.dz*side,-point.dx*side),side});
+        if(index%2===0){const x=point.x-point.dz*street.width*.22,z=point.z+point.dx*street.width*.22;sector(x,z).puddles.push({x,z,angle:Math.atan2(point.dx,point.dz),side});}
+      }
     }
-    this.group.add(posts);this.lamps.add(bulbs);
-    const puddles=new THREE.InstancedMesh(this.geometry,this.puddleMaterial,Math.floor(ROAD_NODES.length/2));
-    for(let i=0;i<puddles.count;i++){
-      const point=ROAD_NODES[i*2];this.dummy.position.set(point.x,.085,point.z+12);this.dummy.scale.set(2.8,.006,6);this.dummy.updateMatrix();puddles.setMatrixAt(i,this.dummy.matrix);
+    for(const {lamps,puddles}of sectors.values()){
+      if(lamps.length){
+        const posts=new THREE.InstancedMesh(this.geometry,postMaterial,lamps.length*3),bulbs=new THREE.InstancedMesh(this.geometry,this.lampMaterial,lamps.length);
+        lamps.forEach((point,index)=>{
+          const armX=Math.sin(point.angle)*.65,armZ=Math.cos(point.angle)*.65;
+          this.dummy.position.set(point.x,3,point.z);this.dummy.rotation.set(0,point.angle,0);this.dummy.scale.set(.15,6,.15);this.dummy.updateMatrix();posts.setMatrixAt(index*3,this.dummy.matrix);
+          this.dummy.position.set(point.x+armX,5.9,point.z+armZ);this.dummy.scale.set(.14,.14,1.4);this.dummy.updateMatrix();posts.setMatrixAt(index*3+1,this.dummy.matrix);
+          this.dummy.position.set(point.x+armX*2,5.8,point.z+armZ*2);this.dummy.scale.set(.48,.2,.9);this.dummy.updateMatrix();posts.setMatrixAt(index*3+2,this.dummy.matrix);
+          this.dummy.position.y=5.68;this.dummy.scale.set(.42,.05,.74);this.dummy.updateMatrix();bulbs.setMatrixAt(index,this.dummy.matrix);
+        });
+        posts.computeBoundingSphere();bulbs.computeBoundingSphere();this.group.add(posts);this.lamps.add(bulbs);
+      }
+      if(puddles.length){
+        const mesh=new THREE.InstancedMesh(this.geometry,this.puddleMaterial,puddles.length);
+        puddles.forEach((point,index)=>{this.dummy.position.set(point.x,.092,point.z);this.dummy.rotation.set(0,point.angle,0);this.dummy.scale.set(1.4,.006,4.2);this.dummy.updateMatrix();mesh.setMatrixAt(index,this.dummy.matrix);});mesh.computeBoundingSphere();this.reflections.add(mesh);
+      }
     }
-    this.reflections.add(puddles);
   }
   private garage(){
     const facade=new THREE.Group();facade.position.set(-20,0,72.4);facade.name='mod-shop';
