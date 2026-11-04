@@ -289,7 +289,7 @@ export class CityView {
 
   private city() {
     const trim=this.surfaces.concrete,glass=this.surfaces.windowGlass,roof=this.surfaces.roof;
-    const windowGeo=new THREE.BoxGeometry(1.55,1.95,.085);
+    const windowGeo=this.softwareRendering?new THREE.PlaneGeometry(1.55,1.95):new THREE.BoxGeometry(1.55,1.95,.085);
     const windowSectors=new Map<string,{windows:THREE.Matrix4[];litWindows:THREE.Matrix4[];frames:THREE.Matrix4[]}>();
     const windowFrame=this.material(0x4a5051,{metalness:.35,roughness:.55});
     const litGlass=this.surfaces.litWindow;
@@ -318,8 +318,12 @@ export class CityView {
       const step=western?4.6:3.8;
       for(let y=5.4;surface!==this.surfaces.office&&y<height-1.3;y+=3.65)for(let offset=-7.6;offset<=7.6;offset+=step)for(const side of[0,1,2,3]){
         dummy.position.set(side===1?b.x+width/2+.05:side===3?b.x-width/2-.05:b.x+offset,y,side===0?b.z+depth/2+.05:side===2?b.z-depth/2-.05:b.z+offset);
-        dummy.rotation.set(0,side%2?Math.PI/2:0,0);dummy.scale.set(1,1,1);dummy.updateMatrix();
+        dummy.rotation.set(0,this.softwareRendering?side*Math.PI/2:side%2?Math.PI/2:0,0);dummy.scale.set(1,1,1);
+        // Single-sided glass faces outward and sits just ahead of its larger frame.
+        if(this.softwareRendering)dummy.translateZ(.015);
+        dummy.updateMatrix();
         ((Math.round(y)+side+Math.round(offset)+i)%6===0?litWindows:windows).push(dummy.matrix.clone());
+        if(this.softwareRendering)dummy.translateZ(-.015);
         dummy.scale.set(1.15,1.13,.65);dummy.updateMatrix();frames.push(dummy.matrix.clone());
       }
       if(i<15&&i%3===1)this.box(.28,height,depth+.08,trim,this.scene,b.x-width/2+2,height/2+.18,b.z);

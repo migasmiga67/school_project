@@ -110,27 +110,41 @@ test('telefon dwóch klientów przesyła zwykły tekst, zaproszenie i dostawia w
   await expect(host.locator('#phone-chat-text')).toHaveValue('');
   await openPhone(guest);await guest.locator('#phone-tab-chat').click();
   await expect(guest.locator('.phone-chat-message p').filter({hasText:message})).toHaveText(message);
-  expect(await guest.locator('#phone-content img').count()).toBe(0);expect(await guest.evaluate(()=>Object.prototype.hasOwnProperty.call(window,'__CHAT_INJECTED__'))).toBe(false);
-  await expect.poll(async()=>(await room(guest)).phone.messages.some(entry=>entry.text===message&&entry.senderName==='Alicja')).toBe(true);
+  await expect.poll(async()=>guest.evaluate(text=>{
+   const current=(window as unknown as{__NEON_TEST__:Snapshot}).__NEON_TEST__,shared=current.online.snapshot;
+   return{online:current.online.status,hasRoom:shared!==null,images:document.querySelectorAll('#phone-content img').length,injected:Object.prototype.hasOwnProperty.call(window,'__CHAT_INJECTED__'),message:shared?.phone.messages.some(entry=>entry.text===text&&entry.senderName==='Alicja')};
+  },message)).toEqual({online:'online',hasRoom:true,images:0,injected:false,message:true});
   await host.bringToFront();await host.locator('#phone-tab-invites').click();await host.locator('#phone-invite-activity').selectOption('bank');await host.locator('#phone-send-invite').click();
-  await expect.poll(async()=>(await room(guest)).phone.invites.length).toBe(1);const invitation=(await room(guest)).phone.invites[0];
+  let invitation!:PhoneSnapshot['invites'][number];
+  await expect.poll(async()=>{const shared=await room(guest);invitation=shared.phone.invites[0];return shared.phone.invites.length;}).toBe(1);
   await guest.bringToFront();await guest.locator('#phone-tab-invites').click();await guest.locator(`#phone-invite-accept-${invitation.id}`).click();
-  for(const page of[host,guest])await expect.poll(async()=>{
+  await Promise.all([host,guest].map(page=>expect.poll(async()=>{
    const shared=await room(page);
    return{invitation:shared.phone.invites[0].status,activity:shared.jobs.active,challenge:shared.challenge.status};
-  }).toEqual({invitation:'ready',activity:null,challenge:'idle'});
+  }).toEqual({invitation:'ready',activity:null,challenge:'idle'})));
   await guest.screenshot({path:info.outputPath('crew-phone-invitation.png'),fullPage:true});
-  await host.bringToFront();await host.locator('#phone-close').click();await host.keyboard.press('e');await expect.poll(async()=>(await snapshot(host)).state.player.mode).toBe('foot');
-  const before=await room(host);await openPhone(host);await host.locator('#phone-tab-garage').click();await host.locator('#phone-request-car').click();
+  await host.bringToFront();await host.locator('#phone-close').click();await host.keyboard.press('e');
+  let before!:RoomSnapshot;
   await expect.poll(async()=>{
-   const shared=await room(host);return{wallet:shared.wallet,version:shared.deliveryEffect.version};
+   const current=await snapshot(host);before=current.online.snapshot!;
+   return{mode:current.state.player.mode,online:current.online.status,hasRoom:current.online.snapshot!==null};
+  }).toEqual({mode:'foot',online:'online',hasRoom:true});
+  await openPhone(host);await host.locator('#phone-tab-garage').click();await host.locator('#phone-request-car').click();
+  let delivered!:RoomSnapshot;
+  await expect.poll(async()=>{
+   const shared=await room(host);delivered=shared;return{wallet:shared.wallet,version:shared.deliveryEffect.version};
   }).toEqual({wallet:before.wallet-50,version:before.deliveryEffect.version+1});
-  const delivered=await room(host),target=delivered.deliveryEffect.target!;
+  const target=delivered.deliveryEffect.target!;
   expect(target).not.toBeNull();await expect(host.locator('#phone-request-car')).toBeDisabled();
-  await expect.poll(async()=>{const car=(await snapshot(host)).state.vehicles.find(vehicle=>vehicle.id==='stratus')!;return Math.hypot(car.x-target.x,car.z-target.z);}).toBeLessThan(.1);
-  const player=(await snapshot(host)).state.player;expect(Math.hypot(player.x-target.x,player.z-target.z)).toBeGreaterThanOrEqual(4.5);
-  expect((await room(guest)).wallet).toBe(1250);
-  const frames=(await snapshot(host)).rendering.frames;
+  let positioned!:Snapshot;
+  await Promise.all([
+   expect.poll(async()=>{
+    const current=await snapshot(host),car=current.state.vehicles.find(vehicle=>vehicle.id==='stratus')!,player=current.state.player;positioned=current;
+    return{carNear:Math.hypot(car.x-target.x,car.z-target.z)<.1,playerFar:Math.hypot(player.x-target.x,player.z-target.z)>=4.5};
+   }).toEqual({carNear:true,playerFar:true}),
+   (async()=>{expect((await room(guest)).wallet).toBe(1250);})(),
+  ]);
+  const frames=positioned.rendering.frames;
   await expect.poll(async()=>{
    const current=await snapshot(host),shared=current.online.snapshot;
    return shared&&{online:current.online.status,advanced:current.rendering.frames>frames+5,wallet:shared.wallet,version:shared.deliveryEffect.version};

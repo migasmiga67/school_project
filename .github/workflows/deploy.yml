@@ -25,24 +25,59 @@ jobs:
       - run: npm run build
         env:
           VITE_ICE_SERVERS: ${{ secrets.TURN_ICE_SERVERS }}
+      - name: Share production client with browser test jobs
+        uses: actions/upload-artifact@v4
+        with:
+          name: neon-client-dist
+          path: dist/
+          retention-days: 1
+          if-no-files-found: error
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: dist
+  browser-tests:
+    name: Browser tests (${{ matrix.group }})
+    needs: build
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      max-parallel: 4
+      matrix:
+        include:
+          - group: core
+            specs: tests/browser.spec.ts tests/expanded-world.browser.spec.ts tests/mobility.browser.spec.ts tests/career.browser.spec.ts
+          - group: city
+            specs: tests/casino.browser.spec.ts tests/stories.browser.spec.ts tests/tournament.browser.spec.ts
+          - group: multiplayer
+            specs: tests/multiplayer.browser.spec.ts
+          - group: activities
+            specs: tests/expansion.browser.spec.ts
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - uses: actions/download-artifact@v4
+        with:
+          name: neon-client-dist
+          path: dist/
       - run: npx playwright install --with-deps chromium
-      - name: City, garage, activities and multiplayer browser tests
-        run: npm run test:e2e
+      - name: Run browser test group
+        run: npm run test:e2e -- ${{ matrix.specs }}
       - name: Failure diagnostics
         if: failure()
         uses: actions/upload-artifact@v4
         with:
-          name: browser-failure-diagnostics
+          name: browser-failure-diagnostics-${{ matrix.group }}
           path: |
             test-results/
             playwright-report/
           retention-days: 7
           if-no-files-found: ignore
-      - uses: actions/upload-pages-artifact@v3
-        with:
-          path: dist
   deploy:
-    needs: build
+    needs: [build, browser-tests]
     runs-on: ubuntu-latest
     permissions:
       contents: read

@@ -255,4 +255,4 @@ Własny serwer produkcyjny konfiguruje się przez te same zmienne `VITE_PEER_HOS
 
 `npm run build` odświeża `dist` i gotową kopię w katalogu głównym: `index.html`, `assets`, favicon oraz `.nojekyll`. Pages może korzystać z `main / (root)` lub z workflow **Deploy Neon Coast** publikującego `dist`.
 
-Workflow sprawdza typy, testy logiki, budowanie i testy przeglądarkowe. Raporty awarii zachowuje w artefakcie. W wariancie Actions ustaw **Settings → Pages → Source → GitHub Actions**. Nie publikuj źródłowego `app/index.html` bez kompilacji.
+Workflow sprawdza typy, testy logiki, budowanie i testy przeglądarkowe. Cztery równoległe grupy przeglądarkowe pobierają tę samą produkcyjną kompilację; wdrożenie wymaga powodzenia wszystkich grup. Raporty awarii zachowuje w osobnym artefakcie każdej grupy. W wariancie Actions ustaw **Settings → Pages → Source → GitHub Actions**. Nie publikuj źródłowego `app/index.html` bez kompilacji.
