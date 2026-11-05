@@ -11,6 +11,10 @@ Oryginalny, niewielki sandbox 3D w przeglądarce, inspirowany miejskimi grami ak
 - Dokładniejsze elewacje, witryny, dachy, tekstury asfaltu i chodników, nawierzchnie ciemniejące od deszczu, zaokrąglone nadwozia i sylwetki postaci oraz woda z odbiciem nieba i pianą przy brzegu.
 - Ustawienia grafiki dostępne z menu i pauzy: Automatyczna, Niska, Średnia i Wysoka, z oddzielnymi limitami dla programowego WebGL.
 - Płynniejszy ruch nadwozia i zawieszenia, obrót kół, światła hamowania i reflektory rozświetlające ulicę po zmroku.
+- Dokładniejsze wspólne modele aut graczy, NPC i policji: profilowane szyby, nadkola, felgi, grille, detale drzwi i oznaczenia radiowozów. Odległe auta zachowują uproszczone modele.
+- Ruch prawostronny na pasach dopasowanych do szerokości ulic, zaokrąglone zakręty, zatrzymywanie przed światłami i kolejkami; patrole korzystają z tych samych zasad.
+- Dokładniejsze twarze, dłonie, ubrania i obuwie postaci; gracz ma animowane kolana i łokcie, a przechodnie zachowują wydajne wspólne instancje geometrii.
+- Widok pierwszoosobowy z dłońmi i ruchem ramion podczas chodzenia oraz kokpitem, zegarem prędkości i skręcającą kierownicą podczas jazdy. Rozglądanie myszką zachowuje położenie kokpitu względem auta.
 - Auto sportowe i sedany, zaparkowane pojazdy i ruch uliczny; można wysiadać, chodzić, sprintować i przejmować auta.
 - Gaz, hamulec, jazda wstecz, ręczny, nitro i kolizje z zabudową oraz pojazdami.
 - Trzy typy zleceń: dostawa, wyścig przez punkty kontrolne, ucieczka przed policją.
@@ -239,6 +243,8 @@ npm run test:e2e
 ```
 
 W środowisku chmurowym można użyć `npm ci --cache /workspace/.npm-cache`. `src/game.ts` zawiera logikę i fizykę, `src/world.ts` scenę Three.js, a `src/main.ts` interfejs i wejście. `src/city-map.ts` definiuje wspólne ulice, skrzyżowania, zabudowę i trasy; `src/city-streets.ts` rysuje jezdnie i chodniki, `src/city-districts.ts` zabudowę i miejsca dzielnic, a `src/city-art.ts` materiały i detale. `src/garage.ts` rozlicza zakupy i tuning, `src/city-life.ts` czas, pogodę i wydarzenia, a `src/online-jobs.ts` napad i wyścigi.
+
+`src/traffic-lanes.ts` wyznacza pasy na wspólnej mapie, a `src/traffic-flow.ts` próbkuje te same trasy dla symulacji, prognoz i klientów online. `src/vehicle-model.ts` buduje scalone modele aut używane lokalnie, przez patrole i graczy online; `src/vehicle-lod.ts` upraszcza dalekie pojazdy. `src/character-geometry.ts` udostępnia detale postaci. `src/first-person-view.ts` utrzymuje ręce i kokpit w osobnym przebiegu renderowania po wyczyszczeniu głębokości świata, aby dłonie poprawnie zasłaniały kierownicę i nie przecinały ścian.
 
 `src/casino-view.ts` buduje kasyno; `src/roulette-motion.ts` definiuje wspólny przebieg obrotu i położenie zwycięskiej kieszeni, a `src/roulette-view.ts` animuje koło i kulkę w panelu. `src/casino-games.ts` rozlicza zakłady i zapis ruletki solo. `src/poker.ts` odpowiada za zasady i boty, a `src/poker-ui.ts` za interfejs stołu. `src/room-authority.ts` prowadzi pokój, portfele, przejazdy i wspólny stół; `src/multiplayer-client.ts` obsługuje połączenia WebRTC.
 

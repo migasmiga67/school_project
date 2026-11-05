@@ -82,6 +82,13 @@ describe('analytic ambient traffic',()=>{
   }
   expect(waiting).toBeGreaterThan(100);
  });
+ it('returns at floating-point boundaries around a single pedestrian crossing',()=>{
+  // Repeated fixed steps can arrive just before the exact opening. The cached
+  // timeline must stop seeking instead of spinning through a zero-time gate.
+  for(const time of[12.999999999999964,13,13.000000000000004,13.0001]){
+   const pose=pedestrianTrafficPose(46,time);expect(Number.isFinite(pose.x+pose.z+pose.progress)).toBe(true);
+  }
+ });
 });
 
 describe('ambient yielding and forecasts',()=>{

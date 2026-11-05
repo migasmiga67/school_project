@@ -1,11 +1,13 @@
 import * as THREE from 'three';
 import type { GameState, Roadblock, Vehicle } from './model';
 import { POLICE_SAFEHOUSE } from './game';
+import { createVehicleModel, type VehicleModel } from './vehicle-model';
+import { createVehicleMotion, stepVehicleMotion, type VehicleMotion } from './vehicle-motion';
 
 /** Pursuit props follow the simulation; this view never decides detection or collisions. */
 export class PoliceView {
   readonly group=new THREE.Group();
-  private readonly patrols=new Map<string,THREE.Group>();
+  private readonly patrols=new Map<string,{model:VehicleModel;motion:VehicleMotion}>();
   private readonly blocks=new Map<string,THREE.Group>();
   private readonly helicopter=new THREE.Group();
   private readonly rotor=new THREE.Group();
@@ -20,7 +22,7 @@ export class PoliceView {
   private readonly gold=new THREE.MeshBasicMaterial({color:0xefc76d});
   private seconds=0;
 
-  constructor(_software=false){
+  constructor(private readonly software=false){
     this.body=new THREE.MeshLambertMaterial({color:0xe1e5de});
     this.box(this.helicopter,2.5,1.4,4.1,this.dark,0,0,0);
     this.box(this.helicopter,1.9,.8,1.9,this.glass,0,.15,-1.25);
@@ -58,18 +60,19 @@ export class PoliceView {
   private box(parent:THREE.Group,w:number,h:number,d:number,material:THREE.Material,x:number,y:number,z:number){
     const mesh=new THREE.Mesh(new THREE.BoxGeometry(w,h,d),material);mesh.position.set(x,y,z);parent.add(mesh);return mesh;
   }
-  private patrol(car:Vehicle){
-    let group=this.patrols.get(car.id);
-    if(!group){
-      group=new THREE.Group();
-      this.box(group,1.85,.65,4.3,this.body,0,.65,0);
-      this.box(group,1.65,.65,2.15,this.dark,0,1.2,.1);
-      this.box(group,1.45,.4,.1,this.glass,0,1.3,-1);
-      this.box(group,.6,.14,.35,this.red,-.34,1.65,0);this.box(group,.6,.14,.35,this.blue,.34,1.65,0);
-      for(const x of [-.92,.92])for(const z of [-1.3,1.3])this.box(group,.18,.6,.65,this.dark,x,.35,z);
-      this.patrols.set(car.id,group);this.group.add(group);
+  private patrol(car:Vehicle,dt:number,responding:boolean){
+    let visual=this.patrols.get(car.id);
+    if(!visual){
+      const model=createVehicleModel('police',car.color,{software:this.software});
+      visual={model,motion:createVehicleMotion()};this.patrols.set(car.id,visual);this.group.add(model.group);
     }
-    group.position.set(car.x,.04,car.z);group.rotation.y=-car.heading;
+    const {model}=visual;model.group.visible=true;model.group.position.set(car.x,.05,car.z);model.group.rotation.y=-car.heading;
+    visual.motion=stepVehicleMotion(visual.motion,car,dt);
+    model.wheels.forEach(wheel=>{wheel.rotation.x=visual.motion.wheelRotation;});model.frontWheels.forEach(wheel=>{wheel.rotation.y=visual.motion.steering;});
+    model.chassis.rotation.set(visual.motion.pitch,visual.motion.yaw,visual.motion.roll);model.chassis.position.y=visual.motion.heave;
+    model.head.emissiveIntensity=1.1;model.brake.emissiveIntensity=.22+visual.motion.braking*2.1;
+    const flash=Math.sin(this.seconds*12+car.x)>0;
+    if(model.red&&model.blue){model.red.emissiveIntensity=responding?(flash?2:.08):.03;model.blue.emissiveIntensity=responding?(flash?.08:2):.03;}
   }
   private block(block:Roadblock){
     let group=this.blocks.get(block.id);
@@ -89,8 +92,8 @@ export class PoliceView {
     this.group.visible=!state.interior;
     const pursuit=state.pursuit;
     const activePatrols=new Set(pursuit?.patrols.map(car=>car.id)??[]),activeBlocks=new Set(pursuit?.roadblocks.map(block=>block.id)??[]);
-    for(const [id,group] of this.patrols)group.visible=activePatrols.has(id);
-    for(const car of pursuit?.patrols??[])this.patrol(car);
+    for(const [id,visual] of this.patrols)if(!activePatrols.has(id)){visual.model.dispose();this.patrols.delete(id);}
+    for(const car of pursuit?.patrols??[])this.patrol(car,dt,state.wanted>0);
     for(const [id,group] of this.blocks)group.visible=activeBlocks.has(id);
     for(const block of pursuit?.roadblocks??[])this.block(block);
     // Reused props remain bounded even after many roadblock spawns.
@@ -108,6 +111,7 @@ export class PoliceView {
     this.safehouse.visible=true;
   }
   destroy(){
+    for(const visual of this.patrols.values())visual.model.dispose();this.patrols.clear();
     const geometries=new Set<THREE.BufferGeometry>(),materials=new Set<THREE.Material>(),textures=new Set<THREE.Texture>();
     this.group.traverse(object=>{if(object instanceof THREE.Mesh){
       geometries.add(object.geometry);

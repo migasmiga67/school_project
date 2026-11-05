@@ -1,5 +1,6 @@
 import { CITY_STREETS,CITY_TRAFFIC_LOOPS,clearCitySegment } from './city-map';
 import { SIGNAL_CYCLE_SECONDS,TRAFFIC_SIGNALS,nextSignalOpening } from './traffic-signals';
+import { createDrivingLane } from './traffic-lanes';
 import type { Point } from './model';
 
 export interface RouteGate {at:number;signalId:string;heading:number;clearance:number}
@@ -26,13 +27,25 @@ export function crossingGates(points:readonly Point[],mode:Mode='pedestrian'):re
     for(let i=0;i<points.length;i++){
       const a=points[i],b=points[(i+1)%points.length],dx=b.x-a.x,dz=b.z-a.z,segment=Math.hypot(dx,dz);if(segment<1e-7)continue;
       const t=Math.max(0,Math.min(1,((signal.junction.x-a.x)*dx+(signal.junction.z-a.z)*dz)/(segment*segment))),x=a.x+dx*t,z=a.z+dz*t,d=Math.hypot(x-signal.junction.x,z-signal.junction.z);
-      if(d<=(mode==='vehicle'?1.3:signal.junction.radius+4))candidates.push({at:walked+t*segment,distance:d,heading:Math.atan2(dx,-dz)});walked+=segment;
+      if(d<=(mode==='vehicle'?signal.junction.radius+.35:signal.junction.radius+4))candidates.push({at:walked+t*segment,distance:d,heading:Math.atan2(dx,-dz)});walked+=segment;
     }
     const groups:typeof candidates[]=[];
     for(const candidate of candidates){const group=groups.at(-1);if(group&&candidate.at-group[group.length-1].at<signal.junction.radius*2+5)group.push(candidate);else groups.push([candidate]);}
+    // The same rounded junction can straddle the loop's progress origin.
+    if(mode==='vehicle'&&groups.length>1&&groups[0][0].at+length-groups[groups.length-1].at(-1)!.at<signal.junction.radius*2+5){groups[0].push(...groups.pop()!);}
     for(const group of groups){
       const closest=group.reduce((a,b)=>b.distance<a.distance?b:a),approach=signal.junction.radius+(mode==='vehicle'?5:1.3);
-      gates.push({at:modulo(closest.at-approach,length),signalId:signal.id,heading:closest.heading,clearance:signal.junction.radius*2+2.6});
+      if(mode==='pedestrian'){gates.push({at:modulo(closest.at-approach,length),signalId:signal.id,heading:closest.heading,clearance:signal.junction.radius*2+2.6});continue;}
+      // Measure the actual lane's entry, including bends. The front bumper
+      // stops before the zebra, and the incoming tangent selects its light.
+      const boundary=(direction:number,radius:number)=>{
+        let travel=0;while(travel<45&&distance(sampleTrafficPath(points,closest.at+travel*direction),signal.junction)<radius)travel+=1;
+        let low=Math.max(0,travel-1),high=travel;
+        for(let i=0;i<14;i++){const middle=(low+high)/2;if(distance(sampleTrafficPath(points,closest.at+middle*direction),signal.junction)<radius)low=middle;else high=middle;}
+        return closest.at+high*direction;
+      };
+      const entry=boundary(-1,signal.junction.radius+7.8),exit=boundary(1,signal.junction.radius+4),heading=sampleTrafficPath(points,entry).heading;
+      gates.push({at:modulo(entry,length),signalId:signal.id,heading,clearance:exit-entry+2.6});
     }
   }
   const result=gates.sort((a,b)=>a.at-b.at).filter((gate,index,list)=>index===0||gate.at-list[index-1].at>.2);
@@ -69,7 +82,10 @@ export function signalAwareProgress(points:readonly Point[],seed:number,speed:nu
   let routes=timelines.get(points);if(!routes){routes=new Map();timelines.set(points,routes);}const key=`${seed}/${cruise}/${mode}`;
   let timeline=routes.get(key);
   if(!timeline){timeline={motions:[],time:0,progress:seed,speed:cruise,gateIndex:gates.findIndex(gate=>gate.at>=modulo(seed,length)-1e-6),states:new Map(),cycle:null};if(timeline.gateIndex<0)timeline.gateIndex=0;routes.set(key,timeline);}
-  while(timeline.time<=elapsed+1e-7&&!timeline.cycle){
+  // Do not extend a timeline whose exact boundary is a few ulps beyond the
+  // requested time. A single-gate walk could otherwise repeatedly process a
+  // zero-distance opening without advancing time (e.g. 13 - 4e-14 seconds).
+  while(timeline.time<=elapsed&&!timeline.cycle){
     const gate=gates[timeline.gateIndex],target=timeline.progress+modulo(gate.at-modulo(timeline.progress,length),length),remaining=target-timeline.progress;
     const acceleration=mode==='vehicle'?3.4:2,arrival=timeline.time+movementTime(remaining,timeline.speed,cruise,acceleration),clearance=mode==='pedestrian'?gate.clearance/cruise+.5:movementTime(gate.clearance+7.4,0,cruise,acceleration)+.3;
     const stop=nextSignalOpening(gate.signalId,arrival,gate.heading,mode,clearance)>arrival+1e-6;
@@ -96,9 +112,13 @@ export function signalAwareProgress(points:readonly Point[],seed:number,speed:nu
 }
 
 export const trafficSeed=(index:number)=>index<8?(index%2?index*31+45:index*59+50):(index-8)*61+24;
-export const trafficRoute=(index:number)=>CITY_TRAFFIC_LOOPS[index<8?index%2:2+(index-8)%3];
+const laneLoops=CITY_TRAFFIC_LOOPS.map(points=>createDrivingLane(points));
+export const trafficRoute=(index:number)=>laneLoops[index<8?index%2:2+(index-8)%3];
 export function ambientTrafficPose(index:number,seconds:number):TrafficPose {
   const points=trafficRoute(index),flow=signalAwareProgress(points,trafficSeed(index),8+index%4,seconds);return{...sampleTrafficPath(points,flow.progress),...flow};
+}
+export function patrolTrafficPose(index:number,seconds:number):TrafficPose {
+  const points=laneLoops[index%2],flow=signalAwareProgress(points,index===0?205:63,7,seconds);return{...sampleTrafficPath(points,flow.progress),...flow};
 }
 
 export interface PedestrianTrafficRoute {points:readonly Point[];length:number}

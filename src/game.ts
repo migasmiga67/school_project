@@ -1,6 +1,7 @@
 import { BUILDINGS, ROAD_NODES, WORLD_BOUNDS } from './model';
-import { CITY_TRAFFIC_LOOPS, nearestStreet, routeStreets } from './city-map';
-import { AMBIENT_PEDESTRIAN_COUNT,ambientTrafficPose,nextRouteGate,pedestrianTrafficPose,sampleTrafficPath,signalAwareProgress,trafficRoute } from './traffic-flow';
+import { nearestStreet } from './city-map';
+import { AMBIENT_PEDESTRIAN_COUNT,ambientTrafficPose,nextRouteGate,patrolTrafficPose,pedestrianTrafficPose,sampleTrafficPath,signalAwareProgress,trafficRoute } from './traffic-flow';
+import { routeDrivingLanes } from './traffic-lanes';
 import { nextSignalOpening } from './traffic-signals';
 import { advanceGarageGate,createGarageGate,garageGateCollision,garageSolidCollision,isGarageBuildingCollider } from './garage-building';
 import type { GarageVisitor } from './garage-building';
@@ -38,18 +39,6 @@ function roadblockHit(s:GameState,p:Point,radius:number):boolean {
     return s.time<b.expiresAt&&Math.abs(dx*c-dz*sin)<3.8+radius&&Math.abs(dx*sin+dz*c)<.65+radius;
   }));
 }
-const trafficLoops=CITY_TRAFFIC_LOOPS;
-function loopPose(points: readonly Point[], progress: number): Point & { heading: number } {
-  const perimeter = points.reduce((sum, p, i) => sum + length(p, points[(i + 1) % points.length]), 0);
-  let distance = ((progress % perimeter) + perimeter) % perimeter;
-  for (let i = 0; i < points.length; i++) {
-    const from = points[i], to = points[(i + 1) % points.length], segment = length(from, to);
-    if (distance <= segment) return { x: from.x + (to.x - from.x) * distance / segment, z: from.z + (to.z - from.z) * distance / segment, heading: Math.atan2(to.x - from.x, -(to.z - from.z)) };
-    distance -= segment;
-  }
-  return { ...points[0], heading: 0 };
-}
-
 export function createGame(): GameState {
   const cars = [
     vehicle('stratus', 'sport', START.x, START.z, 0, 0xded8cb, true, true),
@@ -252,11 +241,14 @@ function walk(s: GameState, input: Input, dt: number) {
 /** Local yielding keeps serializable route progress so detached forecasts retain it. */
 function advanceTrafficFlow(s:GameState,clock:number,dt:number){
   const controlled=activeVehicle(s),cars=s.vehicles.filter(car=>/^traffic-\d+$/.test(car.id)&&car!==controlled&&!car.parked&&car.health>0)as AmbientCar[];
+  advanceLaneTraffic(s,cars,clock,dt);
+}
+function advanceLaneTraffic(s:GameState,cars:AmbientCar[],clock:number,dt:number){
   if(!cars.length)return;
-  const before=s.vehicles.map(car=>({...car}));
+  const controlled=activeVehicle(s),before=[...s.vehicles,...s.police,...(s.pursuit?.patrols??[])].map(car=>({...car}));
   const pedestrians=Array.from({length:AMBIENT_PEDESTRIAN_COUNT},(_,index)=>pedestrianTrafficPose(index,clock));
   for(const car of cars){
-    const index=Number(car.id.slice(8)),cruise=8+index%4,path=trafficRoute(index),base=ambientTrafficPose(index,clock),forward={x:Math.sin(car.heading),z:-Math.cos(car.heading)};
+    const patrol=car.id.startsWith('patrol-'),index=Number(car.id.slice(patrol?7:8)),cruise=patrol?7:8+index%4,path=trafficRoute(index),base=patrol?patrolTrafficPose(index,clock):ambientTrafficPose(index,clock),forward={x:Math.sin(car.heading),z:-Math.cos(car.heading)};
     const progress=car.ambientProgress??base.progress;
     let gap=Infinity;
     const obstacle=(point:Point,radius:number)=>{const dx=point.x-car.x,dz=point.z-car.z,along=dx*forward.x+dz*forward.z,lateral=Math.abs(dx*forward.z-dz*forward.x);if(along>-.1&&lateral<radius)gap=Math.min(gap,Math.max(0,along));};
@@ -268,9 +260,10 @@ function advanceTrafficFlow(s:GameState,clock:number,dt:number){
     }
     if(s.player.mode==='foot'&&!s.interior)obstacle(s.player,1.8);
     for(const person of pedestrians)if(Math.hypot(person.x-car.x,person.z-car.z)<13)obstacle(person,1.65);
-    const safeGap=4.6,stopping=car.speed*car.speed/(2*5)+safeGap;
+    // Detailed sedans are almost 4.9 m bumper-to-bumper; leave visible clearance.
+    const safeGap=5.4,stopping=car.speed*car.speed/(2*5)+safeGap;
     const needsYield=gap<Math.max(11,stopping);
-    if(!car.ambientDelayed&&!needsYield){Object.assign(car,base,{ambientProgress:base.progress,ambientClock:clock,wheelPhase:base.progress*1.6});continue;}
+    if(!car.ambientDelayed&&!needsYield){const steer=base.speed>.5?clamp(angle(base.heading-car.heading)/(Math.max(dt,.001)*base.speed)*4,-1,1):0;Object.assign(car,base,{steer,ambientProgress:base.progress,ambientClock:clock,wheelPhase:base.progress*1.6});continue;}
     car.ambientDelayed=true;
     const gate=nextRouteGate(path,progress),closed=gate&&nextSignalOpening(gate.signalId,clock,gate.heading,'vehicle',gate.clearance/cruise+1)>clock+1e-6;
     let desired=cruise;
@@ -281,7 +274,8 @@ function advanceTrafficFlow(s:GameState,clock:number,dt:number){
     if(needsYield)travel=Math.min(travel,Math.max(0,gap-safeGap));
     if(gate&&closed)travel=Math.min(travel,gate.distance);
     const next=progress+travel,pose=sampleTrafficPath(path,next);
-    Object.assign(car,pose,{speed:travel<1e-8?0:newSpeed,ambientProgress:next,ambientClock:clock,wheelPhase:next*1.6});
+    const steer=travel>.001?clamp(angle(pose.heading-car.heading)/travel*4,-1,1):0;
+    Object.assign(car,pose,{steer,speed:travel<1e-8?0:newSpeed,ambientProgress:next,ambientClock:clock,wheelPhase:next*1.6});
   }
 }
 function traffic(s: GameState, dt: number, events: GameEvent[]) {
@@ -320,10 +314,9 @@ function spawnPolice(s: GameState) {
 function updatePatrols(s:GameState,dt:number,events:GameEvent[]){
   const state=pursuitState(s),car=activeVehicle(s);
   if(s.wanted>0){state.patrols=[];return;}
-  if(state.patrols.length!==2)state.patrols=[0,1].map(index=>vehicle(`patrol-${index}`,'police',0,0,0,0xe3e9ed,false));
-  state.patrols.forEach((cop,index)=>{
-    const pose=loopPose(trafficLoops[index],(index===0?205:63)+s.time*7);
-    Object.assign(cop,pose,{speed:7,wheelPhase:s.time*11.2});
+  if(state.patrols.length!==2)state.patrols=[0,1].map(index=>{const pose=patrolTrafficPose(index,Math.max(0,s.time-dt));return{...vehicle(`patrol-${index}`,'police',pose.x,pose.z,pose.heading,0xe3e9ed,false),speed:pose.speed,ambientProgress:pose.progress,ambientClock:Math.max(0,s.time-dt)};});
+  advanceLaneTraffic(s,state.patrols,s.time,dt);
+  state.patrols.forEach(cop=>{
     if(car&&length(car,cop)<2.8&&Math.abs(car.speed)>5){
       collision(s,car,Math.max(7,Math.abs(car.speed)*.6),events);car.speed*=.65;
     }
@@ -389,13 +382,13 @@ function pursuit(s: GameState, dt: number, events: GameEvent[]) {
   for (const cop of s.police) {
     let route = rt.policeRoutes.get(cop.id);
     if (!route || s.time >= route.at || length(route.target, suspect) > 8) {
-      route = { target: { ...suspect }, path: routeStreets(cop, suspect), at: s.time + 1.2 }; rt.policeRoutes.set(cop.id, route);
+      route = { target: { ...suspect }, path: routeDrivingLanes(cop, suspect), at: s.time + 1.2 }; rt.policeRoutes.set(cop.id, route);
     }
     while (route.path.length && length(cop, route.path[0]) < .5) route.path.shift();
     const target = route.path[0];
     if (target) {
       const dx = target.x - cop.x, dz = target.z - cop.z, distance = Math.hypot(dx, dz), speed = Math.min(13 + s.wanted * 1.5, distance / Math.max(dt, .001));
-      cop.heading = Math.atan2(dx, -dz); cop.speed = speed;
+      const heading=Math.atan2(dx,-dz);cop.steer=clamp(angle(heading-cop.heading)/(Math.max(dt,.001)*Math.max(speed,1))*4,-1,1);cop.heading=heading;cop.speed=speed;
       if (distance > .01) move(s,cop, dx / distance * speed * dt, dz / distance * speed * dt, 1.4);
       cop.wheelPhase += speed * dt;
     } else cop.speed = 0;

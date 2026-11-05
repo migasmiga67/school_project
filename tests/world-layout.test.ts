@@ -35,7 +35,7 @@ describe('larger connected city',()=>{
  it('routes pursuing police along curved extensions and places roadblocks on actual streets',()=>{
   const target={x:-160,z:40},start={x:-184,z:40},pursuit=emptyCity();Object.assign(pursuit.player,{mode:'foot',vehicleId:null,...target});pursuit.wanted=1;
   const cop={...pursuit.vehicles[0],id:'extension-cop',kind:'police' as const,...start,speed:0,parked:false};pursuit.police=[cop];
-  let nearest=Infinity;for(let i=0;i<120;i++){step(pursuit,idle,1/30);expect(occupied(cop,1.4)).toBe(false);expect(nearestStreet(cop)!.distance).toBeLessThan(.55);nearest=Math.min(nearest,Math.hypot(cop.x-target.x,cop.z-target.z));}
+  let nearest=Infinity;for(let i=0;i<120;i++){step(pursuit,idle,1/30);expect(occupied(cop,1.4)).toBe(false);const road=nearestStreet(cop)!;expect(road.distance).toBeLessThan(road.street.width/2-1.1);nearest=Math.min(nearest,Math.hypot(cop.x-target.x,cop.z-target.z));}
   expect(nearest).toBeLessThan(4);
   const blocked=emptyCity();Object.assign(blocked.player,{mode:'foot',vehicleId:null,...target});blocked.wanted=2;step(blocked,idle,1/30);
   expect(blocked.police).toHaveLength(2);expect(blocked.police.every(car=>Math.abs(car.x)>98||Math.abs(car.z)>98)).toBe(true);
@@ -46,12 +46,13 @@ describe('larger connected city',()=>{
   Object.assign(boat,{x:280,z:180,heading:Math.PI/2,speed:20});Object.assign(state.player,{x:280,z:180,heading:Math.PI/2,mode:'drive',vehicleId:boat.id});state.mission.active=false;advance(state,3,{throttle:true});
   expect(boat.x).toBeGreaterThan(300);expect(boat.x).toBeLessThanOrEqual(WATER_BOUNDS.maxX-1.4);expect(boat.z).toBeGreaterThan(92);expect(boat.z).toBeLessThanOrEqual(WATER_BOUNDS.maxZ);
  });
- it('adds moving traffic in all three extensions without altering the original traffic clocks',()=>{
+ it('adds right-hand lane traffic in all three extensions with stable shared clocks',()=>{
   const state=createGame();synchronizeOnlineTraffic(state,0);
   const original=state.vehicles.filter(vehicle=>/^traffic-[0-7]$/.test(vehicle.id)).map(vehicle=>({id:vehicle.id,x:vehicle.x,z:vehicle.z}));
-  expect(original).toEqual([{id:'traffic-0',x:-30,z:-80},{id:'traffic-1',x:-40,z:36},{id:'traffic-2',x:80,z:-72},{id:'traffic-3',x:18,z:40},{id:'traffic-4',x:80,z:46},{id:'traffic-5',x:40,z:0},{id:'traffic-6',x:-4,z:80},{id:'traffic-7',x:18,z:-40}]);
+  expect(original.map(car=>Number(nearestStreet(car)!.distance.toFixed(2)))).toEqual([2.75,2.75,3,2.75,3,2.75,3,2.75]);
+  expect(original[0].z).toBe(-77.25);expect(original[1].x).toBe(-42.75);
   expect(state.vehicles.filter(vehicle=>vehicle.id.startsWith('traffic-'))).toHaveLength(16);
-  const visited=new Set<string>();for(let time=0;time<=240;time+=2){synchronizeOnlineTraffic(state,time);for(const vehicle of state.vehicles.filter(vehicle=>/^traffic-(?:[89]|1[0-5])$/.test(vehicle.id))){expect(nearestStreet(vehicle)!.distance).toBeLessThan(.001);expect(occupied(vehicle,1.5)).toBe(false);visited.add(nearestStreet(vehicle)!.street.district);}}
+  const visited=new Set<string>();for(let time=0;time<=240;time+=2){synchronizeOnlineTraffic(state,time);for(const vehicle of state.vehicles.filter(vehicle=>/^traffic-(?:[89]|1[0-5])$/.test(vehicle.id))){const road=nearestStreet(vehicle)!;expect(road.distance).toBeLessThan(4.6);expect(occupied(vehicle,1.5)).toBe(false);visited.add(road.street.district);}}
   expect([...visited]).toEqual(expect.arrayContaining(['westwood','financial','port']));
   synchronizeOnlineTraffic(state,0);expect(state.vehicles.filter(vehicle=>/^traffic-[0-7]$/.test(vehicle.id)).map(vehicle=>({id:vehicle.id,x:vehicle.x,z:vehicle.z}))).toEqual(original);
  });

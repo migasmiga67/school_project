@@ -6,6 +6,8 @@ import { CITY_BENCH_PLACEMENTS,CITY_STREET_SIGN_PLACEMENTS,findStreetDecoration,
 import { AvatarMotion } from './avatar-motion';
 import { cityLifeBudget,pedestrianReaction,type PedestrianVehicle } from './pedestrian-reaction';
 import { pathLength, samplePath } from './city-art';
+import { createCharacterFaceParts,createPedestrianHeadGeometry,createPedestrianHairGeometry } from './character-geometry';
+import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
 
 export interface CityEvent { id:string; title:string; target:Point; reward:number; expiresAt:number }
 export interface CityEnvironment {
@@ -55,7 +57,8 @@ export class CityLife {
   readonly group=new THREE.Group();
   private readonly geometry=new THREE.BoxGeometry(1,1,1);
   private readonly people:THREE.InstancedMesh[]=[];
-  private readonly peopleColors:THREE.Color[][]=[[],[],[],[]];
+  private readonly peopleColors:THREE.Color[][]=Array.from({length:8},()=>[]);
+  private readonly peopleParts=[1,1,2,2,2,2,1,1];
   private readonly visiblePeople:number[]=[];
   private readonly rainMesh:THREE.InstancedMesh;
   private quality:'low'|'medium'|'high';
@@ -83,9 +86,14 @@ export class CityLife {
   constructor(private readonly software:boolean) {
     this.group.name='city-life';this.quality=software?'low':'high';
     const material=new THREE.MeshLambertMaterial({color:0xffffff});
-    const head=new THREE.SphereGeometry(.5,software?6:8,software?4:6),torso=new THREE.CapsuleGeometry(.5,.4,software?2:3,software?6:8).scale(1,1/1.4,1),limb=new THREE.CapsuleGeometry(.5,.55,software?2:3,6).scale(1,1/1.55,1);
-    for(const [count,geometry] of [[PEDESTRIAN_COUNT,head],[PEDESTRIAN_COUNT,torso],[PEDESTRIAN_COUNT*2,limb],[PEDESTRIAN_COUNT*2,limb]] as const){
-      const mesh=new THREE.InstancedMesh(geometry,material,count);mesh.instanceMatrix.setUsage(THREE.DynamicDrawUsage);mesh.frustumCulled=false;
+    const head=createPedestrianHeadGeometry(),torso=new THREE.CylinderGeometry(.29,.235,.66,10).scale(1,1,.64),limb=new THREE.CapsuleGeometry(.5,.55,software?2:3,6).scale(1,1/1.55,1);
+    const handPieces=[new THREE.CapsuleGeometry(.065,.19,2,6).translate(0,-.065,0),new THREE.SphereGeometry(.5,8,6).scale(.115,.17,.105).translate(0,-.23,-.008),new THREE.CapsuleGeometry(.018,.045,2,5).translate(.066,-.22,-.006)];
+    const hand=mergeGeometries(handPieces);handPieces.forEach(piece=>piece.dispose());
+    const face=createCharacterFaceParts();face.skin.dispose();face.brows.dispose();
+    const faceMaterial=new THREE.MeshLambertMaterial({color:0xffffff,vertexColors:true});
+    const geometries=[head,torso,limb,limb,hand,new THREE.CapsuleGeometry(.5,.4,2,8).scale(.24,.145/1.4,.39),createPedestrianHairGeometry(),face.features];
+    for(let index=0;index<geometries.length;index++){
+      const mesh=new THREE.InstancedMesh(geometries[index],index===7?faceMaterial:material,PEDESTRIAN_COUNT*this.peopleParts[index]);mesh.name=['pedestrian-heads','pedestrian-torsos','pedestrian-sleeves','pedestrian-trousers','pedestrian-hands','pedestrian-shoes','pedestrian-hair','pedestrian-faces'][index];mesh.instanceMatrix.setUsage(THREE.DynamicDrawUsage);mesh.frustumCulled=false;
       this.people.push(mesh);this.group.add(mesh);
     }
     const shirts=[0x679ca8,0xb67c77,0x8b80ae,0xc4a76b,0x67a68d,0x526b88];
@@ -93,9 +101,11 @@ export class CityLife {
     for(let i=0;i<PEDESTRIAN_COUNT;i++){
       setColor(0,i,[0xd4a37d,0x9c6f54,0xc28e6c,0x6c4938][i%4]);
       setColor(1,i,shirts[i%shirts.length]);
+      setColor(6,i,[0x2d2b29,0x44362d,0x9b7b50,0x262b30,0x6d6152][i%5]);setColor(7,i,0xffffff);
       for(let side=0;side<2;side++){
         setColor(2,i*2+side,shirts[i%shirts.length]);
         setColor(3,i*2+side,i%3?0x25394d:0x625b58);
+        setColor(4,i*2+side,[0xd4a37d,0x9c6f54,0xc28e6c,0x6c4938][i%4]);setColor(5,i*2+side,i%3?0x242e35:0x8b8172);
       }
     }
     this.rainMesh=new THREE.InstancedMesh(this.geometry,this.rainMaterial,software?128:480);
@@ -169,21 +179,25 @@ export class CityLife {
         if(this.visiblePeople[index]!==i){
           this.visiblePeople[index]=i;colorsChanged=true;
           for(let mesh=0;mesh<this.people.length;mesh++){
-            const parts=mesh<2?1:2;
+            const parts=this.peopleParts[mesh];
             for(let part=0;part<parts;part++)this.people[mesh].setColorAt(index*parts+part,this.peopleColors[mesh][i*parts+part]);
           }
         }
         this.dummy.position.set(pose.x+reaction.x,.05+motion.bob,pose.z+reaction.z);this.dummy.rotation.set(motion.lean,-pose.heading+motion.yawOffset,motion.roll);this.dummy.scale.set(1,1,1);this.dummy.updateMatrix();
-        this.personPart(0,index,0,1.6,0,.4,.42,.4);this.personPart(1,index,0,1.09,0,.52,.7,.34);
+        this.personPart(0,index,0,1.76,0,1,1,1);this.personPart(1,index,0,1.16,0,1,1,1);
+        this.personPart(6,index,0,1.76,0,1,1,1);this.personPart(7,index,0,1.76,0,1,1,1);
         for(let side=0;side<2;side++){
-          const sign=side?1:-1,arm=side?motion.rightArm:motion.leftArm,leg=side?motion.rightLeg:motion.leftLeg;
-          this.personPart(2,index*2+side,sign*.36,1.1,0,.17,.64,.22,arm-reaction.alert*.9);
-          this.personPart(3,index*2+side,sign*.15,.4,0,.2,.8,.26,leg);
+          const sign=side?1:-1,arm=(side?motion.rightArm:motion.leftArm)-reaction.alert*.9,leg=side?motion.rightLeg:motion.leftLeg;
+          // Rotate each limb around the shoulder/hip, keeping hands and feet attached to it.
+          this.personPart(2,index*2+side,sign*.325,1.45-.1*Math.cos(arm),-.1*Math.sin(arm),.22,.3,.24,arm);
+          this.personPart(4,index*2+side,sign*.325,1.45-.26*Math.cos(arm),-.26*Math.sin(arm),1,1,1,arm);
+          this.personPart(3,index*2+side,sign*.145,.85-.36*Math.cos(leg),-.36*Math.sin(leg),.215,.76,.24,leg);
+          this.personPart(5,index*2+side,sign*.145,.85-.72*Math.cos(leg)+.07*Math.sin(leg),-.72*Math.sin(leg)-.07*Math.cos(leg),1,1,1,leg);
         }
       }
       this.current.visiblePedestrians=visible;this.visiblePeople.length=visible;
       for(let index=0;index<this.people.length;index++){
-        const mesh=this.people[index];mesh.count=visible*(index<2?1:2);mesh.instanceMatrix.needsUpdate=true;
+        const mesh=this.people[index];mesh.count=visible*this.peopleParts[index];mesh.instanceMatrix.needsUpdate=true;
         if(colorsChanged&&mesh.instanceColor)mesh.instanceColor.needsUpdate=true;
       }
       this.rainMesh.visible=environment.rain>.01;this.rainMaterial.opacity=.25+environment.rain*.32;

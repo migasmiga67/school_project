@@ -78,9 +78,10 @@ describe('expanded police pursuits',()=>{
     const state=emptyCity();place(state,40,20);state.wanted=1;state.police=[cop('one',0,20)];
     step(state,idle,.05);place(state,0,-40);
     advance(state,2.8);
-    // Last report was on the east street, so the patrol turns east at (0, 0).
+    // Last report was on the east street, so the patrol turns east into the
+    // south/right-hand lane of Neon Avenue rather than its centre marking.
     // A patrol following the current hidden coordinate would continue north.
-    expect(state.police[0].x).toBeGreaterThan(10);expect(Math.abs(state.police[0].z)).toBeLessThan(.5);
+    expect(state.police[0].x).toBeGreaterThan(10);expect(state.police[0].z).toBeCloseTo(2.75,1);
     expect(state.pursuit!.status).toBe('search');
   });
   it('lets a stopped unseen player wait out a chase at the marked safehouse',()=>{

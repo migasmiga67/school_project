@@ -6,10 +6,12 @@ import type { VehicleKind } from './model';
 import { appearanceColors, type AppearanceState } from './appearance';
 import { createMobilityVehicle } from './mobility-view';
 import { AvatarMotion } from './avatar-motion';
+import { createVehicleModel } from './vehicle-model';
+import { createVehicleMotion, stepVehicleMotion, type VehicleMotion } from './vehicle-motion';
+import { createCharacterFaceGeometry } from './character-geometry';
 
 type LitMaterial = THREE.MeshLambertMaterial | THREE.MeshStandardMaterial;
 interface BodyPart { size: [number, number, number]; at: [number, number, number]; color: number; rotation?: [number, number, number]; shape?:'sphere'|'capsule'|'torso'|'hair'; rounding?:number }
-interface CarShape { paint: THREE.BufferGeometry; details: THREE.BufferGeometry }
 interface RemoteVisual {
   root: THREE.Group;
   avatar: THREE.Group;
@@ -17,14 +19,11 @@ interface RemoteVisual {
   legs: THREE.Group[];
   arms: THREE.Group[];
   car: THREE.Group;
-  carBody: THREE.Mesh;
-  carDetails: THREE.Mesh;
-  paint: LitMaterial;
+  carModel?: ReturnType<typeof createVehicleModel>;
+  carMotion: VehicleMotion;
   pants: LitMaterial;
   appearanceKey: string;
   mobility?: ReturnType<typeof createMobilityVehicle>;
-  wheels: THREE.Mesh[];
-  frontSteers: THREE.Group[];
   label: THREE.Sprite;
   labelTexture: THREE.CanvasTexture;
   name: string;
@@ -54,9 +53,7 @@ export class RemotePlayersView {
   private readonly materials = new Set<THREE.Material>();
   private readonly avatarBodies = new Map<string, THREE.BufferGeometry>();
   private readonly armShapes = new Map<string, THREE.BufferGeometry>();
-  private readonly carShapes = new Map<VehicleKind, CarShape>();
   private readonly colored: LitMaterial;
-  private readonly wheelShape: THREE.BufferGeometry;
   private readonly legShape: THREE.BufferGeometry;
   private readonly shoeShape: THREE.BufferGeometry;
   private count = 0;
@@ -68,8 +65,10 @@ export class RemotePlayersView {
     this.colored = this.material(0xffffff, true);
     this.legShape = this.track(new THREE.CapsuleGeometry(.5,1,3,8));this.legShape.scale(.23,.37,.25);
     this.legShape.translate(0, -.35, 0);
-    this.shoeShape=this.boxes([{shape:'capsule',size:[.26,.15,.4],at:[0,-.68,-.075],color:0x202a30}]);
-    this.wheelShape = this.wheelGeometry();
+    this.shoeShape=this.boxes([
+      {shape:'capsule',size:[.24,.145,.39],at:[0,-.72,-.07],color:0x202a30},
+      {shape:'capsule',size:[.244,.04,.385],at:[0,-.767,-.07],color:0x787d7d},
+    ]);
   }
 
   get visibleCount() { return this.count; }
@@ -124,78 +123,39 @@ export class RemotePlayersView {
     if (!body) {
       const shirt = colors.shirt, skin = colors.skin;
       const parts:BodyPart[]=[
-        { shape:'torso',size: [.62, .72, .366], at: [0, 1.17, 0], color: shirt },
-        { shape:'capsule',size:[.52,.3,.31],at:[0,.87,0],color:colors.pants },
+        { shape:'torso',size: [.58, .66, .371], at: [0, 1.18, 0], color: shirt },
+        { shape:'capsule',size:[.49,.25,.31],at:[0,.85,0],color:colors.pants },
         { shape:'capsule',size: [.145, .17, .145], at: [0, 1.58, 0], color: skin },
         { shape:'sphere',size: [.38, .44, .35], at: [0, 1.79, -.015], color: skin },
-        { shape:'sphere',size:[.055,.105,.05],at:[-.19,1.78,0],color:skin },
-        { shape:'sphere',size:[.055,.105,.05],at:[.19,1.78,0],color:skin },
-        { shape:'sphere',size:[.05,.075,.06],at:[0,1.77,-.192],color:skin },
-        { shape:'sphere',size: [.038, .024, .018], at: [-.07, 1.83, -.181], color: 0x202b32 },
-        { shape:'sphere',size: [.038, .024, .018], at: [.07, 1.83, -.181], color: 0x202b32 },
+        { size:[.016,.4,.015],at:[0,1.19,-.187],color:0x59616a },
+        { size:[.47,.045,.31],at:[0,.91,0],color:0x59616a },
       ];
+      for(const side of[-1,1])parts.push({size:[.12,.14,.025],at:[side*.068,1.47,-.134],color:shirt,rotation:[0,0,side*.45]});
+      for(const y of[1.11,1.26,1.4])parts.push({shape:'sphere',size:[.024,.024,.016],at:[0,y,-.2],color:0x787d7d});
       parts.push({shape:'hair',size:[colors.hairstyle==='buzz'?.4:.42,colors.hairstyle==='buzz'?.416:colors.hairstyle==='long'?.456:.448,.4],at:[0,1.81,-.012],color:colors.hair});
       if(colors.hairstyle!=='buzz')parts.push({shape:colors.hairstyle==='long'?'sphere':'capsule',size:[.35,colors.hairstyle==='long'?.52:.2,colors.hairstyle==='long'?.16:.12],at:[0,colors.hairstyle==='long'?1.72:1.86,.14],color:colors.hair});
       if(colors.hairstyle==='long')for(const side of[-1,1])parts.push({shape:'capsule',size:[.075,.39,.22],at:[side*.185,1.76,.035],color:colors.hair});
       if(colors.accessoryStyle==='glasses'){for(const side of[-1,1])parts.push({shape:'sphere',size:[.155,.095,.028],at:[side*.095,1.83,-.19],color:colors.accessory});parts.push({size:[.06,.024,.025],at:[0,1.84,-.207],color:colors.accessory});}
       if(colors.accessoryStyle==='cap')parts.push({shape:'hair',size:[.472,.496,.4],at:[0,1.81,-.012],color:colors.accessory},{shape:'sphere',size:[.46,.035,.27],at:[0,1.965,-.22],color:colors.accessory});
       if(colors.crewOutfit)parts.push({size:[.09,.36,.018],at:[.14,1.18,-.176],color:0xdcece2,rotation:[0,0,.2]});
-      body = this.boxes(parts);body.translate(0,-1,0);
+      const silhouette=this.boxes(parts),sourceFace=createCharacterFaceGeometry(skin,colors.hair),face=sourceFace.index?sourceFace.toNonIndexed():sourceFace;
+      if(face!==sourceFace)sourceFace.dispose();face.translate(0,1.79,-.015);
+      body=this.track(mergeGeometries([silhouette,face])!);silhouette.dispose();this.geometries.delete(silhouette);face.dispose();body.translate(0,-1,0);
       this.avatarBodies.set(key, body);
     }
     let arm = this.armShapes.get(key);
     if (!arm) {
-      arm = this.boxes([
-        { shape:'capsule',size: [.21, .36, .23], at: [0, -.13, 0], color: colors.shirt },
-        { shape:'capsule',size: [.17, .32, .18], at: [0, -.44, 0], color: colors.skin },
-        { shape:'sphere',size: [.15, .2, .14], at: [0, -.66, -.015], color: colors.skin },
-      ]);
+      const parts:BodyPart[]=[
+        { shape:'capsule',size: [.22, .32, .245], at: [0, -.1, 0], color: colors.shirt },
+        { shape:'capsule',size: [.158, .285, .158], at: [0, -.39, 0], color: colors.skin },
+        { shape:'capsule',size: [.107, .145, .095], at: [0, -.58, -.006], color: colors.skin },
+        { shape:'capsule',size: [.038, .09, .045], at: [.048, -.584, -.01], color: colors.skin,rotation:[0,0,.5] },
+      ];
+      for(let finger=0;finger<4;finger++)parts.push({shape:'capsule',size:[.022,.072-(finger===3?.016:0),.03],at:[-.034+finger*.023,-.667+Math.abs(1.5-finger)*.006,-.012],color:colors.skin});
+      arm = this.boxes(parts);
       this.armShapes.set(key, arm);
     }
     return { body, arm,key,colors };
-  }
-
-  private wheelGeometry() {
-    const tire = this.tintGeometry(new THREE.CylinderGeometry(.42, .42, .27, 10).toNonIndexed(), 0x1f272c);
-    const hub = this.tintGeometry(new THREE.CylinderGeometry(.23, .23, .29, 8).toNonIndexed(), 0xbec7c6);
-    tire.rotateZ(Math.PI / 2); hub.rotateZ(Math.PI / 2);
-    const geometry = mergeGeometries([tire, hub])!;
-    tire.dispose(); hub.dispose();
-    return this.track(geometry);
-  }
-
-  private carGeometry(kind: VehicleKind): CarShape {
-    const cached = this.carShapes.get(kind);
-    if (cached) return cached;
-    const sport = kind === 'sport', length = sport ? 4.5 : 4.7, roof = sport ? 1.54 : 1.75;
-    const body: BodyPart[] = [
-      { size: [1.95, .64, length], at: [0, .7, 0], color: 0xffffff, rounding:.16 },
-      { size: [1.7, .22, 1.3], at: [0, 1.06, -1.4], color: 0xffffff, rounding:.08 },
-      { size: [1.63, .12, 1.55], at: [0, roof, .18], color: 0xffffff, rounding:.055 },
-    ];
-    const details: BodyPart[] = [
-      { size: [1.93, .13, length + .08], at: [0, .39, 0], color: 0x25353e },
-      { size: [1.62, sport ? .58 : .78, 1.9], at: [0, sport ? 1.21 : 1.32, .1], color: 0x25353e, rounding:.13 },
-      { size: [1.49, sport ? .45 : .58, .06], at: [0, sport ? 1.31 : 1.42, -.86], color: 0x76a4b2, rotation: [-.28, 0, 0] },
-      { size: [1.46, .43, .06], at: [0, sport ? 1.29 : 1.43, 1.05], color: 0x76a4b2, rotation: [.24, 0, 0] },
-      { size: [.62, .17, .05], at: [0, .6, length / 2 + .06], color: 0xe5dec5 },
-    ];
-    for (const side of [-1, 1]) {
-      body.push({ size: [.06, .55, .09], at: [side * .86, 1.25, .3], color: 0xffffff });
-      body.push({ size: [.16, .14, .35], at: [side * 1.04, 1.14, -.65], color: 0xffffff });
-      details.push({ size: [.05, sport ? .38 : .5, 1.45], at: [side * .83, sport ? 1.28 : 1.42, .15], color: 0x76a4b2 });
-      details.push({ size: [.48, .18, .08], at: [side * .65, .78, -length / 2 - .04], color: 0xffefbd });
-      details.push({ size: [.56, .15, .08], at: [side * .65, .8, length / 2 + .04], color: 0xc75863 });
-    }
-    if (sport) body.push({ size: [1.8, .11, .4], at: [0, 1.15, 1.95], color: 0xffffff });
-    if (kind === 'police') {
-      details.push({ size: [1.35, .14, .4], at: [0, 1.89, .1], color: 0x25353e });
-      details.push({ size: [.6, .2, .36], at: [-.34, 2.02, .1], color: 0xd9536a });
-      details.push({ size: [.6, .2, .36], at: [.34, 2.02, .1], color: 0x5daae1 });
-    }
-    const result = { paint: this.boxes(body, false), details: this.boxes(details) };
-    this.carShapes.set(kind, result);
-    return result;
   }
 
   private mesh(geometry: THREE.BufferGeometry, material: THREE.Material, parent: THREE.Object3D) {
@@ -226,27 +186,20 @@ export class RemotePlayersView {
     const pants=this.material(shape.colors.pants);
     const legs: THREE.Group[] = [], arms: THREE.Group[] = [];
     for (const side of [-1, 1]) {
-      const leg = new THREE.Group(); leg.position.set(side * .15, .84, 0); avatar.add(leg); this.mesh(this.legShape, pants, leg);this.mesh(this.shoeShape,this.colored,leg); legs.push(leg);
-      const arm = new THREE.Group(); arm.position.set(side * .35, 1.45, 0); avatar.add(arm); this.mesh(shape.arm, this.colored, arm); arms.push(arm);
+      const leg = new THREE.Group(); leg.position.set(side * .145, .85, 0); avatar.add(leg); this.mesh(this.legShape, pants, leg);this.mesh(this.shoeShape,this.colored,leg); legs.push(leg);
+      const arm = new THREE.Group(); arm.position.set(side * .325, 1.45, 0); avatar.add(arm); this.mesh(shape.arm, this.colored, arm); arms.push(arm);
     }
     const car = new THREE.Group(); root.add(car);
-    const carShape = this.carGeometry('sport'), paint = this.material(SLOT_COLORS[slot]);
-    const carBody = this.mesh(carShape.paint, paint, car), carDetails = this.mesh(carShape.details, this.colored, car);
-    const wheels: THREE.Mesh[] = [], frontSteers: THREE.Group[] = [];
-    for (const x of [-1.02, 1.02]) for (const z of [-1.4, 1.4]) {
-      const steer = new THREE.Group(); steer.position.set(x, .45, z); car.add(steer);
-      wheels.push(this.mesh(this.wheelShape, this.colored, steer));
-      if (z < 0) frontSteers.push(steer);
-    }
+    const carModel=createVehicleModel('sport',SLOT_COLORS[slot],{software:this.software});car.add(carModel.group);
     const labelTexture = this.nameTexture(member.name, slot);
     const label = new THREE.Sprite(new THREE.SpriteMaterial({ map: labelTexture, transparent: true, depthWrite: false }));
     label.scale.set(2.9, .635, 1); label.position.y = 2.65; root.add(label);
-    return { root, avatar, body, legs, arms, car, carBody, carDetails, paint,pants,appearanceKey:shape.key, wheels, frontSteers, label, labelTexture, name: member.name, slot, heading: 0, wheelPhase: 0, phase: 0,motion:new AvatarMotion(), kind: 'sport', paintColor: SLOT_COLORS[slot], location: member.pose.interior, mode: member.pose.mode, passengerOf:member.pose.passengerOf??null, initialized: false };
+    return { root, avatar, body, legs, arms, car, carModel,carMotion:createVehicleMotion(),pants,appearanceKey:shape.key, label, labelTexture, name: member.name, slot, heading: 0, wheelPhase: 0, phase: 0,motion:new AvatarMotion(), kind: 'sport', paintColor: SLOT_COLORS[slot], location: member.pose.interior, mode: member.pose.mode, passengerOf:member.pose.passengerOf??null, initialized: false };
   }
 
   private remove(id: string, visual: RemoteVisual) {
     visual.root.removeFromParent(); visual.labelTexture.dispose(); visual.label.material.dispose();
-    visual.paint.dispose(); this.materials.delete(visual.paint);
+    this.removeCarModel(visual);
     visual.pants.dispose();this.materials.delete(visual.pants);this.removeMobility(visual);
     this.visuals.delete(id);
   }
@@ -285,7 +238,7 @@ export class RemotePlayersView {
       const heading = driving ? pose.vehicle!.heading : rideVehicle?.heading??pose.heading;
       const jump = !visual.initialized || visual.location !== pose.interior || visual.mode !== pose.mode || visual.passengerOf!==(pose.passengerOf??null) || Math.hypot(targetX - visual.root.position.x, targetZ - visual.root.position.z) > 18;
       const previousX = visual.root.position.x, previousZ = visual.root.position.z, oldHeading = visual.heading;
-      if (jump) { visual.root.position.set(targetX, driving||riding ? .05 : .1, targetZ); visual.heading = heading;visual.motion.reset(); }
+      if (jump) { visual.root.position.set(targetX, driving||riding ? .05 : .1, targetZ); visual.heading = heading;visual.motion.reset();visual.carMotion=createVehicleMotion(); }
       else {
         visual.root.position.x += (targetX - visual.root.position.x) * blend;
         visual.root.position.z += (targetZ - visual.root.position.z) * blend;
@@ -302,14 +255,23 @@ export class RemotePlayersView {
         const vehicle = pose.vehicle!;
         if (vehicle.kind !== visual.kind) {
           this.removeMobility(visual);
-          const special=vehicle.kind==='bike'||vehicle.kind==='boat';
-          visual.carBody.visible=visual.carDetails.visible=!special;visual.wheels.forEach(wheel=>wheel.visible=!special);
+          this.removeCarModel(visual);visual.carMotion=createVehicleMotion();
           if(vehicle.kind==='bike'||vehicle.kind==='boat'){visual.mobility=createMobilityVehicle(vehicle.kind,vehicle.color);visual.car.add(visual.mobility.group);}
-          else {const shape = this.carGeometry(vehicle.kind); visual.carBody.geometry = shape.paint; visual.carDetails.geometry = shape.details;}
+          else {visual.carModel=createVehicleModel(vehicle.kind,vehicle.color,{software:this.software});visual.car.add(visual.carModel.group);}
           visual.kind = vehicle.kind;
         }
         const color = Number.isFinite(vehicle.color) ? (vehicle.color >>> 0) & 0xffffff : SLOT_COLORS[slot];
-        if (color !== visual.paintColor) { visual.paint.color.setHex(color); visual.paintColor = color; }
+        if (color !== visual.paintColor) { visual.carModel?.paint.color.setHex(color); visual.paintColor = color; }
+        if(visual.carModel){
+          const model=visual.carModel,motion=stepVehicleMotion(visual.carMotion,{speed:vehicle.speed,heading:visual.heading,steer:0},step);
+          visual.carMotion=motion;
+          model.chassis.position.y=motion.heave;model.chassis.rotation.set(motion.pitch,motion.yaw,motion.roll);
+          model.wheels.forEach(wheel=>wheel.rotation.x=motion.wheelRotation);
+          model.frontWheels.forEach(steer=>steer.rotation.y=motion.steering);
+          model.brake.emissiveIntensity=.25+motion.braking*1.7;
+          if(model.red)model.red.emissiveIntensity=Math.sin(this.clock*14)>0?1.7:.15;
+          if(model.blue)model.blue.emissiveIntensity=Math.sin(this.clock*14)<0?1.7:.15;
+        }
         if(visual.mobility){
           visual.mobility.paint.color.setHex(color);
           visual.mobility.rider.traverse((object:THREE.Object3D)=>{if(!(object instanceof THREE.Mesh))return;const slot=object.userData.appearanceSlot as 'shirt'|'pants'|'skin'|'hair'|undefined;if(!slot)return;for(const material of Array.isArray(object.material)?object.material:[object.material])if('color'in material)(material as LitMaterial).color.setHex(avatarShape.colors[slot]);});
@@ -317,9 +279,7 @@ export class RemotePlayersView {
           visual.mobility.wheels.forEach(wheel=>wheel.rotation.x=visual.wheelPhase);
         }
         visual.wheelPhase += vehicle.speed * step / .42;
-        visual.wheels.forEach(wheel => { wheel.rotation.x = visual.wheelPhase; });
         const turn = step > 0 && !jump ? THREE.MathUtils.clamp(wrap(visual.heading - oldHeading) / step * .3, -.35, .35) : 0;
-        visual.frontSteers.forEach(steer => { steer.rotation.y = turn; });
         if(visual.mobility){visual.mobility.frontWheels.forEach(steer=>steer.rotation.y=turn);visual.mobility.group.rotation.z=vehicle.kind==='bike'?-turn*.8:0;}
       } else if(!riding) {
         const moving = travel > .0003;
@@ -341,4 +301,5 @@ export class RemotePlayersView {
     this.geometries.clear(); this.materials.clear(); this.group.removeFromParent(); this.count = 0;
   }
   private removeMobility(visual:RemoteVisual){if(!visual.mobility)return;const geometries=new Set<THREE.BufferGeometry>(),materials=new Set<THREE.Material>();visual.mobility.group.traverse((object:THREE.Object3D)=>{if(object instanceof THREE.Mesh){geometries.add(object.geometry);for(const material of Array.isArray(object.material)?object.material:[object.material])materials.add(material);}});geometries.forEach(item=>item.dispose());materials.forEach(item=>item.dispose());visual.mobility.group.removeFromParent();visual.mobility=undefined;}
+  private removeCarModel(visual:RemoteVisual){visual.carModel?.group.removeFromParent();visual.carModel?.dispose();visual.carModel=undefined;}
 }

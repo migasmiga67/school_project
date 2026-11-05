@@ -9,7 +9,6 @@ import { RemotePlayersView } from './remote-players';
 import { CityLife, getCityEnvironment } from './city-life';
 import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
 import { WORLD_BOUNDS, type GameState, type Vehicle } from './model';
-import { RoundedBoxGeometry } from 'three/addons/geometries/RoundedBoxGeometry.js';
 import { SurfaceLibrary, createWaterMaterial } from './surface-materials';
 import { AtmosphereView, atmosphereFogProfile } from './atmosphere';
 import { PoliceView } from './police-view';
@@ -21,12 +20,14 @@ import { VehicleLodLibrary, type DistantCarVisual } from './vehicle-lod';
 import { CityStreetsView } from './city-streets';
 import { CityDistrictsView } from './city-districts';
 import { createVehicleMotion, stepVehicleMotion, type VehicleMotion } from './vehicle-motion';
+import { createVehicleModel } from './vehicle-model';
 import { graphicsProfile, type GraphicsProfile, type GraphicsQuality } from './graphics';
 import { VehicleLighting, type VehicleLightSource } from './vehicle-lighting';
 import { GarageBuildingView } from './garage-building-view';
 import { isInsideGarageBay } from './garage-building';
 import { BuildingEntrancesView } from './building-entrances-view';
 import type { BuildingEntranceId, EntranceActor } from './building-entrances';
+import { FirstPersonView } from './first-person-view';
 
 type LitMaterial = THREE.MeshStandardMaterial | THREE.MeshLambertMaterial;
 
@@ -67,6 +68,7 @@ export class CityView {
   private readonly heroLegs: THREE.Mesh[] = [];
   private readonly heroArms: THREE.Mesh[] = [];
   private readonly customAvatar:AvatarView;
+  private readonly firstPerson:FirstPersonView;
   private readonly mobilityVisuals:MobilityView;
   private readonly surfaces:SurfaceLibrary;
   private readonly atmosphere:AtmosphereView;
@@ -178,6 +180,8 @@ export class CityView {
     this.casino = new CasinoView(this.softwareRendering);
     this.scene.add(this.casino.exterior, this.casino.interior);
     this.cityObjects = this.scene.children.filter(object => object !== this.hero && object !== this.marker && object !== this.casino.interior);
+    // A small retained overlay keeps hands clear of walls and self-occluding.
+    this.firstPerson=new FirstPersonView(this.softwareRendering);
     this.cityBackground = this.scene.background;
     this.cityFog = this.scene.fog;
     this.remote = new RemotePlayersView(this.softwareRendering);
@@ -229,22 +233,6 @@ export class CityView {
   private material(color: number, props: THREE.MeshStandardMaterialParameters = {}): LitMaterial {
     if (this.softwareRendering) return new THREE.MeshLambertMaterial({ color, emissive: props.emissive ?? 0, emissiveIntensity: props.emissiveIntensity ?? 1, side: props.side ?? THREE.FrontSide, flatShading: props.flatShading ?? false });
     return new THREE.MeshStandardMaterial({ color, roughness: 0.82, ...props });
-  }
-  private batchCarBody(group: THREE.Group) {
-    group.updateMatrixWorld(true);
-    const batches = new Map<string, {material:THREE.Material;meshes:THREE.Mesh[];geometries:THREE.BufferGeometry[]}>();
-    group.traverse(object => {
-      if (!(object instanceof THREE.Mesh) || Array.isArray(object.material) || object.material.transparent) return;
-      const key = `${object.material.uuid}:${Object.keys(object.geometry.attributes).sort().join(',')}`;
-      let batch=batches.get(key);
-      if(!batch){batch={material:object.material,meshes:[],geometries:[]};batches.set(key,batch);}
-      const geometry=object.geometry.index?object.geometry.toNonIndexed():object.geometry.clone();
-      geometry.applyMatrix4(object.matrixWorld);batch.meshes.push(object);batch.geometries.push(geometry);
-    });
-    for(const batch of batches.values()){
-      if(batch.meshes.length>1){const geometry=mergeGeometries(batch.geometries);if(geometry){batch.meshes.forEach(mesh=>{mesh.removeFromParent();mesh.geometry.dispose();});group.add(new THREE.Mesh(geometry,batch.material));}}
-      batch.geometries.forEach(geometry=>geometry.dispose());
-    }
   }
   private mesh(geo: THREE.BufferGeometry, material: THREE.Material, parent: THREE.Object3D, x = 0, y = 0, z = 0) {
     // Shared surface maps tile every eight metres, including on long roads.
@@ -348,60 +336,13 @@ export class CityView {
     const group = new THREE.Group(); this.scene.add(group);
     const shadow = new THREE.Mesh(new THREE.PlaneGeometry(3.1, 5.6), new THREE.MeshBasicMaterial({ map:this.smokeTexture,color:0x101722,transparent:true,opacity:.38,depthWrite:false }));
     shadow.rotation.x = -Math.PI / 2; shadow.position.y = 0.046; group.add(shadow);
-    const chassis=new THREE.Group();chassis.name='sprung-chassis';group.add(chassis);
-    const sporty = vehicle.kind === 'sport'; const paint = this.material(vehicle.color, { metalness: 0.3, roughness: 0.36 });
-    const black = this.material(0x25353e, { metalness: 0.25, roughness: 0.35 }); const tire = this.material(0x20252a); const chrome = this.material(0xc1c7c5, { metalness: 0.65, roughness: 0.3 });
-    const bodyLength = sporty ? 4.5 : 4.7;
-    this.mesh(new RoundedBoxGeometry(1.95,.64,bodyLength,this.softwareRendering?1:3,.16),paint,chassis,0,.7,0);
-    this.box(1.93, 0.13, bodyLength + 0.08, black, chassis, 0, 0.39, 0);
-    this.mesh(new RoundedBoxGeometry(1.7,.22,1.3,this.softwareRendering?1:2,.08),paint,chassis,0,1.06,-1.4);
-    this.box(1.62, sporty ? 0.58 : 0.78, 1.9, black, chassis, 0, sporty ? 1.21 : 1.32, 0.1);
-    this.mesh(new RoundedBoxGeometry(1.63,.12,1.55,this.softwareRendering?1:2,.055),paint,chassis,0,sporty?1.54:1.75,.18);
-    const glass = this.material(0x78a4b1, { roughness: 0.15, metalness: 0.5 });
-    const windscreen = this.box(1.49, sporty ? 0.45 : 0.58, 0.06, glass, chassis, 0, sporty ? 1.31 : 1.42, -0.86); windscreen.rotation.x = -0.28;
-    const rear = this.box(1.46, 0.43, 0.06, glass, chassis, 0, sporty ? 1.29 : 1.43, 1.05); rear.rotation.x = 0.24;
-    for (const side of [-1, 1]) {
-      this.box(0.05, sporty ? 0.38 : 0.5, 1.45, glass, chassis, side * 0.83, sporty ? 1.28 : 1.42, 0.15);
-      this.box(0.06, 0.55, 0.09, paint, chassis, side * 0.86, 1.25, 0.3);
-      this.box(0.16, 0.14, 0.35, paint, chassis, side * 1.04, 1.14, -0.65);
-      this.box(0.06, 0.07, 0.28, chrome, chassis, side * 1.002, 0.98, 0.52);
-    }
-    const head = this.material(0xfff1c7, { emissive: 0xffe1aa, emissiveIntensity: 0.8 });
-    const brake = this.material(0xca5965, { emissive: 0xc63743, emissiveIntensity: 0.25 });
-    for (const x of [-0.65, 0.65]) {
-      this.box(0.48, 0.18, 0.08, head, chassis, x, 0.78, -bodyLength / 2 - 0.04);
-      this.box(0.56, 0.15, 0.08, brake, chassis, x, 0.8, bodyLength / 2 + 0.04);
-    }
-    this.box(0.62, 0.17, 0.05, this.material(0xe9e4cc), chassis, 0, 0.6, bodyLength / 2 + 0.06);
-    const wheels: THREE.Group[] = [], frontWheels: THREE.Group[] = [];
-    for (const x of [-1.02, 1.02]) for (const z of [-1.4, 1.4]) {
-      const steer = new THREE.Group(); steer.position.set(x, 0.45, z); group.add(steer);
-      const spin = new THREE.Group(); steer.add(spin);
-      const wheel = this.mesh(new THREE.CylinderGeometry(0.42, 0.42, 0.26,this.softwareRendering?12:20), tire, spin); wheel.rotation.z = Math.PI / 2;
-      const hub = this.mesh(new THREE.CylinderGeometry(0.24, 0.24, 0.28, 12), black, spin); hub.rotation.z = Math.PI / 2;
-      const spokes:THREE.BufferGeometry[]=[];
-      for(let index=0;index<5;index++){
-        const angle=index*Math.PI*2/5,spoke=new THREE.BoxGeometry(.025,.30,.045);
-        spoke.rotateX(angle);spoke.translate(Math.sign(x)*.153,Math.cos(angle)*.10,Math.sin(angle)*.10);spokes.push(spoke);
-      }
-      const spokeGeometry=mergeGeometries(spokes)!;spokes.forEach(spoke=>spoke.dispose());this.mesh(spokeGeometry,chrome,spin);
-      wheels.push(spin); if (z < 0) frontWheels.push(steer);
-    }
-    const visual: CarVisual = { group,chassis,motion:createVehicleMotion(), wheels, frontWheels, brake, head, paint, paintColor:vehicle.color, kind:vehicle.kind, smoke: [] };
-    if (vehicle.kind === 'police') {
-      this.box(1.98, 0.35, 1.4, this.material(0xe8e4d9), chassis, 0, 0.76, 0.05);
-      this.box(1.35, 0.14, 0.4, black, chassis, 0, 1.89, 0.1);
-      visual.red = this.material(0xef7180, { emissive: 0xed3d50, emissiveIntensity: 0.8 }); visual.blue = this.material(0x80c9ef, { emissive: 0x348be8, emissiveIntensity: 0.8 });
-      this.box(0.6, 0.2, 0.36, visual.red, chassis, -0.34, 2.02, 0.1); this.box(0.6, 0.2, 0.36, visual.blue, chassis, 0.34, 2.02, 0.1);
-    }
-    if (sporty) {
-      this.box(1.8, 0.11, 0.4, black, chassis, 0, 1.15, 1.95);
-      for (const x of [-0.65, 0.65]) this.box(0.08, 0.3, 0.15, black, chassis, x, 1.03, 1.95);
-    }
+    const model=createVehicleModel(vehicle.kind==='police'?'police':vehicle.kind==='sport'?'sport':'sedan',vehicle.color,{software:this.softwareRendering,material:(color,props)=>this.material(color,props)});
+    group.add(...model.group.children);
+    const {chassis,wheels,frontWheels,paint,head,brake,red,blue}=model;
+    const visual:CarVisual={group,chassis,motion:createVehicleMotion(),wheels,frontWheels,paint,head,brake,red,blue,paintColor:vehicle.color,kind:vehicle.kind,smoke:[]};
     for (let i = 0; i < 3; i++) {
       const smoke = new THREE.Sprite(new THREE.SpriteMaterial({ map: this.smokeTexture, color: 0x9ea3a6, opacity: 0, transparent: true, depthWrite: false })); group.add(smoke); visual.smoke.push(smoke);
     }
-    if (this.softwareRendering) this.batchCarBody(chassis);
     if(this.distantCars){
       const full=new THREE.Group();full.add(...group.children);group.add(full);visual.full=full;
       visual.distant=this.distantCars.create(vehicle.kind==='sport'?'sport':vehicle.kind==='police'?'police':'sedan',vehicle.color);
@@ -431,7 +372,8 @@ export class CityView {
     if(group){this.homeScene.add(group,this.hero,this.remote.group);}else this.scene.add(this.hero,this.remote.group);
   }
   addCityObject(group:THREE.Group){this.scene.add(group);}
-  setAppearance(appearance:AppearanceState,crewColor?:number){this.customAvatar.setAppearance(appearance,crewColor);this.mobilityVisuals.setAppearance(appearance,crewColor);}
+  setAppearance(appearance:AppearanceState,crewColor?:number){this.customAvatar.setAppearance(appearance,crewColor);this.firstPerson.setAppearance(appearance,crewColor);this.mobilityVisuals.setAppearance(appearance,crewColor);}
+  get firstPersonSnapshot(){return this.firstPerson.snapshot;}
   get remotePlayers() { return this.remote.visibleCount; }
   get cityLifeSnapshot() { return this.living.snapshot; }
   setOnline(members: OnlineMember[], selfId: string) {
@@ -460,7 +402,7 @@ export class CityView {
     const actors:EntranceActor[]=[{...state.player,interior:state.interior,access:this.entranceAccess},...this.onlineMembers.filter(member=>member.id!==this.onlineSelf).map(member=>({...member.pose,access:['casino'] as BuildingEntranceId[]}))];
     this.entrances.update(actors,dt);this.entrances.group.visible=!inside;
     if(inside)this.casino.updateDoor(state.player,dt);
-    this.living.update(citySeconds,state.player,inside,dt,[...state.vehicles,...state.police]);
+    this.living.update(citySeconds,state.player,inside,dt,[...state.vehicles,...state.police,...(state.pursuit?.patrols??[])]);
     this.streets.updateSignals(citySeconds);
     this.policeVisuals.update(state,dt);this.policeVisuals.group.visible=!inside;
     this.mobilityVisuals.update(state,dt,this.remoteCars,cameraMode===2?state.player.vehicleId??undefined:undefined);this.mobilityVisuals.group.visible=!inside;
@@ -504,7 +446,7 @@ export class CityView {
       visual.smoke.forEach((sprite, index) => { sprite.visible = vehicle.health < 35; const phase = ((state.time * 0.6 + index / 3) % 1); sprite.position.set(0, 1 + phase * 2, -1.3 + phase * 0.6); sprite.scale.setScalar(0.5 + phase * 1.8); (sprite.material as THREE.SpriteMaterial).opacity = vehicle.health < 35 ? (1 - phase) * 0.3 : 0; });
     }
     for (const [id, visual] of this.cars) if (!alive.has(id)){this.disposeCar(visual);this.cars.delete(id);}
-    const lightSources:VehicleLightSource[]=[...state.vehicles,...state.police].filter(v=>v.kind!=='boat'&&v.kind!=='bike'&&!this.remoteCars.has(v.id)).map(vehicle=>({id:vehicle.id,x:vehicle.x,z:vehicle.z,heading:vehicle.heading,kind:vehicle.kind,braking:this.cars.get(vehicle.id)?.motion.braking??0}));
+    const lightSources:VehicleLightSource[]=[...state.vehicles,...state.police,...(state.pursuit?.patrols??[])].filter(v=>v.kind!=='boat'&&v.kind!=='bike'&&!this.remoteCars.has(v.id)).map(vehicle=>({id:vehicle.id,x:vehicle.x,z:vehicle.z,heading:vehicle.heading,kind:vehicle.kind,braking:this.cars.get(vehicle.id)?.motion.braking??0}));
     for(const member of this.onlineMembers){if(member.id===this.onlineSelf||member.pose.mode!=='drive'||member.pose.interior||member.pose.homeId||member.pose.passengerOf)continue;lightSources.push({id:`remote-${member.id}`,x:member.pose.x,z:member.pose.z,heading:member.pose.heading,kind:member.pose.vehicle?.kind});}
     this.vehicleLighting.update(lightSources,state.player,environment.daylight,dt,!inside,environment.rain);
     const p = state.player,riding=Boolean(p.passengerOf),inCar=p.mode==='drive'||riding;
@@ -527,6 +469,7 @@ export class CityView {
     const zoom = pose?.zoom ?? 1;
     const pitch = pose?.pitch ?? (cameraMode === 1 ? 1 : cameraMode === 2 ? .02 : .38);
     const ridingVehicle=state.vehicles.find(vehicle=>vehicle.id===p.vehicleId),airHeight=ridingVehicle?.airHeight??0;
+    const roadCar=Boolean(ridingVehicle&&ridingVehicle.kind!=='bike'&&ridingVehicle.kind!=='boat');
     let destination: THREE.Vector3; let lookAt: THREE.Vector3;
     if (inside && this.seated) {
       destination = new THREE.Vector3(0, 2.8, 3.2);
@@ -535,8 +478,9 @@ export class CityView {
       lookAt = destination.clone().add(new THREE.Vector3(Math.sin(headYaw) * Math.cos(headPitch), -Math.sin(headPitch), -Math.cos(headYaw) * Math.cos(headPitch)).multiplyScalar(10));
     } else if (cameraMode === 2) {
       const vehicleForward = new THREE.Vector3(Math.sin(p.heading), 0, -Math.cos(p.heading));
-      destination = new THREE.Vector3(p.x, (inCar ? 1.45 : 1.75)+airHeight, p.z);
-      if(inCar)destination.addScaledVector(vehicleForward, .6);
+      destination = new THREE.Vector3(p.x, (inCar ? 1.45 : 1.9)+airHeight, p.z);
+      if(inCar)destination.addScaledVector(vehicleForward, roadCar ? .25 : .6);
+      if(roadCar&&!riding)destination.addScaledVector(new THREE.Vector3(Math.cos(p.heading),0,Math.sin(p.heading)),-.42);
       if(riding)destination.add(new THREE.Vector3(Math.cos(p.heading),0,Math.sin(p.heading)).multiplyScalar(.48));
       lookAt = destination.clone().addScaledVector(forward, 25);lookAt.y -= Math.tan(pitch) * 25;
     } else {
@@ -554,7 +498,7 @@ export class CityView {
     }
     const fieldOfView = this.seated ? THREE.MathUtils.clamp((this.camera.aspect < 1 ? 78 : 62) / zoom, 42, 90) : cameraMode === 2 ? THREE.MathUtils.clamp(58 / zoom, 35, 85) : 58;
     if(this.camera.fov !== fieldOfView){this.camera.fov = fieldOfView;this.camera.updateProjectionMatrix();}
-    if (!this.initialized || this.lastMode !== cameraMode) { this.camera.position.copy(destination); this.initialized = true; this.lastMode = cameraMode; }
+    if (cameraMode===2 || !this.initialized || this.lastMode !== cameraMode) { this.camera.position.copy(destination); this.initialized = true; this.lastMode = cameraMode; }
     else this.camera.position.lerp(destination, 1 - Math.exp(-Math.min(dt, 0.2) * 5.8));
     if (cameraMode !== 2 && !inside) {
       const pivot = new THREE.Vector3(p.x, 1.8, p.z);
@@ -564,25 +508,36 @@ export class CityView {
       if (obstruction) this.camera.position.copy(pivot).addScaledVector(offset.normalize(), Math.max(0.4, obstruction.distance - 0.55));
     }
     this.remote.update(this.onlineMembers, this.onlineSelf, state.interior, dt,cameraMode===2&&riding?p.passengerOf??undefined:undefined);
-    this.camera.lookAt(lookAt);this.atmosphere.update(environment,this.camera.position,citySeconds);this.renderer.render(this.scene, this.camera);this.renderFrames++;
+    this.camera.lookAt(lookAt);
+    this.firstPerson.update({
+      visible:cameraMode===2&&!this.seated&&!riding&&(p.mode==='foot'||roadCar),
+      mode:p.mode==='drive'?'drive':'foot',
+      speed:p.mode==='drive'?ridingVehicle?.speed??0:dt>0?this.motion/dt:0,
+      steer:ridingVehicle?.steer??0,dt,seconds:this.visualTime,
+      fov:this.camera.fov,aspect:this.camera.aspect,
+      lookYaw:Math.atan2(Math.sin(heading-p.heading),Math.cos(heading-p.heading)),
+      lookPitch:pitch,daylight:inside?1:environment.daylight,
+    });
+    this.atmosphere.update(environment,this.camera.position,citySeconds);this.renderer.render(this.scene, this.camera);this.firstPerson.render(this.renderer);this.renderFrames++;
   }
   private updateHome(state:GameState,dt:number,cameraMode:number,pose?:CameraPose){
     this.visualTime+=dt;const p=state.player,yaw=pose?.yaw??p.heading,pitch=pose?.pitch??.35,zoom=pose?.zoom??1;
     this.hero.visible=cameraMode!==2;this.hero.position.set(p.x,.1,p.z);this.hero.rotation.y=-p.heading;
-    const moved=this.lastPlayer?Math.hypot(p.x-this.lastPlayer.x,p.z-this.lastPlayer.z)>.001:false;this.lastPlayer={x:p.x,z:p.z};
-    this.customAvatar.update(moved,this.visualTime,{speed:moved?2.8:0,heading:p.heading,dt});
+    const travel=this.lastPlayer?Math.hypot(p.x-this.lastPlayer.x,p.z-this.lastPlayer.z):0,moved=travel>.001;this.lastPlayer={x:p.x,z:p.z};
+    const speed=dt>0?travel/dt:0;
+    this.customAvatar.update(moved,this.visualTime,{speed,heading:p.heading,dt});
     this.heroLegs.forEach((leg,i)=>leg.rotation.x=moved?Math.sin(this.visualTime*10+i*Math.PI)*.45:0);
     this.heroArms.forEach((arm,i)=>arm.rotation.x=moved?-Math.sin(this.visualTime*10+i*Math.PI)*.3:0);
     const forward=new THREE.Vector3(Math.sin(yaw),0,-Math.cos(yaw));const pivot=new THREE.Vector3(p.x,1.5,p.z);
-    const destination=cameraMode===2?new THREE.Vector3(p.x,1.75,p.z):pivot.clone().addScaledVector(forward,-Math.cos(pitch)*4*zoom);
+    const destination=cameraMode===2?new THREE.Vector3(p.x,1.9,p.z):pivot.clone().addScaledVector(forward,-Math.cos(pitch)*4*zoom);
     if(cameraMode!==2)destination.y+=Math.sin(pitch)*4*zoom;
     destination.x=THREE.MathUtils.clamp(destination.x,-7.2,7.2);destination.z=THREE.MathUtils.clamp(destination.z,-5.7,7.2);destination.y=THREE.MathUtils.clamp(destination.y,.7,5.4);
-    if(!this.initialized||cameraMode!==this.lastMode){this.camera.position.copy(destination);this.initialized=true;this.lastMode=cameraMode;}else this.camera.position.lerp(destination,1-Math.exp(-Math.min(dt,.2)*8));
+    if(cameraMode===2||!this.initialized||cameraMode!==this.lastMode){this.camera.position.copy(destination);this.initialized=true;this.lastMode=cameraMode;}else this.camera.position.lerp(destination,1-Math.exp(-Math.min(dt,.2)*8));
     const lookAt=cameraMode===2?destination.clone().addScaledVector(forward,10):pivot.clone().addScaledVector(forward,1);
     if(cameraMode===2)lookAt.y-=Math.tan(pitch)*10;
     if(this.camera.fov!==58){this.camera.fov=58;this.camera.updateProjectionMatrix();}
     this.remote.update(this.onlineMembers,this.onlineSelf,null,dt,undefined,this.homeId);
-    this.camera.lookAt(lookAt);this.renderer.render(this.homeScene,this.camera);this.renderFrames++;
+    this.camera.lookAt(lookAt);this.firstPerson.update({visible:cameraMode===2,mode:'foot',speed,steer:0,dt,seconds:this.visualTime,fov:this.camera.fov,aspect:this.camera.aspect});this.renderer.render(this.homeScene,this.camera);this.firstPerson.render(this.renderer);this.renderFrames++;
   }
   get graphicsProfile(){return {...this.qualityProfile,lighting:this.vehicleLighting.snapshot};}
   setGraphicsQuality(quality:GraphicsQuality){this.requestedQuality=quality;this.configureGraphics();this.resize();}
@@ -603,5 +558,5 @@ export class CityView {
     this.onGraphicsChange?.();
   }
   resize() { this.configureGraphics();const width = Math.max(1, this.parent.clientWidth), height = Math.max(1, this.parent.clientHeight); this.camera.aspect = width / height; this.camera.updateProjectionMatrix(); this.renderer.setSize(width, height, false); }
-  destroy() { this.observer.disconnect();this.garageBuilding.destroy();this.entrances.destroy(); this.vehicleLighting.destroy();this.streets.destroy();this.districts.destroy();this.living.destroy(); this.remote.destroy(); this.casino.destroy();this.atmosphere.destroy(); this.scene.traverse(object => { if (object instanceof THREE.Mesh) { object.geometry.dispose(); for (const material of Array.isArray(object.material) ? object.material : [object.material]) material.dispose(); } });this.occluders.forEach(object=>object.geometry.dispose());this.surfaces.destroy();this.distantCars?.destroy(); if(this.cityBackground instanceof THREE.Texture)this.cityBackground.dispose();this.glowTexture.dispose(); this.smokeTexture.dispose(); this.renderer.dispose(); this.renderer.domElement.remove(); }
+  destroy() { this.observer.disconnect();this.firstPerson.group.removeFromParent();this.firstPerson.destroy();this.garageBuilding.destroy();this.entrances.destroy(); this.vehicleLighting.destroy();this.streets.destroy();this.districts.destroy();this.living.destroy(); this.remote.destroy(); this.casino.destroy();this.atmosphere.destroy(); this.scene.traverse(object => { if (object instanceof THREE.Mesh) { object.geometry.dispose(); for (const material of Array.isArray(object.material) ? object.material : [object.material]) material.dispose(); } });this.occluders.forEach(object=>object.geometry.dispose());this.surfaces.destroy();this.distantCars?.destroy(); if(this.cityBackground instanceof THREE.Texture)this.cityBackground.dispose();this.glowTexture.dispose(); this.smokeTexture.dispose(); this.renderer.dispose(); this.renderer.domElement.remove(); }
 }
