@@ -22,7 +22,7 @@ import { CityExpansion } from './expansion-controller';
 import { CityStories } from './city-stories';
 import { DOCK } from './mobility';
 import { districtAt } from './world-layout';
-import { GARAGE_BUILDING, garageServiceAvailable, isInsideGarageBay, atGarageServiceDesk } from './garage-building';
+import { GARAGE_BUILDING, garageServiceAvailable, isInsideGarageBay, garageFootServiceInteraction } from './garage-building';
 import { GraphicsUI } from './graphics-ui';
 import { loadGraphicsQuality, saveGraphicsQuality } from './graphics';
 
@@ -109,7 +109,7 @@ stories=new CityStories({
  onContacts:()=>expansion?.openCareer(),onActivities:()=>activitiesUI.open(),
 },loadedStories);
 function nearGarage(){return !expansion?.homeId&&!state.interior&&!state.player.passengerOf&&garageServiceAvailable(activeVehicle(state)??state.player,state.player.mode==='drive'?1.5:.55);}
-function garageFootInteraction(){return state.player.mode==='foot'&&nearGarage()&&(atGarageServiceDesk(state.player)||!isInsideGarageBay(state.player)&&Math.hypot(state.player.x-GARAGE_LOCATION.x,state.player.z-GARAGE_LOCATION.z)<=3);}
+function garageFootInteraction(){return state.player.mode==='foot'&&nearGarage()&&garageFootServiceInteraction(state.player,Boolean(nearestVehicle(state)));}
 function routeGarage(){expansion?.clearRoute();garageNavigation=true;casinoNavigation=false;notify('GPS: MOD SHOP. Podjedź do bramy — otworzy się automatycznie. W środku: G — tuning, E — wysiądź.');updateHUD();}
 function openGarage(){
  if(!nearGarage()){routeGarage();return;}

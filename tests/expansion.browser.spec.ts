@@ -66,20 +66,30 @@ async function createPair(browser: Browser, info: TestInfo): Promise<Pair> {
     return page;
   };
   try {
-    const host = await open('Alicja');
+    // Finish both WebGL bootstraps before the host starts a room or either
+    // city starts simulating. A joining client must not compete with a live
+    // host scene while it is still constructing its own world.
+    const [host, guest] = await Promise.all([open('Alicja'), open('Borys')]);
     await host.locator('#online-create').click();
     await expect.poll(async () => (await snapshot(host)).online.status, { timeout: 20000 }).toBe('online');
+    await expect(host.locator('#online-code')).toHaveText(/^[A-Z2-9]{8}$/);
     const code = (await host.locator('#online-code').innerText()).trim();
-    await host.locator('#online-enter').click();
-    const guest = await open('Borys');
     await guest.locator('#online-room').fill(code);
     await guest.locator('#online-join').click();
-    await expect.poll(async () => (await snapshot(guest)).online.status, { timeout: 20000 }).toBe('online');
-    await guest.locator('#online-enter').click();
-    for (const page of [host, guest]) {
+    await expect.poll(async () => {
+      const clients = await Promise.all([snapshot(host), snapshot(guest)]);
+      return clients.map(client => ({
+        online: client.online.status, members: client.online.snapshot?.members.length,
+        code: client.online.snapshot?.code,
+      }));
+    }, { timeout: 20000 }).toEqual([
+      { online: 'online', members: 2, code }, { online: 'online', members: 2, code },
+    ]);
+    await Promise.all([host, guest].map(page => page.locator('#online-enter').click()));
+    await Promise.all([host, guest].map(async page => {
       await expect.poll(async () => (await snapshot(page)).started).toBe(true);
       await expect.poll(async () => (await room(page)).members.length).toBe(2);
-    }
+    }));
     return { host, guest, contexts, errors, failed };
   } catch (error) {
     await captureFailure(contexts, info);

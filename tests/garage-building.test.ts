@@ -1,7 +1,7 @@
 import {describe,expect,it} from 'vitest';
 import {activeVehicle,createGame,step,updateGarageAccess} from '../src/game';
 import {advanceSimulation} from '../src/simulation';
-import {GARAGE_BUILDING,GARAGE_CAR_CLEARANCE,GARAGE_FOOT_CLEARANCE,advanceGarageGate,atGarageServiceDesk,createGarageGate,garageGateCollision,garageServiceAvailable,garageSolidCollision,isGarageBuildingCollider,isInsideGarageBay,type GarageGateState,type GarageVisitor} from '../src/garage-building';
+import {GARAGE_BUILDING,GARAGE_CAR_CLEARANCE,GARAGE_FOOT_CLEARANCE,advanceGarageGate,atGarageServiceDesk,atGarageEntrance,garageFootServiceInteraction,createGarageGate,garageGateCollision,garageServiceAvailable,garageSolidCollision,isGarageBuildingCollider,isInsideGarageBay,type GarageGateState,type GarageVisitor} from '../src/garage-building';
 import type {GameState,Input} from '../src/model';
 const idle:Input={throttle:false,brake:false,left:false,right:false,handbrake:false,boost:false,sprint:false,interact:false,nextMission:false,reset:false};
 function carAt(z:number,x=-20):GameState {
@@ -17,6 +17,16 @@ function moveCarTo(state:GameState,target:number,reverse=false){
  }
 }
 describe('world-space garage shell and services',()=>{
+ it('keeps the whole entrance foyer usable without taking E away from a nearby parked car',()=>{
+  for(const point of[{x:-22.41184,z:71.5},{x:-22.4,z:73.22656},{x:-20,z:75.5}]){
+   expect(atGarageEntrance(point)).toBe(true);expect(garageFootServiceInteraction(point)).toBe(true);
+  }
+  expect(garageFootServiceInteraction({x:-22.4,z:71.5},true)).toBe(false);
+  expect(garageFootServiceInteraction({x:-17.3,z:62.5},true)).toBe(false);
+  expect(garageFootServiceInteraction(GARAGE_BUILDING.desk,true)).toBe(true);
+  expect(garageFootServiceInteraction({x:-20,z:65})).toBe(false);
+  expect(garageFootServiceInteraction({x:-28,z:72})).toBe(false);
+ });
  it('opens only the correct parcel while retaining solid wings, back wall and workshop props',()=>{
   expect(isGarageBuildingCollider({x:-20,z:60,halfX:12,halfZ:12})).toBe(true);
   expect(isGarageBuildingCollider({x:20,z:60,halfX:12,halfZ:12})).toBe(false);

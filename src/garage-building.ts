@@ -67,6 +67,18 @@ export const canUseGarageService=garageServiceAvailable;
 export function atGarageServiceDesk(point:Point):boolean {
   return garageServiceAvailable(point)&&isInsideGarageBay(point)&&Math.hypot(point.x-GARAGE_BUILDING.desk.x,point.z-GARAGE_BUILDING.desk.z)<=2.1;
 }
+/** The opening is a usable foyer on both sides of the moving gate. */
+export function atGarageEntrance(point:Point):boolean {
+  return garageServiceAvailable(point)&&point.x>=GARAGE_BUILDING.bayMinX+.55&&point.x<=GARAGE_BUILDING.bayMaxX-.55
+    &&Math.abs(point.z-GARAGE_BUILDING.frontZ)<=3.5;
+}
+export function garageFootServiceInteraction(point:Point,nearbyVehicle=false):boolean {
+  if(atGarageServiceDesk(point))return true;
+  // In the bay, E beside a vehicle must still let the player get back in.
+  if(nearbyVehicle&&isInsideGarageBay(point))return false;
+  return atGarageEntrance(point)||!isInsideGarageBay(point)&&garageServiceAvailable(point)
+    &&Math.hypot(point.x-GARAGE_BUILDING.entrance.x,point.z-GARAGE_BUILDING.entrance.z)<=3;
+}
 
 function requestsOpening(visitor:GarageVisitor):boolean {
   if(!valid(visitor))return false;
