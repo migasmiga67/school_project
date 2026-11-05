@@ -6,7 +6,7 @@ import { CITY_BENCH_PLACEMENTS,CITY_STREET_SIGN_PLACEMENTS,findStreetDecoration,
 import { AvatarMotion } from './avatar-motion';
 import { cityLifeBudget,pedestrianReaction,type PedestrianVehicle } from './pedestrian-reaction';
 import { pathLength, samplePath } from './city-art';
-import { createCharacterFaceParts,createPedestrianHeadGeometry,createPedestrianHairGeometry } from './character-geometry';
+import { createCharacterFaceParts,createPedestrianHeadGeometry,createPedestrianHairGeometry,CHARACTER_HEAD_SCALE } from './character-geometry';
 import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
 
 export interface CityEvent { id:string; title:string; target:Point; reward:number; expiresAt:number }
@@ -184,8 +184,8 @@ export class CityLife {
           }
         }
         this.dummy.position.set(pose.x+reaction.x,.05+motion.bob,pose.z+reaction.z);this.dummy.rotation.set(motion.lean,-pose.heading+motion.yawOffset,motion.roll);this.dummy.scale.set(1,1,1);this.dummy.updateMatrix();
-        this.personPart(0,index,0,1.76,0,1,1,1);this.personPart(1,index,0,1.16,0,1,1,1);
-        this.personPart(6,index,0,1.76,0,1,1,1);this.personPart(7,index,0,1.76,0,1,1,1);
+        this.personPart(0,index,0,1.76,0,CHARACTER_HEAD_SCALE,CHARACTER_HEAD_SCALE,CHARACTER_HEAD_SCALE);this.personPart(1,index,0,1.16,0,1,1,1);
+        this.personPart(6,index,0,1.76,0,CHARACTER_HEAD_SCALE,CHARACTER_HEAD_SCALE,CHARACTER_HEAD_SCALE);this.personPart(7,index,0,1.76,0,CHARACTER_HEAD_SCALE,CHARACTER_HEAD_SCALE,CHARACTER_HEAD_SCALE);
         for(let side=0;side<2;side++){
           const sign=side?1:-1,arm=(side?motion.rightArm:motion.leftArm)-reaction.alert*.9,leg=side?motion.rightLeg:motion.leftLeg;
           // Rotate each limb around the shoulder/hip, keeping hands and feet attached to it.

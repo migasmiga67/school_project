@@ -2,7 +2,7 @@ import * as THREE from 'three';
 import { appearanceColors, createAppearance, type AppearanceState } from './appearance';
 import { AvatarMotion, type AvatarMotionInput } from './avatar-motion';
 import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
-import { createCharacterFaceParts } from './character-geometry';
+import { createCharacterFaceParts,CHARACTER_HAIR_THETA,CHARACTER_HEAD_SCALE } from './character-geometry';
 
 type AvatarMaterial=THREE.MeshLambertMaterial|THREE.MeshStandardMaterial;
 /** One independently colored avatar. Parent sets world position and heading. */
@@ -61,7 +61,7 @@ export class AvatarView {
   // Keep the pelvis and feet planted while shoulders and head anticipate a turn.
   const upper=this.group.children.filter(object=>this.arms.includes(object as THREE.Group)||[...this.hairstyles.values(),...this.accessories.values()].includes(object as THREE.Group)||object.position.y>=1);
   this.upperBody.position.y=1;this.group.add(this.upperBody);
-  this.headRoot.position.y=.79;this.upperBody.add(this.headRoot);
+  this.headRoot.position.y=.79;this.headRoot.scale.setScalar(CHARACTER_HEAD_SCALE);this.upperBody.add(this.headRoot);
   for(const object of upper){const head=object.position.y>1.65||[...this.hairstyles.values(),...this.accessories.values()].includes(object as THREE.Group);object.position.y-=head?1.79:1;(head?this.headRoot:this.upperBody).add(object);}
   // Fixed details share materials and one draw per animated bone instead of one draw per finger.
   const batch=(parent:THREE.Object3D)=>{
@@ -80,7 +80,7 @@ export class AvatarView {
  private capsule(w:number,h:number,d:number){const geometry=new THREE.CapsuleGeometry(.5,1,3,8);geometry.scale(w,h/2,d);return geometry;}
  private round(parent:THREE.Object3D,w:number,h:number,d:number,material:THREE.Material,x:number,y:number,z:number){return this.part(parent,this.capsule(w,h,d),material,x,y,z);}
  private oval(parent:THREE.Object3D,w:number,h:number,d:number,material:THREE.Material,x:number,y:number,z:number){const geometry=new THREE.SphereGeometry(.5,8,6);geometry.scale(w,h,d);return this.part(parent,geometry,material,x,y,z);}
- private hairCap(parent:THREE.Object3D,width:number,height:number,material:THREE.Material=this.hair){const geometry=new THREE.SphereGeometry(.2,8,5,0,Math.PI*2,0,Math.PI*.57);geometry.scale(width,height,1);return this.part(parent,geometry,material,0,1.81,-.012);}
+ private hairCap(parent:THREE.Object3D,width:number,height:number,material:THREE.Material=this.hair){const geometry=new THREE.SphereGeometry(.2,8,5,0,Math.PI*2,0,CHARACTER_HAIR_THETA);geometry.scale(width,height,1);return this.part(parent,geometry,material,0,1.81,-.012);}
  private box(parent:THREE.Group,w:number,h:number,d:number,material:THREE.Material,x:number,y:number,z:number){const mesh=new THREE.Mesh(new THREE.BoxGeometry(w,h,d),material);mesh.position.set(x,y,z);mesh.castShadow=!this.software;parent.add(mesh);return mesh;}
  setAppearance(appearance:AppearanceState,crewColor?:number){
   const colors=appearanceColors(appearance,crewColor),signature=JSON.stringify(colors);if(signature===this.signature)return;this.signature=signature;

@@ -1,6 +1,11 @@
 import * as THREE from 'three';
 import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
 
+/** Keep the frontal hairline above the eyebrows; rear hair is modelled separately. */
+export const CHARACTER_HAIR_THETA=Math.PI*.39;
+/** The shared head dimensions are scaled against the adult shoulder/torso silhouette. */
+export const CHARACTER_HEAD_SCALE=.8;
+
 const oval=(w:number,h:number,d:number,x:number,y:number,z:number)=>new THREE.SphereGeometry(.5,10,7).scale(w,h,d).translate(x,y,z);
 function combine(parts:THREE.BufferGeometry[]){const geometry=mergeGeometries(parts);parts.forEach(part=>part.dispose());return geometry;}
 function tint(geometry:THREE.BufferGeometry,color:number){
@@ -35,9 +40,10 @@ export function createCharacterFaceGeometry(skin:number,hair:number){
 /** Shared adult proportions for instanced ambient pedestrians. */
 export function createPedestrianHeadGeometry(){
  const parts=createCharacterFaceParts();parts.features.dispose();parts.brows.dispose();
- return combine([oval(.38,.44,.35,0,0,0),oval(.14,.19,.14,0,-.24,.015),parts.skin]);
+ // The neck overlaps the shirt after the adult head scale, avoiding a floating head during gait.
+ return combine([oval(.38,.44,.35,0,0,0),oval(.14,.24,.14,0,-.255,.015),parts.skin]);
 }
 export function createPedestrianHairGeometry(){
- const cap=new THREE.SphereGeometry(.2,10,6,0,Math.PI*2,0,Math.PI*.56);cap.scale(1.03,1.13,.94);cap.translate(0,.018,.006);
+ const cap=new THREE.SphereGeometry(.2,10,6,0,Math.PI*2,0,CHARACTER_HAIR_THETA);cap.scale(1.03,1.13,.94);cap.translate(0,.018,.006);
  const brows=createCharacterFaceParts();brows.skin.dispose();brows.features.dispose();return combine([cap,brows.brows]);
 }

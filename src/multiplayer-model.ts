@@ -13,7 +13,9 @@ import type { CampaignAction, CampaignSnapshot } from './campaign';
 import type { MobilityTrialAction, MobilityTrialSnapshot } from './mobility';
 
 export const MAX_ROOM_PLAYERS = 4;
-export const ROOM_PROTOCOL = 9;
+// Lane geometry is part of the shared deterministic traffic simulation.
+// Older clients sample street centrelines and cannot safely share this world.
+export const ROOM_PROTOCOL = 10;
 export const ONLINE_BUY_IN = 200;
 export const ONLINE_TURN_MS = 30000;
 export const CREW_DURATION_MS = 150000;

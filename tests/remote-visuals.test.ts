@@ -1,8 +1,9 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import * as THREE from 'three';
 import { RemotePlayersView } from '../src/remote-players';
-import { createAppearance } from '../src/appearance';
+import { appearanceAction, appearanceColors, createAppearance } from '../src/appearance';
 import type { OnlineMember, OnlineVehicle } from '../src/multiplayer-model';
+import { CHARACTER_HEAD_SCALE } from '../src/character-geometry';
 
 const views:RemotePlayersView[]=[];
 const member=(id='driver'):OnlineMember=>({id,name:id,slot:0,appearance:createAppearance(),pose:{x:0,z:0,heading:0,mode:'drive',interior:null,seated:false,vehicle:{id:'car',kind:'sedan',x:0,z:0,heading:0,color:0x397b91,speed:12,health:100}}});
@@ -52,8 +53,28 @@ describe('shared detailed online vehicles',()=>{
     const avatar=scene.group.getObjectByName('Online player driver')!.children[0],body=avatar.children[0] as THREE.Mesh;
     const geometry=body.geometry,colors=geometry.getAttribute('color'),positions=geometry.getAttribute('position');
     const whites=new THREE.Color(0xe9e3d7);let eyes=0;
-    for(let index=0;index<colors.count;index++)if(Math.abs(colors.getX(index)-whites.r)<1e-5&&Math.abs(colors.getY(index)-whites.g)<1e-5&&Math.abs(colors.getZ(index)-whites.b)<1e-5){expect(positions.getY(index)).toBeGreaterThan(.8);expect(positions.getZ(index)).toBeLessThan(-.16);eyes++;}
+    for(let index=0;index<colors.count;index++)if(Math.abs(colors.getX(index)-whites.r)<1e-5&&Math.abs(colors.getY(index)-whites.g)<1e-5&&Math.abs(colors.getZ(index)-whites.b)<1e-5){expect(positions.getY(index)).toBeGreaterThan(.8);expect(positions.getZ(index)).toBeLessThan(-.13);eyes++;}
     expect(eyes).toBeGreaterThan(0);
     for(let frame=0;frame<20;frame++){other.pose.z-=.03;scene.update([other],'self',null,.016);expect(body.geometry).toBe(geometry);}
+  });
+
+  it.each(['hair-short','hair-buzz','hair-long','accessory-cap'])('%s leaves remote eyes and cheeks visible from the front',item=>{
+    const other=member(),scene=view();other.pose.mode='foot';other.pose.vehicle=null;
+    if(item!=='hair-short'){
+      const action=item==='hair-buzz'?{type:'equip' as const,slot:'hair' as const,item}:{type:'buy' as const,item};
+      const result=appearanceAction(createAppearance(),500,action);if(!result.ok)throw new Error(result.reason);other.appearance=result.appearance;
+    }
+    scene.update([other],'self',null,.016);scene.group.updateMatrixWorld(true);
+    const avatar=scene.group.getObjectByName('Online player driver')!.children[0],body=avatar.children[0] as THREE.Mesh;
+    const palette=appearanceColors(other.appearance!),hair=new THREE.Color(palette.hair),accessory=new THREE.Color(palette.accessory);
+    const colors=body.geometry.getAttribute('color'),ray=new THREE.Raycaster();
+    for(const [x,y] of[[-.075,.043],[.075,.043],[-.12,-.05],[.12,-.05]]){
+      ray.set(body.localToWorld(new THREE.Vector3(x*CHARACTER_HEAD_SCALE,.79+y*CHARACTER_HEAD_SCALE,-2)),new THREE.Vector3(0,0,1).transformDirection(body.matrixWorld));
+      const hit=ray.intersectObject(body,false)[0];expect(hit).toBeDefined();
+      const firstColor=new THREE.Color().fromBufferAttribute(colors,hit.face!.a);
+      const difference=(other:THREE.Color)=>Math.abs(firstColor.r-other.r)+Math.abs(firstColor.g-other.g)+Math.abs(firstColor.b-other.b);
+      expect(difference(hair)).toBeGreaterThan(.01);
+      if(item==='accessory-cap')expect(difference(accessory)).toBeGreaterThan(.01);
+    }
   });
 });

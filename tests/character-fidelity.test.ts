@@ -1,11 +1,32 @@
 import { describe,it,expect,vi } from 'vitest';
 import * as THREE from 'three';
 import { AvatarView } from '../src/avatar-view';
-import { createAppearance,appearanceAction } from '../src/appearance';
-import { createCharacterFaceGeometry } from '../src/character-geometry';
+import { createAppearance,appearanceAction,appearanceColors } from '../src/appearance';
+import { createCharacterFaceGeometry,createPedestrianHairGeometry,createPedestrianHeadGeometry,CHARACTER_HEAD_SCALE } from '../src/character-geometry';
 import { CityLife,pedestrianPose } from '../src/city-life';
 
 describe('character presentation',()=>{
+ it('exposes forehead and cheeks in every hairstyle instead of covering the face with scalp geometry',()=>{
+  const avatar=new AvatarView(true),ray=new THREE.Raycaster();
+  try{
+   for(const hairstyle of['hair-short','hair-buzz','hair-long']){
+    const appearance=createAppearance();appearance.owned.push(hairstyle);appearance.selected.hair=hairstyle;avatar.setAppearance(appearance);avatar.group.updateMatrixWorld(true);
+    const visible:THREE.Mesh[]=[];avatar.group.traverseVisible(object=>{if(object instanceof THREE.Mesh)visible.push(object);});
+    for(const[x,y]of[[0,.08],[-.105,-.045],[.105,-.045]]as const){
+     ray.set(new THREE.Vector3(x*CHARACTER_HEAD_SCALE,1.79+y*CHARACTER_HEAD_SCALE,-2),new THREE.Vector3(0,0,1));const hit=ray.intersectObjects(visible,false)[0];expect(hit,hairstyle).toBeTruthy();
+     expect(((hit.object as THREE.Mesh).material as THREE.MeshLambertMaterial).color.getHex(),`${hairstyle}: ${x}/${y}`).toBe(appearanceColors(appearance).skin);
+    }
+   }
+  }finally{avatar.destroy();}
+  const skin=new THREE.MeshLambertMaterial({color:0xc19074}),hair=new THREE.MeshLambertMaterial({color:0x302b27}),head=new THREE.Mesh(createPedestrianHeadGeometry(),skin),scalp=new THREE.Mesh(createPedestrianHairGeometry(),hair);
+  try{
+   head.scale.setScalar(CHARACTER_HEAD_SCALE);scalp.scale.setScalar(CHARACTER_HEAD_SCALE);head.updateMatrixWorld(true);scalp.updateMatrixWorld(true);
+   const neckBottom=new THREE.Box3().setFromObject(head).min.y+1.76;expect(neckBottom).toBeLessThanOrEqual(1.49-.025);
+   for(const[x,y]of[[0,.08],[-.105,-.045],[.105,-.045]]as const){
+    ray.set(new THREE.Vector3(x*CHARACTER_HEAD_SCALE,y*CHARACTER_HEAD_SCALE,-2),new THREE.Vector3(0,0,1));expect(ray.intersectObjects([head,scalp],false)[0]?.object).toBe(head);
+   }
+  }finally{head.geometry.dispose();scalp.geometry.dispose();skin.dispose();hair.dispose();}
+ });
  it('keeps facial detail in front of a human-sized head and retains multiple material colours',()=>{
   const face=createCharacterFaceGeometry(0xc19074,0x303333);
   try{

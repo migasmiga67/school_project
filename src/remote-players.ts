@@ -8,7 +8,7 @@ import { createMobilityVehicle } from './mobility-view';
 import { AvatarMotion } from './avatar-motion';
 import { createVehicleModel } from './vehicle-model';
 import { createVehicleMotion, stepVehicleMotion, type VehicleMotion } from './vehicle-motion';
-import { createCharacterFaceGeometry } from './character-geometry';
+import { CHARACTER_HAIR_THETA, CHARACTER_HEAD_SCALE, createCharacterFaceGeometry } from './character-geometry';
 
 type LitMaterial = THREE.MeshLambertMaterial | THREE.MeshStandardMaterial;
 interface BodyPart { size: [number, number, number]; at: [number, number, number]; color: number; rotation?: [number, number, number]; shape?:'sphere'|'capsule'|'torso'|'hair'; rounding?:number }
@@ -102,7 +102,7 @@ export class RemotePlayersView {
       else if(part.shape==='sphere'){shape=new THREE.SphereGeometry(.5,8,6);shape.scale(...part.size);}
       else if(part.shape==='capsule'){shape=new THREE.CapsuleGeometry(.5,1,3,8);shape.scale(part.size[0],part.size[1]/2,part.size[2]);}
       else if(part.shape==='torso'){shape=new THREE.CylinderGeometry(.5,.4,1,8);shape.scale(...part.size);}
-      else if(part.shape==='hair'){shape=new THREE.SphereGeometry(.5,8,5,0,Math.PI*2,0,Math.PI*.57);shape.scale(...part.size);}
+      else if(part.shape==='hair'){shape=new THREE.SphereGeometry(.5,8,5,0,Math.PI*2,0,CHARACTER_HAIR_THETA);shape.scale(...part.size);}
       else shape=new THREE.BoxGeometry(...part.size);
       const geometry=shape.index?shape.toNonIndexed():shape;if(geometry!==shape)shape.dispose();
       if (part.rotation) {
@@ -126,20 +126,21 @@ export class RemotePlayersView {
         { shape:'torso',size: [.58, .66, .371], at: [0, 1.18, 0], color: shirt },
         { shape:'capsule',size:[.49,.25,.31],at:[0,.85,0],color:colors.pants },
         { shape:'capsule',size: [.145, .17, .145], at: [0, 1.58, 0], color: skin },
-        { shape:'sphere',size: [.38, .44, .35], at: [0, 1.79, -.015], color: skin },
         { size:[.016,.4,.015],at:[0,1.19,-.187],color:0x59616a },
         { size:[.47,.045,.31],at:[0,.91,0],color:0x59616a },
       ];
       for(const side of[-1,1])parts.push({size:[.12,.14,.025],at:[side*.068,1.47,-.134],color:shirt,rotation:[0,0,side*.45]});
       for(const y of[1.11,1.26,1.4])parts.push({shape:'sphere',size:[.024,.024,.016],at:[0,y,-.2],color:0x787d7d});
-      parts.push({shape:'hair',size:[colors.hairstyle==='buzz'?.4:.42,colors.hairstyle==='buzz'?.416:colors.hairstyle==='long'?.456:.448,.4],at:[0,1.81,-.012],color:colors.hair});
-      if(colors.hairstyle!=='buzz')parts.push({shape:colors.hairstyle==='long'?'sphere':'capsule',size:[.35,colors.hairstyle==='long'?.52:.2,colors.hairstyle==='long'?.16:.12],at:[0,colors.hairstyle==='long'?1.72:1.86,.14],color:colors.hair});
-      if(colors.hairstyle==='long')for(const side of[-1,1])parts.push({shape:'capsule',size:[.075,.39,.22],at:[side*.185,1.76,.035],color:colors.hair});
-      if(colors.accessoryStyle==='glasses'){for(const side of[-1,1])parts.push({shape:'sphere',size:[.155,.095,.028],at:[side*.095,1.83,-.19],color:colors.accessory});parts.push({size:[.06,.024,.025],at:[0,1.84,-.207],color:colors.accessory});}
-      if(colors.accessoryStyle==='cap')parts.push({shape:'hair',size:[.472,.496,.4],at:[0,1.81,-.012],color:colors.accessory},{shape:'sphere',size:[.46,.035,.27],at:[0,1.965,-.22],color:colors.accessory});
+      const head:BodyPart[]=[{shape:'sphere',size:[.38,.44,.35],at:[0,1.79,-.015],color:skin}];
+      head.push({shape:'hair',size:[colors.hairstyle==='buzz'?.4:.42,colors.hairstyle==='buzz'?.416:colors.hairstyle==='long'?.456:.448,.4],at:[0,1.81,-.012],color:colors.hair});
+      if(colors.hairstyle!=='buzz')head.push({shape:colors.hairstyle==='long'?'sphere':'capsule',size:[.35,colors.hairstyle==='long'?.52:.2,colors.hairstyle==='long'?.16:.12],at:[0,colors.hairstyle==='long'?1.72:1.86,.14],color:colors.hair});
+      if(colors.hairstyle==='long')for(const side of[-1,1])head.push({shape:'capsule',size:[.075,.39,.22],at:[side*.185,1.76,.035],color:colors.hair});
+      if(colors.accessoryStyle==='glasses'){for(const side of[-1,1])head.push({shape:'sphere',size:[.155,.095,.028],at:[side*.095,1.83,-.19],color:colors.accessory});head.push({size:[.06,.024,.025],at:[0,1.84,-.207],color:colors.accessory});}
+      if(colors.accessoryStyle==='cap')head.push({shape:'hair',size:[.472,.496,.4],at:[0,1.81,-.012],color:colors.accessory},{shape:'sphere',size:[.46,.035,.27],at:[0,1.965,-.22],color:colors.accessory});
+      for(const part of head){part.size=part.size.map(value=>value*CHARACTER_HEAD_SCALE)as BodyPart['size'];part.at=[part.at[0]*CHARACTER_HEAD_SCALE,1.79+(part.at[1]-1.79)*CHARACTER_HEAD_SCALE,-.015+(part.at[2]+.015)*CHARACTER_HEAD_SCALE];parts.push(part);}
       if(colors.crewOutfit)parts.push({size:[.09,.36,.018],at:[.14,1.18,-.176],color:0xdcece2,rotation:[0,0,.2]});
       const silhouette=this.boxes(parts),sourceFace=createCharacterFaceGeometry(skin,colors.hair),face=sourceFace.index?sourceFace.toNonIndexed():sourceFace;
-      if(face!==sourceFace)sourceFace.dispose();face.translate(0,1.79,-.015);
+      if(face!==sourceFace)sourceFace.dispose();face.scale(CHARACTER_HEAD_SCALE,CHARACTER_HEAD_SCALE,CHARACTER_HEAD_SCALE);face.translate(0,1.79,-.015);
       body=this.track(mergeGeometries([silhouette,face])!);silhouette.dispose();this.geometries.delete(silhouette);face.dispose();body.translate(0,-1,0);
       this.avatarBodies.set(key, body);
     }
