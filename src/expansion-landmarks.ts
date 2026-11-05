@@ -5,11 +5,15 @@ import type { Point } from './model';
 /** Doorways sit outside the existing building collision boxes. */
 export function expansionLandmarks():THREE.Group {
   const group=new THREE.Group();
-  const entrance=(point:Point,title:string,subtitle:string,color:number,north=false)=>{
+  const entrance=(point:Point,title:string,subtitle:string,color:number,north=false,animated=true)=>{
     const facade=new THREE.Group();facade.position.set(point.x,0,point.z);if(north)facade.rotation.y=Math.PI;
     const metal=new THREE.MeshLambertMaterial({color:0x192a39}),light=new THREE.MeshBasicMaterial({color});
     const box=(w:number,h:number,d:number,material:THREE.Material,x:number,y:number,z:number)=>{const mesh=new THREE.Mesh(new THREE.BoxGeometry(w,h,d),material);mesh.position.set(x,y,z);facade.add(mesh);};
-    box(5,4,.35,metal,0,2,-.6);box(1.5,2.8,.15,light,0,1.4,-.37);box(6,.25,1.8,metal,0,4,.1);
+    if(animated){
+      for(const side of[-1,1])box(1.6,4,.35,metal,side*1.7,2,-.6);
+      box(1.8,1.05,.35,metal,0,3.475,-.6);
+    }else{box(5,4,.35,metal,0,2,-.6);box(1.5,2.8,.15,light,0,1.4,-.37);}
+    box(6,.25,1.8,metal,0,4,.1);
     const canvas=document.createElement('canvas');canvas.width=768;canvas.height=192;const ctx=canvas.getContext('2d')!;
     ctx.fillStyle='#122330';ctx.fillRect(0,0,768,192);ctx.strokeStyle=`#${color.toString(16).padStart(6,'0')}`;ctx.lineWidth=5;ctx.strokeRect(5,5,758,182);
     ctx.textAlign='center';ctx.fillStyle='#edf4ef';ctx.font='bold 58px Arial';ctx.fillText(title,384,91);ctx.font='25px Arial';ctx.fillStyle='#acd9d4';ctx.fillText(subtitle,384,145);
@@ -20,6 +24,6 @@ export function expansionLandmarks():THREE.Group {
   entrance(HOMES.canal.door,'CANAL RESIDENCE','MIESZKANIE · GARAŻ',0x8de5c5);
   entrance(HOMES.loft.door,'OCEAN VIEW','APARTAMENTY',0x9ecbff,true);
   entrance(CREW_BASE.door,'DOCKHOUSE','BAZA EKIPY · PLANOWANIE',0xe6be78,true);
-  entrance({x:-60,z:-46},'AETHER BANK','SEJF · STREFA CHRONIONA',0xabc2dd);
+  entrance({x:-60,z:-46},'AETHER BANK','SEJF · STREFA CHRONIONA',0xabc2dd,false,false);
   return group;
 }

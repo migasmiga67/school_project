@@ -2,6 +2,8 @@ import { BUILDINGS, ROAD_NODES, WORLD_BOUNDS } from './model';
 import { CITY_TRAFFIC_LOOPS, nearestStreet, routeStreets } from './city-map';
 import { AMBIENT_PEDESTRIAN_COUNT,ambientTrafficPose,nextRouteGate,pedestrianTrafficPose,sampleTrafficPath,signalAwareProgress,trafficRoute } from './traffic-flow';
 import { nextSignalOpening } from './traffic-signals';
+import { advanceGarageGate,createGarageGate,garageGateCollision,garageSolidCollision,isGarageBuildingCollider } from './garage-building';
+import type { GarageVisitor } from './garage-building';
 import { CASINO } from './casino-location';
 import { BIKE_LOCATION, DOCK, advanceBikeFlight, advanceBoat, canBoardDockBoat, canDisembarkBoat, resetMobilityMotion } from './mobility';
 import type { GameEvent, GameState, Input, Point, Vehicle, PursuitState, Roadblock } from './model';
@@ -63,7 +65,7 @@ export function createGame(): GameState {
     cars.push({...vehicle(`traffic-${i}`, i % 3 === 0 ? 'sport' : 'sedan', p.x, p.z, p.heading, [0x51a89e, 0xe0b878, 0x926f9b, 0xa5b6c4][i % 4], false),speed:p.speed,...{ambientProgress:p.progress,ambientClock:0,ambientDelayed:false}});
   }
   const s: GameState = {
-    interior: null,
+    interior: null,garageGate:createGarageGate(),garageVisitors:[],
     player: { ...START, heading: 0, mode: 'drive', vehicleId: 'stratus', health: 100 }, vehicles: cars, police: [],
     pursuit:{status:'clear',visible:false,hidden:false,searchSeconds:0,concealmentSeconds:0,patrols:[],roadblocks:[],helicopter:null},
     money: 1250, wanted: 0, heat: 0, time: 0, arrestProgress: 0, collisionCooldown: 0, escapeTimer: 0,
@@ -111,22 +113,23 @@ function moveIndoor(p: Point, dx: number, dz: number, radius: number) {
   const z = clamp(p.z + dz, bounds.minZ + radius, bounds.maxZ - radius);
   if (!occupied({ x: p.x, z })) p.z = z;
 }
-function blocked(p: Point, radius: number): boolean {
-  return BUILDINGS.some(b => p.x > b.x - b.halfX - radius && p.x < b.x + b.halfX + radius && p.z > b.z - b.halfZ - radius && p.z < b.z + b.halfZ + radius);
+function blocked(s:GameState,p: Point, radius: number): boolean {
+  return BUILDINGS.some(b => !isGarageBuildingCollider(b)&&p.x > b.x - b.halfX - radius && p.x < b.x + b.halfX + radius && p.z > b.z - b.halfZ - radius && p.z < b.z + b.halfZ + radius)
+    ||garageSolidCollision(p,radius)||garageGateCollision(p,radius,s.garageGate);
 }
-function move(p: Point, dx: number, dz: number, radius: number): boolean {
+function move(s:GameState,p: Point, dx: number, dz: number, radius: number): boolean {
   let hit = false;
   const x = clamp(p.x + dx, WORLD_BOUNDS.minX + radius, WORLD_BOUNDS.maxX - radius);
   if (x !== p.x + dx) hit = true;
-  if (!blocked({ x, z: p.z }, radius)) p.x = x; else if (Math.abs(dx) > .0001) hit = true;
+  if (!blocked(s,{ ...p,x }, radius)) p.x = x; else if (Math.abs(dx) > .0001) hit = true;
   const z = clamp(p.z + dz, WORLD_BOUNDS.minZ + radius, WORLD_BOUNDS.maxZ - radius);
   if (z !== p.z + dz) hit = true;
-  if (!blocked({ x: p.x, z }, radius)) p.z = z; else if (Math.abs(dz) > .0001) hit = true;
+  if (!blocked(s,{ ...p,z }, radius)) p.z = z; else if (Math.abs(dz) > .0001) hit = true;
   return hit;
 }
-function clearSight(a: Point, b: Point): boolean {
+function clearSight(s:GameState,a: Point, b: Point): boolean {
   const steps = Math.max(1, Math.ceil(length(a, b) / 2));
-  for (let i = 1; i < steps; i++) if (blocked({ x: a.x + (b.x - a.x) * i / steps, z: a.z + (b.z - a.z) * i / steps }, .1)) return false;
+  for (let i = 1; i < steps; i++) if (blocked(s,{ x: a.x + (b.x - a.x) * i / steps, z: a.z + (b.z - a.z) * i / steps }, .1)) return false;
   return true;
 }
 function attention(s: GameState, amount: number, events: GameEvent[]) {
@@ -166,7 +169,7 @@ function interact(s: GameState, events: GameEvent[]) {
     if (Math.abs(car.speed) > 4) { events.push({ kind: 'info', text: 'Zatrzymaj samochód, aby bezpiecznie wysiąść.' }); return; }
     const offset=car.kind==='bike'?1.65:2.6;
     const side = [{ x: Math.cos(car.heading) * offset, z: Math.sin(car.heading) * offset }, { x: -Math.cos(car.heading) * offset, z: -Math.sin(car.heading) * offset }];
-    const exit = side.map(p => ({ x: car.x + p.x, z: car.z + p.z })).find(p => !blocked(p, .5) && p.x > WORLD_BOUNDS.minX && p.x < WORLD_BOUNDS.maxX && p.z > WORLD_BOUNDS.minZ && p.z < WORLD_BOUNDS.maxZ);
+    const exit = side.map(p => ({ x: car.x + p.x, z: car.z + p.z })).find(p => !blocked(s,p, .5) && p.x > WORLD_BOUNDS.minX && p.x < WORLD_BOUNDS.maxX && p.z > WORLD_BOUNDS.minZ && p.z < WORLD_BOUNDS.maxZ);
     if (!exit) { events.push({ kind: 'info', text: 'Brak miejsca przy drzwiach. Zaparkuj na otwartej przestrzeni.' }); return; }
     car.speed = 0; car.parked = true; Object.assign(s.player, exit, { mode: 'foot', vehicleId: null });
     events.push({ kind: 'info', text: 'Wysiadłeś. WASD — ruch, Shift — sprint, E — wejdź do pobliskiego auta.' });
@@ -214,11 +217,13 @@ function drive(s: GameState, car: Vehicle, input: Input, dt: number, events: Gam
   if (input.handbrake) car.speed *= Math.exp(-dt * (3.5 + brakes * .6));
   const axis = Number(input.right) - Number(input.left);
   car.steer += (axis - car.steer) * Math.min(1, dt * (bike?10:7));
+  const previousHeading=car.heading;
   car.heading = angle(car.heading + car.steer * Math.min(Math.abs(car.speed) / 5, 1) * Math.sign(car.speed || 1) * dt * (bike?(input.handbrake?3.1:2.15):(input.handbrake ? 2.4 : 1.45)) / (1 + Math.abs(car.speed) / 42));
+  if(garageSolidCollision(car,bike?.68:1.5))car.heading=previousHeading;
   const speed = car.speed;
   const previous={x:car.x,z:car.z};
   const radius=bike ? .68 : 1.5;
-  if (move(car, Math.sin(car.heading) * speed * dt, -Math.cos(car.heading) * speed * dt, radius)) { collision(s, car, speed, events); car.speed *= -.18; }
+  if (move(s,car, Math.sin(car.heading) * speed * dt, -Math.cos(car.heading) * speed * dt, radius)) { collision(s, car, speed, events); car.speed *= -.18; }
   if((car.airHeight??0)<1.65&&roadblockHit(s,car,radius)){
     Object.assign(car,previous);collision(s,car,speed,events);car.speed*=-.24;
   }
@@ -239,7 +244,7 @@ function walk(s: GameState, input: Input, dt: number) {
     if (s.interior === 'casino') moveIndoor(s.player, x / norm * speed * dt, z / norm * speed * dt, .55);
     else {
       const previous={x:s.player.x,z:s.player.z};
-      move(s.player, x / norm * speed * dt, z / norm * speed * dt, .55);
+      move(s,s.player, x / norm * speed * dt, z / norm * speed * dt, .55);
       if(roadblockHit(s,s.player,.55))Object.assign(s.player,previous);
     }
   }
@@ -289,7 +294,7 @@ function traffic(s: GameState, dt: number, events: GameEvent[]) {
       const impact = Math.abs(playerCar.speed - car.speed) + 5;
       collision(s, playerCar, impact, events); playerCar.speed *= -.2; car.speed = 0; car.parked = true;
       const dist = length(car, playerCar) || 1;
-      move(playerCar, (playerCar.x - car.x) / dist * .3, (playerCar.z - car.z) / dist * .3, 1.5);
+      move(s,playerCar, (playerCar.x - car.x) / dist * .3, (playerCar.z - car.z) / dist * .3, 1.5);
       Object.assign(s.player, { x: playerCar.x, z: playerCar.z });
     }
   }
@@ -298,7 +303,7 @@ function traffic(s: GameState, dt: number, events: GameEvent[]) {
     if (car === playerCar || car.kind==='boat'||!car.parked || length(car, playerCar) >= (car.kind==='bike'||playerCar.kind==='bike'?2.2:2.8)) continue;
     collision(s, playerCar, Math.abs(playerCar.speed) + 3, events); playerCar.speed *= -.2;
     const d = length(car, playerCar) || 1;
-    move(playerCar, (playerCar.x - car.x) / d * .4, (playerCar.z - car.z) / d * .4, 1.5);
+    move(s,playerCar, (playerCar.x - car.x) / d * .4, (playerCar.z - car.z) / d * .4, 1.5);
     Object.assign(s.player, { x: playerCar.x, z: playerCar.z });
   }
 }
@@ -355,7 +360,7 @@ function updateHelicopter(s:GameState,dt:number,target:Point,concealed:boolean):
   const dx=destination.x-helicopter.x,dz=destination.z-helicopter.z,d=Math.hypot(dx,dz),travel=Math.min(d,18*dt);
   if(d>.01){helicopter.x+=dx/d*travel;helicopter.z+=dz/d*travel;helicopter.heading=Math.atan2(dx,-dz);}
   helicopter.x=clamp(helicopter.x,WORLD_BOUNDS.minX,WORLD_BOUNDS.maxX);helicopter.z=clamp(helicopter.z,WORLD_BOUNDS.minZ,WORLD_BOUNDS.maxZ);
-  helicopter.spotted=!concealed&&length(helicopter,s.player)<42&&clearSight(helicopter,s.player);
+  helicopter.spotted=!concealed&&length(helicopter,s.player)<42&&clearSight(s,helicopter,s.player);
   helicopter.searching=!helicopter.spotted;
   return helicopter.spotted;
 }
@@ -372,7 +377,7 @@ function pursuit(s: GameState, dt: number, events: GameEvent[]) {
   rt.lastWanted=s.wanted;
   // Hide only after breaking visual contact and stopping near the safehouse.
   // A nearby officer prevents concealment; entering the zone cannot erase an active tail.
-  const groundVisible=()=>s.police.some(c=>length(c,s.player)<35&&clearSight(c,s.player));
+  const groundVisible=()=>s.police.some(c=>length(c,s.player)<35&&clearSight(s,c,s.player));
   const shelter=length(s.player,SAFEHOUSE)<=8&&Math.abs(car?.speed??0)<=1.5;
   const wasVisible=groundVisible();
   const concealed=shelter&&!wasVisible&&!s.police.some(c=>length(c,s.player)<15);
@@ -391,7 +396,7 @@ function pursuit(s: GameState, dt: number, events: GameEvent[]) {
     if (target) {
       const dx = target.x - cop.x, dz = target.z - cop.z, distance = Math.hypot(dx, dz), speed = Math.min(13 + s.wanted * 1.5, distance / Math.max(dt, .001));
       cop.heading = Math.atan2(dx, -dz); cop.speed = speed;
-      if (distance > .01) move(cop, dx / distance * speed * dt, dz / distance * speed * dt, 1.4);
+      if (distance > .01) move(s,cop, dx / distance * speed * dt, dz / distance * speed * dt, 1.4);
       cop.wheelPhase += speed * dt;
     } else cop.speed = 0;
     if (car && length(cop, car) < 2.8 && Math.abs(car.speed) > 5) { collision(s, car, Math.max(7, Math.abs(car.speed) * .6), events); car.speed *= .65; }
@@ -441,7 +446,7 @@ function missions(s: GameState, dt: number, events: GameEvent[]) {
     if (mission.clock <= 0) { mission.active = false; mission.outcome = 'failed'; mission.waypoint = null; mission.instruction = 'Czas minął. Naciśnij M, aby powtórzyć trasę.'; events.push({ kind: 'mission', text: 'Wyścig zakończony. Następnym razem zetnij zakręty i użyj dopalacza.' }); return; }
   }
   if (mission.kind === 'escape') {
-    const hidden = !s.police.some(c => length(c, s.player) < 35 && clearSight(c, s.player))&&!s.pursuit?.helicopter?.spotted;
+    const hidden = !s.police.some(c => length(c, s.player) < 35 && clearSight(s,c, s.player))&&!s.pursuit?.helicopter?.spotted;
     if (mission.waypoint && length(s.player, mission.waypoint) < 9 && hidden) s.escapeTimer += dt; else s.escapeTimer = 0;
     mission.clock = Math.max(0, 12 - s.escapeTimer);
     if (s.escapeTimer >= 12) { s.wanted = 0; s.police = []; s.heat = 0; complete(s, events); }
@@ -458,12 +463,23 @@ function missions(s: GameState, dt: number, events: GameEvent[]) {
   }
 }
 
+/** Also usable while a modal pauses walking, without advancing missions or wallets. */
+export function updateGarageAccess(s:GameState,delta:number,seconds=s.time){
+  const car=activeVehicle(s),visitors:GarageVisitor[]=[...(s.garageVisitors??[])];
+  if(!s.interior){
+    if(car&&car.kind!=='boat')visitors.push({...car,mode:'drive',radius:car.kind==='bike'?1.7:2.8});
+    else if(s.player.mode==='foot')visitors.push({...s.player,mode:'foot',radius:.6});
+  }
+  const blockers:GarageVisitor[]=s.vehicles.filter(vehicle=>vehicle.kind!=='boat').map(vehicle=>({...vehicle,mode:'drive',radius:vehicle.kind==='bike'?1.7:2.8}));
+  s.garageGate=advanceGarageGate(s.garageGate,seconds,delta,visitors,blockers);
+}
+
 /** Real-time simulation owns gameplay. Rendering never changes positions, money or mission state. */
 export function step(s: GameState, input: Input, delta: number): GameEvent[] {
   const dt = Number.isFinite(delta) ? clamp(delta, 0, .05) : 0;
   const events: GameEvent[] = [];
   if (dt <= 0) return events;
-  s.time += dt;
+  s.time += dt;updateGarageAccess(s,dt);
   if (s.interior === 'casino') {
     if (input.reset) {
       Object.assign(s.player, CASINO.entry, { heading: 0 });

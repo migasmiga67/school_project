@@ -51,7 +51,7 @@ jobs:
           - group: multiplayer
             specs: tests/multiplayer.browser.spec.ts
           - group: activities
-            specs: tests/expansion.browser.spec.ts
+            specs: tests/expansion.browser.spec.ts tests/garage-building.browser.spec.ts
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4

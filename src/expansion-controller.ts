@@ -158,11 +158,12 @@ export class CityExpansion {
   const state=this.ctx.getState();
   if(!near(state.player,this.homeDoor(id),3.5)||state.player.mode!=='foot'||state.interior){this.navigate(this.homeDoor(id),id==='crew'?CREW_BASE.name:HOMES[id].name);return;}
   if(state.wanted){this.ctx.onMessage('Zgub pościg, zanim wejdziesz do mieszkania.');return;}
-  if(this.online){this.ctx.session.home({kind:'enter',home:id});return;}
+  if(this.online){this.ctx.view.holdBuildingDoor(id);this.ctx.session.home({kind:'enter',home:id});return;}
   if(id==='crew'||!this.career.ownedHomes.includes(id)){this.ctx.onMessage('Najpierw kup ten lokal w panelu kontaktów i domów.');return;}
-  this.homeReturn={...state.player};this.soloHome=id;Object.assign(state.player,HOME_ROOM.entry,{heading:0,mode:'foot',vehicleId:null});this.ctx.onInterior();this.syncHome();
+  this.ctx.view.holdBuildingDoor(id);this.homeReturn={...state.player};this.soloHome=id;Object.assign(state.player,HOME_ROOM.entry,{heading:0,mode:'foot',vehicleId:null});this.ctx.onInterior();this.syncHome();
  }
  private exitHome(){
+  if(this.homeId)this.ctx.view.holdBuildingDoor(this.homeId);
   if(this.online){this.ctx.session.home({kind:'exit'});return;}
   const state=this.ctx.getState();if(!this.soloHome)return;
   Object.assign(state.player,this.homeReturn??{},homeStreetExit(this.soloHome),{mode:'foot',vehicleId:null});this.soloHome=null;this.homeReturn=null;this.ctx.onInterior();this.syncHome();
@@ -211,6 +212,7 @@ export class CityExpansion {
  }
  step(dt:number,input:Input,canMove:boolean){
   const state=this.ctx.getState(),home=this.homeId;
+  if(home)this.homeView.updateDoor(state.player,dt);
   const stored=this.career.storedCars[this.ctx.getGarage().selected];
   if(stored){const car=state.vehicles.find(item=>item.id==='stratus');if(car)Object.assign(car,HOMES[stored].parking,{speed:0,parked:true});if(state.player.vehicleId==='stratus')Object.assign(state.player,{mode:'foot',vehicleId:null});}
   if(home&&canMove){

@@ -7,6 +7,8 @@ import type { PokerState } from './poker-model';
 import type { RouletteSnapshot } from './casino-games';
 import { ROULETTE_POCKETS, ROULETTE_STEP, rouletteMotion } from './roulette-motion';
 import { RoulettePlayback, rouletteColor } from './roulette-view';
+import { InteriorEntranceDoor } from './building-entrances-view';
+import type { Point } from './model';
 
 type LitMaterial = THREE.MeshLambertMaterial | THREE.MeshStandardMaterial;
 
@@ -25,6 +27,7 @@ export class CasinoView {
   private rouletteBall: THREE.Mesh | null = null;
   private rouletteState: RouletteSnapshot | null = null;
   private readonly reducedMotion = window.matchMedia('(prefers-reduced-motion: reduce)');
+  private readonly exitDoor:InteriorEntranceDoor;
 
   constructor(software: boolean) {
     this.software = software;
@@ -45,6 +48,8 @@ export class CasinoView {
     this.compact(this.exterior);
     this.compact(this.interior);
     // Moving parts are added after static geometry batching.
+    this.exitDoor=new InteriorEntranceDoor(4,3.8,0xd7b66e,this.software);
+    this.exitDoor.visual.group.position.set(0,.12,9.77);this.exitDoor.visual.group.rotation.y=Math.PI;this.interior.add(this.exitDoor.visual.group);
     this.makeRouletteWheel();
     this.poker = new PokerTableView();
     this.poker.group.position.set(CASINO.table.x, 0, CASINO.table.z);
@@ -92,14 +97,14 @@ export class CasinoView {
     const root = this.exterior;
     const stone = this.material(0x17333e);
     const trim = this.material(0xd8b56e);
-    const glass = this.material(0x234e61, 0x102d42, 0.35);
     const neon = this.material(0x9ce7ef, 0x469dcb, 0.6);
     const violet = this.material(0xafa1e8, 0x6254af, 0.45);
     const carpet = this.material(0x87374d);
     const z = 12.08;
 
     // The art covers the front of the existing collider, rather than adding a building.
-    this.box(17.7, 10.2, 0.28, stone, root, 0, 5.25, z);
+    for(const side of[-1,1])this.box(6.65,10.2,.28,stone,root,side*5.525,5.25,z);
+    this.box(4.4,6.4,.28,stone,root,0,7.15,z);
     this.box(18.7, 0.33, 0.5, trim, root, 0, 10.43, z + 0.08);
     this.box(18.3, 0.13, 0.5, neon, root, 0, 10.02, z + 0.13);
     for (const x of [-8.65, 8.65]) {
@@ -112,10 +117,6 @@ export class CasinoView {
     this.label('♠', '#f5dbab', 1.9, 2.1, root, -6.7, 6.65, z + 0.22);
     this.label('♦', '#d6b5ee', 1.9, 2.1, root, 6.7, 6.65, z + 0.22);
 
-    this.box(4.2, 3.6, 0.3, glass, root, 0, 1.98, z + 0.28);
-    for (const x of [-2.22, 0, 2.22]) this.box(0.12, 3.8, 0.42, trim, root, x, 2.05, z + 0.35);
-    this.box(4.6, 0.16, 0.47, trim, root, 0, 3.95, z + 0.32);
-    for (const x of [-0.32, 0.32]) this.box(0.05, 0.72, 0.14, trim, root, x, 1.85, z + 0.52);
     this.box(10.1, 0.2, 2.7, trim, root, 0, 4.35, z + 0.7);
     this.box(9.7, 0.16, 2.6, stone, root, 0, 4.52, z + 0.7);
     this.box(9.8, 0.08, 0.1, neon, root, 0, 4.22, z + 2.02);
@@ -129,7 +130,7 @@ export class CasinoView {
       this.mesh(new THREE.CylinderGeometry(0.38, 0.5, 1.25, 8), stone, root, x, 0.82, z + 1.5);
       this.mesh(new THREE.SphereGeometry(0.31, 10, 8), violet, root, x, 1.58, z + 1.5);
     }
-    this.label('WEJŚCIE · E', '#f4dca9', 3.2, 0.66, root, 0, 2.8, z + 0.51);
+    this.label('WEJŚCIE · E', '#f4dca9', 3.2, 0.56, root, 0, 3.95, z + 0.51);
   }
 
   private makeInterior() {
@@ -157,7 +158,7 @@ export class CasinoView {
     this.box(4,2.8,.3,dark,root,0,5.35,10);
     for(const x of [-2.1,2.1])this.box(.18,4,.35,gold,root,x,2,9.8);
     this.box(4.4,.15,.35,gold,root,0,4.05,9.8);
-    this.label('WYJŚCIE · E','#c9f3dc',3.2,.58,root,0,3.56,9.78,Math.PI);
+    this.label('WYJŚCIE · E','#c9f3dc',3.2,.58,root,0,4.35,9.78,Math.PI);
     for (const x of [-11, 11]) {
       this.box(0.3, 6.8, 20.3, dark, root, x, 3.35, 0);
       this.box(0.34, 0.12, 20.3, gold, root, x, 1.16, 0);
@@ -361,9 +362,11 @@ export class CasinoView {
     this.tableRing.scale.setScalar(1 + Math.sin(time * 1.8) * 0.04);
     this.updateRoulette();
   }
+  updateDoor(position:Point,dt:number){this.exitDoor.update(position,CASINO.exit,dt);}
 
   destroy() {
     this.poker.destroy();
+    this.exitDoor.destroy();
     const geometries = new Set<THREE.BufferGeometry>(); const materials = new Set<THREE.Material>();
     for (const root of [this.exterior, this.interior]) root.traverse(object => {
       if (object instanceof THREE.Mesh) {

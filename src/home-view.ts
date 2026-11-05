@@ -1,5 +1,7 @@
 import * as THREE from 'three';
 import { CREW_BASE, HOMES, type CareerState, type CrewBaseState, type HomeId } from './career';
+import { InteriorEntranceDoor } from './building-entrances-view';
+import type { Point } from './model';
 
 /** A separate, self-lit room; the city renderer supplies the player and camera. */
 export class HomeView {
@@ -14,6 +16,7 @@ export class HomeView {
  private readonly label:THREE.Mesh;
  private readonly textures=new Set<THREE.Texture>();
  private signature='';
+ private readonly exitDoor:InteriorEntranceDoor;
  constructor(private software=false){
   this.group.name='Neon Coast home interior';
   const wall=this.wall=this.material(0xc6bda4),wood=this.wood=this.material(0x8a6045),dark=this.material(0x22353b),trim=this.material(0xc4a879),accent=this.accent=this.material(0x79cbbb,0x287768,.35),white=this.material(0xd8d7c8);
@@ -28,8 +31,8 @@ export class HomeView {
   this.box(15.8,.15,.22,trim,0,.12,-6.12);
   for(const x of [-7.64,7.64])this.box(.16,.15,14,trim,x,.12,.6);
   // Door leads back to the street. Its ring shares HOME_ROOM.exit coordinates.
-  this.box(2.4,2.8,.14,dark,0,1.4,7.55);this.box(.14,2.9,.2,trim,-1.3,1.45,7.5);this.box(.14,2.9,.2,trim,1.3,1.45,7.5);
-  this.box(.17,.17,.18,trim,.8,1.2,7.4);this.label=this.sign('MIESZKANIE',0,2.45,-6.1,5.4,.7);
+  this.exitDoor=new InteriorEntranceDoor(2.4,2.8,0xc4a879,software);this.exitDoor.visual.group.position.set(0,.12,7.42);this.exitDoor.visual.group.rotation.y=Math.PI;this.group.add(this.exitDoor.visual.group);
+  this.label=this.sign('MIESZKANIE',0,2.45,-6.1,5.4,.7);
   const ring=new THREE.Mesh(new THREE.TorusGeometry(.8,.04,4,32),accent);ring.position.set(0,.08,6.7);ring.rotation.x=-Math.PI/2;this.group.add(ring);
   // A map and planning table are included with every property.
   this.box(3.6,.2,2,wood,0,1.08,-3.5);
@@ -74,6 +77,7 @@ export class HomeView {
   this.sofa.visible=false;this.neon.visible=false;this.workbench.visible=false;
  }
  private material(color:number,emissive=0,intensity=0){return new THREE.MeshStandardMaterial({color,emissive,emissiveIntensity:intensity,roughness:.8,metalness:this.software?0:.15});}
+ updateDoor(position:Point,dt:number){this.exitDoor.update(position,{x:0,z:6.7},dt);}
  private box(w:number,h:number,d:number,mat:THREE.Material,x:number,y:number,z:number,parent:THREE.Group=this.group){const mesh=new THREE.Mesh(new THREE.BoxGeometry(w,h,d),mat);mesh.position.set(x,y,z);parent.add(mesh);return mesh;}
  private sign(text:string,x:number,y:number,z:number,w:number,h:number,parent:THREE.Group=this.group,color='#f3e7be'){
   const canvas=document.createElement('canvas');canvas.width=768;canvas.height=128;
@@ -91,6 +95,7 @@ export class HomeView {
   replacement.geometry.dispose();(replacement.material as THREE.Material).dispose();this.group.remove(replacement);if(old){old.dispose();this.textures.delete(old);}
  }
  destroy(){
+  this.exitDoor.destroy();
   const geometries=new Set<THREE.BufferGeometry>(),materials=new Set<THREE.Material>();this.group.traverse(object=>{if(object instanceof THREE.Mesh){geometries.add(object.geometry);for(const mat of Array.isArray(object.material)?object.material:[object.material])materials.add(mat);}});
   geometries.forEach(item=>item.dispose());materials.forEach(item=>item.dispose());this.textures.forEach(item=>item.dispose());this.group.removeFromParent();this.group.clear();
  }

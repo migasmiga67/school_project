@@ -23,6 +23,10 @@ import { CityDistrictsView } from './city-districts';
 import { createVehicleMotion, stepVehicleMotion, type VehicleMotion } from './vehicle-motion';
 import { graphicsProfile, type GraphicsProfile, type GraphicsQuality } from './graphics';
 import { VehicleLighting, type VehicleLightSource } from './vehicle-lighting';
+import { GarageBuildingView } from './garage-building-view';
+import { isInsideGarageBay } from './garage-building';
+import { BuildingEntrancesView } from './building-entrances-view';
+import type { BuildingEntranceId, EntranceActor } from './building-entrances';
 
 type LitMaterial = THREE.MeshStandardMaterial | THREE.MeshLambertMaterial;
 
@@ -54,6 +58,9 @@ export class CityView {
   private requestedQuality:GraphicsQuality;
   private qualityProfile!:GraphicsProfile;
   private readonly vehicleLighting:VehicleLighting;
+  private readonly garageBuilding:GarageBuildingView;
+  private readonly entrances:BuildingEntrancesView;
+  private entranceAccess:readonly BuildingEntranceId[]=['casino'];
   private lastPlayer: { x:number; z:number } | null = null;
   private readonly cars = new Map<string, CarVisual>();
   private readonly hero = new THREE.Group();
@@ -151,6 +158,8 @@ export class CityView {
     this.beach();
     this.skyline();
     this.batchStaticGeometry();
+    this.garageBuilding=new GarageBuildingView(this.softwareRendering,this.surfaces);this.scene.add(this.garageBuilding.group);this.occluders.push(...this.garageBuilding.occluders);
+    this.entrances=new BuildingEntrancesView(this.softwareRendering);this.scene.add(this.entrances.group);
     this.avatar();
     for(const child of this.hero.children)child.visible=false;
     this.customAvatar=new AvatarView(this.softwareRendering);this.hero.add(this.customAvatar.group);
@@ -412,7 +421,10 @@ export class CityView {
     visual.group.removeFromParent();geometries.forEach(geometry=>geometry.dispose());materials.forEach(material=>material.dispose());
   }
 
-  get presentation(): 'city' | 'casino' | 'poker' | 'home' { return this.homeGroup ? 'home' : this.seated ? 'poker' : this.indoors ? 'casino' : 'city'; }
+  get presentation(): 'city' | 'casino' | 'poker' | 'home' | 'garage' { return this.homeGroup ? 'home' : this.seated ? 'poker' : this.indoors ? 'casino' : this.garageBuilding.snapshot.inside?'garage':'city'; }
+  setBuildingAccess(access:readonly BuildingEntranceId[]){this.entranceAccess=access;}
+  holdBuildingDoor(id:BuildingEntranceId){this.entrances.holdOpen(id);}
+  get buildingSnapshot(){return{garage:this.garageBuilding.snapshot,entrances:this.entrances.snapshot};}
   setHome(homeId:string|null,group:THREE.Group|null) {
     if(this.homeId===homeId&&this.homeGroup===group)return;
     this.homeGroup?.removeFromParent();this.homeId=homeId;this.homeGroup=group;this.initialized=false;
@@ -444,6 +456,10 @@ export class CityView {
       this.scene.fog = inside ? new THREE.Fog(0x101420,35,80) : this.cityFog;
     }
     const environment=getCityEnvironment(citySeconds);
+    this.garageBuilding.update(state,this.camera.position);this.garageBuilding.group.visible=!inside;
+    const actors:EntranceActor[]=[{...state.player,interior:state.interior,access:this.entranceAccess},...this.onlineMembers.filter(member=>member.id!==this.onlineSelf).map(member=>({...member.pose,access:['casino'] as BuildingEntranceId[]}))];
+    this.entrances.update(actors,dt);this.entrances.group.visible=!inside;
+    if(inside)this.casino.updateDoor(state.player,dt);
     this.living.update(citySeconds,state.player,inside,dt,[...state.vehicles,...state.police]);
     this.streets.updateSignals(citySeconds);
     this.policeVisuals.update(state,dt);this.policeVisuals.group.visible=!inside;
@@ -524,7 +540,8 @@ export class CityView {
       if(riding)destination.add(new THREE.Vector3(Math.cos(p.heading),0,Math.sin(p.heading)).multiplyScalar(.48));
       lookAt = destination.clone().addScaledVector(forward, 25);lookAt.y -= Math.tan(pitch) * 25;
     } else {
-      const distance = (cameraMode === 1 ? (inside ? 7 : 32) : inCar ? 12 : inside ? 4 : 7) * zoom;
+      const garageInside=isInsideGarageBay(p);
+      const distance = (cameraMode === 1 ? (inside ? 7 : 32) : garageInside?(inCar?6:3.8):inCar ? 12 : inside ? 4 : 7) * zoom;
       const pivot = new THREE.Vector3(p.x, 1.6+airHeight, p.z);
       destination = pivot.clone().addScaledVector(forward, -Math.cos(pitch) * distance);
       destination.y += Math.sin(pitch) * distance;
@@ -586,5 +603,5 @@ export class CityView {
     this.onGraphicsChange?.();
   }
   resize() { this.configureGraphics();const width = Math.max(1, this.parent.clientWidth), height = Math.max(1, this.parent.clientHeight); this.camera.aspect = width / height; this.camera.updateProjectionMatrix(); this.renderer.setSize(width, height, false); }
-  destroy() { this.observer.disconnect(); this.vehicleLighting.destroy();this.streets.destroy();this.districts.destroy();this.living.destroy(); this.remote.destroy(); this.casino.destroy();this.atmosphere.destroy(); this.scene.traverse(object => { if (object instanceof THREE.Mesh) { object.geometry.dispose(); for (const material of Array.isArray(object.material) ? object.material : [object.material]) material.dispose(); } });this.occluders.forEach(object=>object.geometry.dispose());this.surfaces.destroy();this.distantCars?.destroy(); if(this.cityBackground instanceof THREE.Texture)this.cityBackground.dispose();this.glowTexture.dispose(); this.smokeTexture.dispose(); this.renderer.dispose(); this.renderer.domElement.remove(); }
+  destroy() { this.observer.disconnect();this.garageBuilding.destroy();this.entrances.destroy(); this.vehicleLighting.destroy();this.streets.destroy();this.districts.destroy();this.living.destroy(); this.remote.destroy(); this.casino.destroy();this.atmosphere.destroy(); this.scene.traverse(object => { if (object instanceof THREE.Mesh) { object.geometry.dispose(); for (const material of Array.isArray(object.material) ? object.material : [object.material]) material.dispose(); } });this.occluders.forEach(object=>object.geometry.dispose());this.surfaces.destroy();this.distantCars?.destroy(); if(this.cityBackground instanceof THREE.Texture)this.cityBackground.dispose();this.glowTexture.dispose(); this.smokeTexture.dispose(); this.renderer.dispose(); this.renderer.domElement.remove(); }
 }

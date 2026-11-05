@@ -1,6 +1,6 @@
 import './style.css';
 import { CityView } from './world';
-import { createGame, activeVehicle, nearestVehicle, casinoAction, synchronizeOnlineTraffic } from './game';
+import { createGame, activeVehicle, nearestVehicle, casinoAction, synchronizeOnlineTraffic, updateGarageAccess } from './game';
 import type { Input, Point, GameEvent, GameState } from './model';
 import { AudioDrive } from './sound';
 import { advanceSimulation } from './simulation';
@@ -22,6 +22,7 @@ import { CityExpansion } from './expansion-controller';
 import { CityStories } from './city-stories';
 import { DOCK } from './mobility';
 import { districtAt } from './world-layout';
+import { GARAGE_BUILDING, garageServiceAvailable, isInsideGarageBay, atGarageServiceDesk } from './garage-building';
 import { GraphicsUI } from './graphics-ui';
 import { loadGraphicsQuality, saveGraphicsQuality } from './graphics';
 
@@ -107,18 +108,24 @@ stories=new CityStories({
  onOpen:panelOpen,onClose:panelClose,onMessage:notify,onSave:persist,onRoute:()=>{casinoNavigation=false;garageNavigation=false;eventNavigationId='';expansion?.clearRoute();},
  onContacts:()=>expansion?.openCareer(),onActivities:()=>activitiesUI.open(),
 },loadedStories);
-function nearGarage(){return !expansion?.homeId&&!state.interior&&!state.player.passengerOf&&Math.hypot(state.player.x-GARAGE_LOCATION.x,state.player.z-GARAGE_LOCATION.z)<=(state.player.mode==='drive'?6:3);}
-function routeGarage(){expansion?.clearRoute();garageNavigation=true;casinoNavigation=false;notify('GPS: MOD SHOP. Podejdź do wejścia lub zatrzymaj własne auto i naciśnij E.');updateHUD();}
+function nearGarage(){return !expansion?.homeId&&!state.interior&&!state.player.passengerOf&&garageServiceAvailable(activeVehicle(state)??state.player,state.player.mode==='drive'?1.5:.55);}
+function garageFootInteraction(){return state.player.mode==='foot'&&nearGarage()&&(atGarageServiceDesk(state.player)||!isInsideGarageBay(state.player)&&Math.hypot(state.player.x-GARAGE_LOCATION.x,state.player.z-GARAGE_LOCATION.z)<=3);}
+function routeGarage(){expansion?.clearRoute();garageNavigation=true;casinoNavigation=false;notify('GPS: MOD SHOP. Podjedź do bramy — otworzy się automatycznie. W środku: G — tuning, E — wysiądź.');updateHUD();}
 function openGarage(){
  if(!nearGarage()){routeGarage();return;}
- if(Math.abs(activeVehicle(state)?.speed??0)>1.5){notify('Zatrzymaj auto przed wjazdem do warsztatu.');return;}
+ if(Math.abs(activeVehicle(state)?.speed??0)>1.5){notify('Zatrzymaj auto przy stanowisku, aby skorzystać z tuningu. Brama otwiera się automatycznie.');return;}
  if(onlineState.snapshot&&(onlineState.snapshot.jobs.active||onlineState.snapshot.challenge.status==='active')){notify('Dokończ zlecenie ekipy przed wizytą w warsztacie.');return;}
  if(state.player.mode==='drive'&&state.player.vehicleId!=='stratus'){notify('Warsztat obsługuje twoje własne auto. Możesz też podejść pieszo.');return;}
  garageUI.open();
 }
 function deliverSelectedCar(){
  if(state.player.mode==='foot'){
-  const car=state.vehicles.find(item=>item.id==='stratus');if(car)Object.assign(car,{x:-16,z:77,heading:0,speed:0,parked:true});
+  const car=state.vehicles.find(item=>item.id==='stratus');if(!car)return;
+  if(isInsideGarageBay(state.player)){
+   if(isInsideGarageBay(car))return;
+   const parking=[GARAGE_BUILDING.service,{x:GARAGE_BUILDING.x,z:68}].find(point=>Math.abs(point.x-state.player.x)>1.8||Math.abs(point.z-state.player.z)>3.2)??GARAGE_BUILDING.service;
+   Object.assign(car,parking,{heading:0,speed:0,parked:true});
+  }else Object.assign(car,{x:-16,z:77,heading:0,speed:0,parked:true});
  }
 }
 function handleGarageAction(action:GarageAction){
@@ -173,6 +180,10 @@ function handleOnlineState(next:MultiplayerState) {
    const self=snapshot.members.find(member=>member.id===snapshot.youId)!;
    Object.assign(state.player,{x:self.pose.x,z:self.pose.z,heading:self.pose.heading,mode:'foot',vehicleId:null});
    notify(`${occupied.name} zajmuje już ten samochód.`);
+  }
+  for(const member of snapshot.members){const old=previous.snapshot?.members.find(person=>person.id===member.id)?.pose;
+   if(old?.interior!==member.pose.interior&&(old?.interior==='casino'||member.pose.interior==='casino'))view.holdBuildingDoor('casino');
+   for(const home of[old?.homeId,member.pose.homeId])if(home==='canal'||home==='loft'||home==='crew')if(old?.homeId!==member.pose.homeId)view.holdBuildingDoor(home);
   }
   view.setOnline(snapshot.members,snapshot.youId);
   const before=previous.snapshot?.code===snapshot.code?previous.snapshot.challenge:null;
@@ -267,7 +278,7 @@ function interactInput(){
  if(state.player.passengerOf){room.exitRide();return;}
  if(stories?.interact())return;
  if(expansion?.interact())return;
- if(nearGarage()){openGarage();return;}
+ if(garageFootInteraction()){openGarage();return;}
  if(state.player.mode==='foot'&&nearestVehicle(state)?.id==='stratus'&&expansion?.career.storedCars[(onlineState.snapshot?.garage??soloGarage).selected]){notify('To auto jest zabezpieczone na parkingu. Odbierz je w panelu L przy mieszkaniu.');return;}
  if(onlineState.snapshot&&state.player.mode==='foot'&&!casinoAction(state)){
   const vehicle=nearestVehicle(state);
@@ -328,7 +339,7 @@ function fatal(message:string){const box=document.createElement('div');box.class
 function notify(message:string){clearTimeout(notificationTimer);$('#toast').textContent=message;$('#toast').classList.add('show');notificationTimer=setTimeout(()=>$('#toast').classList.remove('show'),4200);}
 function persist(){const saved=soloState??state;try{localStorage.setItem(SAVE_KEY,JSON.stringify({money:saved.money,wins:saved.missionsWon,bestRace:saved.bestRace,muted,pokerReserve:casinoReserve,garage:soloGarage,career:expansion?.savedCareer??loadedCareer,stories:stories?.saved??loadedStories,roulette:expansion?.savedRoulette??loadedRoulette}));saveAvailable=true;}catch{saveAvailable=false;}}
 async function toggleSound(){muted=!muted;await audio.toggle(!muted);if(!muted&&audio.muted){muted=true;notify('Audio jest niedostępne. Gra działa bez dźwięku.');}persist();updateHUD();}
-function district(p:Point):string{return state.interior==='casino'?CASINO.name:districtAt(p);}
+function district(p:Point):string{return state.interior==='casino'?CASINO.name:!expansion?.homeId&&isInsideGarageBay(p)?'MOD SHOP · WARSZTAT':districtAt(p);}
 function updateCasinoHUD(){
  const action=casinoAction(state),near=nearestVehicle(state),inside=state.interior==='casino';
  $('#interaction').classList.toggle('hidden',state.player.mode==='foot'&&!near&&!action);
@@ -355,7 +366,7 @@ function updateHUD(){const passenger=Boolean(state.player.passengerOf),car=activ
  const near=nearestVehicle(state);$('#interaction').classList.toggle('hidden',state.player.mode==='foot'&&!near);$('#interaction-text').textContent=state.player.mode==='drive'?speed>12?'Zwolnij, aby wysiąść':'Wysiądź z samochodu':`Wsiądź · ${near?.kind==='sport'?'Stratus XS':near?.kind==='sedan'?'Sentinel':'samochód'}`;
  $('#car-name').textContent=state.player.mode==='foot'?'SWOBODNY RUCH · PIESZO':car?.label??(car?.kind==='sport'?'STRATUS XS · SPORT':'SENTINEL · SEDAN');const health=state.player.mode==='drive'||passenger?(car?.health??100):state.player.health;$('#health-label').textContent=state.player.mode==='drive'||passenger?'STAN AUTA':'ZDROWIE';$('#health-value').textContent=`${Math.round(health)}%`;$('#health-bar').style.width=`${health}%`;
  document.querySelectorAll('#rpm i').forEach((el,i)=>el.classList.toggle('filled',i<Math.max(1,Math.ceil(speed/14))));$('#sound').setAttribute('aria-pressed',String(!muted));$('#sound').textContent=muted?'♪':'♫';$('#sound').title=muted?'Włącz dźwięk':'Wycisz dźwięk';$('#sound').setAttribute('aria-label',$('#sound').title);
- updateCasinoHUD();updateOnlineHUD();updateJobsHUD();updateCityEvent();const environment=getCityEnvironment(worldSeconds());if(state.interior!=='casino')$('#clock').textContent=`${environment.clock} · ${environment.period} · ${environment.weather}`;if(garageNavigation&&!state.interior)$('#map-hint').textContent='⚙ Trasa do garażu';if(nearGarage()){$('#interaction').classList.remove('hidden');$('#interaction-text').textContent='Otwórz garaż i tuning';}if(state.player.passengerOf){$('#interaction').classList.remove('hidden');$('#interaction-text').textContent='Jedziesz jako pasażer · E / F — wysiądź po zatrzymaniu';$('#car-name').textContent='WSPÓLNY PRZEJAZD · PASAŻER';}else if(nearestRide()){$('#interaction').classList.remove('hidden');$('#interaction-text').textContent='F — wsiądź jako pasażer znajomego';}
+ updateCasinoHUD();updateOnlineHUD();updateJobsHUD();updateCityEvent();const environment=getCityEnvironment(worldSeconds());if(state.interior!=='casino')$('#clock').textContent=`${environment.clock} · ${environment.period} · ${environment.weather}`;if(garageNavigation&&!state.interior)$('#map-hint').textContent='⚙ Trasa do garażu';if(nearGarage()){$('#interaction').classList.remove('hidden');$('#interaction-text').textContent=state.player.mode==='drive'?'G — tuning · E — wysiądź':garageFootInteraction()?'Stanowisko warsztatu · E / G':nearestVehicle(state)?'G — tuning · E — wsiądź do auta':'G — tuning · Stanowisko przy tylnej ścianie';}if(state.player.passengerOf){$('#interaction').classList.remove('hidden');$('#interaction-text').textContent='Jedziesz jako pasażer · E / F — wysiądź po zatrzymaniu';$('#car-name').textContent='WSPÓLNY PRZEJAZD · PASAŻER';}else if(nearestRide()){$('#interaction').classList.remove('hidden');$('#interaction-text').textContent='F — wsiądź jako pasażer znajomego';}
  expansion?.updateHUD();
  stories?.updateHUD();
 }
@@ -379,9 +390,9 @@ function showPause(help=false){held.clear();pulse={interact:false,nextMission:fa
 function resume(){paused=false;showingHelp=false;$('#overlay-root').innerHTML='';held.clear();oldFrame=performance.now();}
 function start(){started=true;paused=false;$('#start-menu').classList.add('hidden');$('#hud').classList.remove('hidden');oldFrame=performance.now();if(!muted)void audio.toggle(true);if(recoveredCasino>0){notify(`Zwrócono $${recoveredCasino} niewykorzystanych żetonów ze stołu.`);recoveredCasino=0;}else if(onlineState.snapshot)notify(`Pokój ${onlineState.snapshot.code}. Zaproś znajomych i spotkajcie się w kasynie.`);else notify('Nova: „Mam dla ciebie małą przesyłkę. Kieruj się do złotego znacznika.”');persist();}
 function camera(){cameraMode=(cameraMode+1)%3;orbit.setMode(cameraMode,state.player.heading);notify(`Kamera: ${['pościgowa','z lotu ptaka','pierwsza osoba'][cameraMode]}`);}
-function handleEvent(event:GameEvent){if(event.kind==='poker'){openPoker();return;}if(event.kind==='interior'){held.clear();pulse={interact:false,nextMission:false,reset:false};casinoNavigation=false;cameraMode=0;orbit.setMode(0,state.player.heading);updateHUD();}notify(event.text);audio.effect(event.kind==='reward'?'reward':event.kind==='damage'||event.kind==='arrest'?'damage':'info');if(event.kind==='reward')expansion?.missionReward();if(event.kind==='reward'||event.kind==='arrest')persist();}
+function handleEvent(event:GameEvent){if(event.kind==='poker'){openPoker();return;}if(event.kind==='interior'){view.holdBuildingDoor('casino');held.clear();pulse={interact:false,nextMission:false,reset:false};casinoNavigation=false;cameraMode=0;orbit.setMode(0,state.player.heading);updateHUD();}notify(event.text);audio.effect(event.kind==='reward'?'reward':event.kind==='damage'||event.kind==='arrest'?'damage':'info');if(event.kind==='reward')expansion?.missionReward();if(event.kind==='reward'||event.kind==='arrest')persist();}
 $('#casino-nav').onclick=()=>{if(state.interior==='casino'){notify('Podejdź do stołu i naciśnij E, aby zagrać.');return;}expansion?.clearRoute();garageNavigation=false;eventNavigationId='';casinoNavigation=!casinoNavigation;notify(casinoNavigation?'GPS: kasyno Sapphire Club. Wejście pieszo, E przy drzwiach.':'GPS: cel aktualnego zlecenia.');updateHUD();};
-$('#activities-open').onclick=()=>activitiesUI.open();$('#touch-activities').onclick=()=>activitiesUI.open();$('#touch-garage').onclick=routeGarage;$('#touch-ride').onclick=rideInput;$('#city-event-route').onclick=()=>{const event=cityEventAt(worldSeconds());if(event){eventNavigationId=event.id;garageNavigation=false;casinoNavigation=false;notify(`GPS: ${event.title}.`);}};$('#start-game').onclick=start;$('#intro-help').onclick=()=>showPause(true);$('#help').onclick=()=>showPause(true);$('#pause').onclick=()=>showPause();$('#sound').onclick=()=>{void toggleSound();};$('#mission-next').onclick=()=>{pulse.nextMission=true;};$('#crew-start').onclick=startCrewChallenge;$('#touch-enter').onclick=interactInput;$('#online').onclick=()=>onlineUI.open();$('#intro-online').onclick=()=>onlineUI.open();
+$('#activities-open').onclick=()=>activitiesUI.open();$('#touch-activities').onclick=()=>activitiesUI.open();$('#touch-garage').onclick=()=>nearGarage()?openGarage():routeGarage();$('#touch-ride').onclick=rideInput;$('#city-event-route').onclick=()=>{const event=cityEventAt(worldSeconds());if(event){eventNavigationId=event.id;garageNavigation=false;casinoNavigation=false;notify(`GPS: ${event.title}.`);}};$('#start-game').onclick=start;$('#intro-help').onclick=()=>showPause(true);$('#help').onclick=()=>showPause(true);$('#pause').onclick=()=>showPause();$('#sound').onclick=()=>{void toggleSound();};$('#mission-next').onclick=()=>{pulse.nextMission=true;};$('#crew-start').onclick=startCrewChallenge;$('#touch-enter').onclick=interactInput;$('#online').onclick=()=>onlineUI.open();$('#intro-online').onclick=()=>onlineUI.open();
 for(const button of document.querySelectorAll<HTMLButtonElement>('[data-hold]')){const key=button.dataset.hold!;button.onpointerdown=e=>{button.setPointerCapture(e.pointerId);held.add(key);e.preventDefault();};button.onpointerup=button.onpointercancel=()=>held.delete(key);}
 addEventListener('keydown',e=>{
  if(graphicsUI.active)return;
@@ -408,7 +419,10 @@ function frame(now:number){requestAnimationFrame(frame);const dt=Math.max(0,Math
  const tournamentSeated=onlineState.snapshot?.tournament.status==='playing'&&onlineState.snapshot.tournament.participants.some(person=>person.id===onlineState.snapshot!.youId&&person.status==='playing');
  // Closing a panel resets oldFrame. A queued RAF can have an earlier timestamp;
  // keep one-shot input until a frame can actually advance the simulation.
- if(dt>0&&started&&!paused&&!expansion?.homeId&&!tournamentSeated&&!state.player.passengerOf&&!raceCountdown){const before=state.money;const events=advanceSimulation(state,input(),dt);pulse={interact:false,nextMission:false,reset:false};events.forEach(handleEvent);if(onlineState.status==='online'&&state.money<before)room.spend(before-state.money);audio.update(activeVehicle(state)?.speed??0,state.player.mode==='drive');}
+ state.garageVisitors=(onlineState.snapshot?.members??[]).filter(member=>member.id!==onlineState.snapshot?.youId&&!member.pose.interior&&!member.pose.homeId).map(member=>({x:member.pose.vehicle?.x??member.pose.x,z:member.pose.vehicle?.z??member.pose.z,mode:member.pose.mode,speed:member.pose.vehicle?.speed??0,heading:member.pose.heading,radius:member.pose.mode==='drive'?2.8:.6}));
+ const advances=dt>0&&started&&!paused&&!expansion?.homeId&&!tournamentSeated&&!state.player.passengerOf&&!raceCountdown;
+ if(advances){const before=state.money;const events=advanceSimulation(state,input(),dt);pulse={interact:false,nextMission:false,reset:false};events.forEach(handleEvent);if(onlineState.status==='online'&&state.money<before)room.spend(before-state.money);audio.update(activeVehicle(state)?.speed??0,state.player.mode==='drive');}
+ if(!advances&&started&&onlineState.status==='online')updateGarageAccess(state,dt,worldSeconds());
  expansion?.step(dt,input(),started&&!paused&&!state.player.passengerOf&&!raceCountdown);
  stories?.step(dt);
  if(state.player.passengerOf||raceCountdown||tournamentSeated)pulse={interact:false,nextMission:false,reset:false};
@@ -417,10 +431,11 @@ function frame(now:number){requestAnimationFrame(frame);const dt=Math.max(0,Math
  // Settings keep a live preview, with time between expensive background draws
  // for responsive controls on software WebGL. Preset/resize changes invalidate it.
  if(!graphicsUI.active||now>=graphicsFrameAt){
+ view.setBuildingAccess(['casino',...(expansion?.career.ownedHomes??[]),...(onlineState.snapshot?.crewBase.owned?['crew' as const]:[])]);
  view.update(state,paused&&!poker.active&&onlineState.status!=='online'?0:dt,cameraMode,orbit,navigationTarget(),Boolean((onlineState.snapshot?.challenge.status==='active'||onlineState.snapshot?.jobs.active)&&!casinoNavigation&&!garageNavigation),worldSeconds());
   graphicsFrameAt=performance.now()+350;
  }
  hudClock+=dt;mapClock+=dt;if(hudClock>.09){updateHUD();hudClock=0;}if(mapClock>.08){drawMap();mapClock=0;}
 }
-Object.defineProperty(window,'__NEON_TEST__',{get:()=>({state:structuredClone(state),started,paused,cameraMode,garage:structuredClone(onlineState.snapshot?.garage??soloGarage),garageOpen:garageUI.active,activitiesOpen:activitiesUI.active,expansion:expansion?.snapshot,stories:stories?.snapshot,city:view.cityLifeSnapshot,cityClaimPending,casino:{pokerOpen:poker.active,poker:structuredClone(poker.snapshot),reserve:casinoReserve},camera:{yaw:orbit.yaw,pitch:orbit.pitch,zoom:orbit.zoom,locked:mouse.locked},online:structuredClone(onlineState),navigation:structuredClone(mapNavigation),rendering:{remotePlayers:view.remotePlayers,view:view.presentation,frames:view.renderFrames,software:view.softwareRendering,graphics:view.graphicsProfile,calls:view.renderer.info.render.calls,triangles:view.renderer.info.render.triangles}})});
+Object.defineProperty(window,'__NEON_TEST__',{get:()=>({state:structuredClone(state),started,paused,cameraMode,garage:structuredClone(onlineState.snapshot?.garage??soloGarage),garageOpen:garageUI.active,activitiesOpen:activitiesUI.active,expansion:expansion?.snapshot,stories:stories?.snapshot,city:view.cityLifeSnapshot,buildings:view.buildingSnapshot,cityClaimPending,casino:{pokerOpen:poker.active,poker:structuredClone(poker.snapshot),reserve:casinoReserve},camera:{yaw:orbit.yaw,pitch:orbit.pitch,zoom:orbit.zoom,locked:mouse.locked},online:structuredClone(onlineState),navigation:structuredClone(mapNavigation),rendering:{remotePlayers:view.remotePlayers,view:view.presentation,frames:view.renderFrames,software:view.softwareRendering,graphics:view.graphicsProfile,calls:view.renderer.info.render.calls,triangles:view.renderer.info.render.triangles}})});
 room.subscribe(handleOnlineState);updateHUD();updateMouseHint();drawMap();if(recoveredCasino>0)persist();if(new URLSearchParams(location.search).has('room'))onlineUI.open();requestAnimationFrame(frame);

@@ -100,7 +100,7 @@ export class CityLife {
     }
     this.rainMesh=new THREE.InstancedMesh(this.geometry,this.rainMaterial,software?128:480);
     this.rainMesh.instanceMatrix.setUsage(THREE.DynamicDrawUsage);this.rainMesh.frustumCulled=false;this.group.add(this.rainMesh);
-    this.streetLights();this.garage();
+    this.streetLights();
     this.eventRing=new THREE.Mesh(new THREE.TorusGeometry(2.9,.1,4,32),new THREE.MeshBasicMaterial({color:0x84dbff}));
     this.eventRing.rotation.x=-Math.PI/2;this.eventRing.position.y=.15;this.eventGroup.add(this.eventRing);
     this.box(this.eventGroup,.8,.8,.8,new THREE.MeshLambertMaterial({color:0xd2aa68}),0,.45,0);
@@ -147,24 +147,6 @@ export class CityLife {
         puddles.forEach((point,index)=>{this.dummy.position.set(point.x,.092,point.z);this.dummy.rotation.set(0,point.angle,0);this.dummy.scale.set(1.4,.006,4.2);this.dummy.updateMatrix();mesh.setMatrixAt(index,this.dummy.matrix);});mesh.computeBoundingSphere();this.reflections.add(mesh);
       }
     }
-  }
-  private garage(){
-    const facade=new THREE.Group();facade.position.set(-20,0,72.4);facade.name='mod-shop';
-    const dark=new THREE.MeshLambertMaterial({color:0x20313e}),metal=new THREE.MeshLambertMaterial({color:0x53646b});
-    this.box(facade,9,4,.2,dark,0,2,0);this.box(facade,7,3.4,.25,metal,0,1.8,.17);
-    const stripes=new THREE.InstancedMesh(this.geometry,dark,8);
-    for(let i=0;i<8;i++){this.dummy.position.set(0,.35+i*.4,.32);this.dummy.scale.set(7,.045,.02);this.dummy.rotation.set(0,0,0);this.dummy.updateMatrix();stripes.setMatrixAt(i,this.dummy.matrix);}facade.add(stripes);
-    this.box(facade,15,.35,2.6,dark,0,4.25,.8);
-    this.box(facade,.12,4,.12,this.neonMaterial,-7,2.5,.4);this.box(facade,.12,4,.12,this.neonMaterial,7,2.5,.4);
-    const canvas=document.createElement('canvas');canvas.width=768;canvas.height=192;
-    const context=canvas.getContext('2d')!;context.fillStyle='#14232c';context.fillRect(0,0,768,192);
-    context.strokeStyle='#83e9dc';context.lineWidth=6;context.strokeRect(6,6,756,180);
-    context.fillStyle='#b5f4e6';context.textAlign='center';context.font='bold 86px Arial';context.fillText('MOD SHOP',384,106);
-    context.fillStyle='#d9c9a0';context.font='22px Arial';context.fillText('TUNING  ·  LAKIER  ·  NOWE AUTA',384,154);
-    const texture=new THREE.CanvasTexture(canvas);texture.colorSpace=THREE.SRGBColorSpace;
-    const sign=new THREE.Mesh(new THREE.PlaneGeometry(15,3.75),new THREE.MeshBasicMaterial({map:texture,side:THREE.DoubleSide}));sign.position.set(0,6.2,.2);facade.add(sign);
-    const entrance=new THREE.Mesh(new THREE.TorusGeometry(1.8,.07,4,32),this.neonMaterial);entrance.rotation.x=-Math.PI/2;entrance.position.set(0,.12,1.6);facade.add(entrance);
-    this.group.add(facade);
   }
   private personPart(mesh:number,index:number,x:number,y:number,z:number,w:number,h:number,d:number,swing=0){
     this.part.position.set(x,y,z);this.part.rotation.set(swing,0,0);this.part.scale.set(w,h,d);this.part.updateMatrix();

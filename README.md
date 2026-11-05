@@ -46,7 +46,7 @@ To mały samodzielny prototyp, a nie projekt o skali pełnej produkcji AAA. Nie 
 | E | wsiadanie i wysiadanie po zwolnieniu; kasyno, stół pokerowy i warsztat |
 | C | zmiana widoku: pościgowy, z góry, pierwsza osoba |
 | M | solo: kolejne zlecenie po zakończeniu aktualnego; online: gospodarz rozpoczyna „Nocny przerzut” |
-| G | trasa do garażu; przy warsztacie otwarcie panelu tuningu |
+| G | trasa do garażu; przy warsztacie i wewnątrz otwarcie panelu tuningu |
 | J | panel zajęć: garaż, przerzut, napad i wyścig |
 | L | kontakty, reputacja, mieszkania, wyposażenie i parking |
 | B | wydarzenia uliczne, dołączanie i GPS |
@@ -66,7 +66,9 @@ Złoty znacznik wskazuje cel. Przejmowanie obcych aut i kolizje przyciągają po
 
 ## Garaż i tuning
 
-**G** wyznacza trasę do MOD SHOP naprzeciwko kasyna; wejście jest przy **(-20, 74)**. Podejdź pieszo albo zatrzymaj własne auto przy bramie i użyj **E** lub ponownie **G**. Warsztat obsługuje własny samochód; podczas wspólnego zlecenia online trzeba najpierw dokończyć aktywność.
+**G** wyznacza trasę do MOD SHOP naprzeciwko kasyna; wjazd jest przy **(-20, 74)**. Podjedź własnym autem od Southside Avenue: segmentowa brama podnosi się automatycznie i można normalnie wjechać na stanowisko wewnątrz budynku. Brama pozostaje otwarta, gdy ktoś jest we wjeździe; po opuszczeniu warsztatu i odsunięciu się zamyka się po chwili.
+
+Zatrzymaj samochód w środku i naciśnij **G**, aby otworzyć tuning. **E** pozwala wysiąść i przejść po warsztacie; pieszo przy biurku serwisowym otwiera panel, a przy aucie pozwala wrócić za kierownicę. Wyjeżdża się przez tę samą bramę, także cofając. Dotychczasowy dostęp do usług przy wejściu pozostaje dostępny. Warsztat obsługuje własny samochód; podczas wspólnego zlecenia online trzeba najpierw dokończyć aktywność.
 
 Dostępne są **Stratus XS** (auto początkowe), **Sentinel GT za $900** i **Comet RS za $2000**. Comet zawiera pierwszy poziom silnika i nitro. Kupienie auta wybiera je do jazdy; posiadane modele można później przełączać bez kolejnego zakupu. Lakier kosztuje **$80**. Po dwóch podstawowych poziomach silnika, hamulców i nitro, przy **200 REP** odblokowuje się trzeci: odpowiednio **$1000 / $750 / $900**. Tuning zmienia osiągi samochodu.
 
@@ -104,6 +106,8 @@ Programowy WebGL zachowuje ograniczenia także po ręcznym wybraniu Wysokiej: be
 Co **120 sekund** pojawia się wydarzenie dostępne przez **40 sekund**: zgubiona przesyłka, pomoc na poboczu albo pilna dostawa. Panel wydarzenia i minimapa pokazują cel. Dotrzyj do niego pieszo lub jako kierowca; nagroda **$150–$200** jest odbierana automatycznie w pobliżu, raz za dane wydarzenie w bieżącej sesji. Pasażer nie odbiera nagrody za samo przejechanie przez punkt. Online wypłatę rozlicza gospodarz do portfela pokoju.
 
 ## Kasyno i poker
+
+Drzwi Sapphire Club otwierają się po podejściu. **E** przy wejściu prowadzi do sali kasyna, w której można swobodnie chodzić i rozglądać się.
 
 W sali są osobne stanowiska: **blackjack po lewej**, **ruletka po prawej**, **turniej przy lewej ścianie w głębi** i dotychczasowy stół pokerowy pośrodku. Podejdź i naciśnij **E** albo **K** przy dodatkowym stanowisku. Niewielki panel pozostawia widoczne wnętrze 3D.
 
@@ -170,6 +174,8 @@ Panel pokazuje osobno łączenie z serwerem pokojów, połączenie z gospodarzem
 **L** otwiera panel kontaktów i kryjówek. W trybie solo ukończone zwykłe misje dają 50 reputacji. Dostępna od początku **Nova** zleca przewóz paczki za **$300 i 60 REP**; **Milo** otwiera trasę portową od 100 REP, a **Vera** pieszy zwiad od 300 REP. Cele zaliczają się po dotarciu we właściwej kolejności; panel pokazuje czas i trasę. Można powtarzać zlecenia jako nowe wyprawy. Aktywne zlecenie nie jest wznawiane po przeładowaniu.
 
 **Mieszkanie nad kanałem** kosztuje **$900**, a **Loft Ocean View** **$2600** i wymaga 200 REP. Kup lokal, wyznacz trasę, podejdź pieszo do jego drzwi i użyj **E**. W środku można swobodnie chodzić, rozglądać się i podejść do stołu planowania. Przy wyjściu ponownie **E** wraca na ulicę.
+
+Wejścia do zakupionych mieszkań oraz wspólnej bazy ekipy mają widoczne, animowane drzwi, które reagują na podejście uprawnionego gracza.
 
 Wyposażenie jest widoczne we wnętrzu: kanapa za **$160** umożliwia odpoczynek i odnowienie zdrowia, neon za **$120** zmienia salon, a stanowisko mechanika za **$300** pozwala naprawiać własne auto przy domu za **$35**. Panel parkingu przechowuje zakupione modele: zatrzymaj własne auto przy mieszkaniu i wybierz zaparkowanie; odbierz je w tym samym panelu przy domu. Przechowywanego auta nie można po prostu przejąć klawiszem E.
 

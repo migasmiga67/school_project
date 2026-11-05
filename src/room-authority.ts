@@ -1,6 +1,7 @@
 import { CASINO } from './casino-location';
 import { BUILDINGS, ROAD_NODES, WORLD_BOUNDS } from './model';
-import { createGarage, garageAction, garageVehicle, GARAGE_LOCATION, type GarageState } from './garage';
+import { createGarage, garageAction, garageVehicle, type GarageState } from './garage';
+import { garageServiceAvailable, garageSolidCollision, isGarageBuildingCollider } from './garage-building';
 import { OnlineJobs } from './online-jobs';
 import { cityEventAt } from './city-life';
 import { CityEvents } from './city-events';
@@ -99,7 +100,9 @@ export class RoomAuthority {
       case 'garage': {
         if(this.jobs.busy||this.challengeStatus==='active')return no('Dokończ aktywność ekipy przed zmianą samochodu.');
         const pose=member.view.pose;
-        if(pose.interior||pose.homeId||pose.seated||pose.passengerOf||Math.hypot(pose.x-GARAGE_LOCATION.x,pose.z-GARAGE_LOCATION.z)>6||Math.abs(pose.vehicle?.speed??0)>1.5)return no('Podejdź do warsztatu lub zaparkuj przy jego bramie.');
+        const clearance=pose.mode==='drive'?pose.vehicle?.kind==='bike'?.68:1.5:.55;
+        if(pose.interior||pose.homeId||pose.seated||pose.passengerOf||!garageServiceAvailable(pose,.55)||!garageServiceAvailable(pose.vehicle??pose,clearance)||Math.abs(pose.vehicle?.speed??0)>1.5)return no('Podejdź do warsztatu lub zatrzymaj auto na stanowisku serwisowym.');
+        if(pose.mode==='drive'&&pose.vehicle?.id!=='stratus')return no('Warsztat obsługuje twoje własne auto. Możesz też podejść pieszo.');
         if(command.action&&typeof command.action==='object'&&command.action.type==='select'&&typeof command.action.car==='string'&&member.career.storedCars[command.action.car])return no('Ten samochód jest zabezpieczony przy mieszkaniu. Odbierz go na swoim parkingu.');
         const result=garageAction(member.garage,member.wallet,command.action,member.career.reputation);
         if(!result.ok)return no(result.reason);
@@ -398,8 +401,15 @@ export class RoomAuthority {
 
   private exitPoint(car:OnlineVehicle,slot:number) {
     if(car.kind==='boat')return{...DOCK.land};
-    const safe=(point:{x:number;z:number})=>point.x>WORLD_BOUNDS.minX+.6&&point.x<WORLD_BOUNDS.maxX-.6&&point.z>WORLD_BOUNDS.minZ+.6&&point.z<WORLD_BOUNDS.maxZ-.6&&!BUILDINGS.some(building=>Math.abs(point.x-building.x)<building.halfX+.6&&Math.abs(point.z-building.z)<building.halfZ+.6);
+    const safe=(point:{x:number;z:number})=>point.x>WORLD_BOUNDS.minX+.6&&point.x<WORLD_BOUNDS.maxX-.6&&point.z>WORLD_BOUNDS.minZ+.6&&point.z<WORLD_BOUNDS.maxZ-.6&&!BUILDINGS.some(building=>isGarageBuildingCollider(building)?garageSolidCollision(point,.6):Math.abs(point.x-building.x)<building.halfX+.6&&Math.abs(point.z-building.z)<building.halfZ+.6);
     const side=slot%2?1:-1;
+    // The garage remains part of the city. A passenger can get out next to a
+    // stopped car in its bay instead of being sent to a distant street node.
+    if(garageServiceAvailable(car,1.5)){
+      const along=slot>=2?1.4:-1.4,c=Math.cos(car.heading),s=Math.sin(car.heading);
+      const nearby=[side,-side].flatMap(direction=>[along,-along,0].map(offset=>({x:car.x+c*2.6*direction-s*offset,z:car.z+s*2.6*direction+c*offset})));
+      const exit=nearby.find(safe);if(exit)return exit;
+    }
     const candidates=[side,-side].flatMap(direction=>[2.9+(slot>=2?1.2:0),5].map(offset=>({x:car.x+Math.cos(car.heading)*offset*direction,z:car.z+Math.sin(car.heading)*offset*direction})));
     const exit=candidates.find(safe);
     if(exit)return exit;

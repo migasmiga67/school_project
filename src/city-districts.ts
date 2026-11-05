@@ -4,6 +4,7 @@ import { CityArt, pathLength, samplePath } from './city-art';
 import type { SurfaceLibrary, SurfaceMaterial } from './surface-materials';
 import { WORLD_LANDMARKS } from './world-layout';
 import { CITY_ACCESS_CLEARANCES,CITY_BENCH_PLACEMENTS,CITY_PLACEMENT_CONTEXT,CITY_STREET_SIGN_PLACEMENTS,canPlaceDecoration,findStreetDecoration,type DecorationFootprint } from './city-placement';
+import { GARAGE_BUILDING } from './garage-building';
 
 const HOME_COLORS=[0xe4c8a4,0xb8cbb5,0xd4ada1,0xb7c9ce,0xd3c692];
 const SHOP_NAMES=['PALM MARKET','CAFE AZUL','COAST RECORDS','SUNDOWN HOTEL','LA FLOR','NOVA STUDIO'];
@@ -25,6 +26,8 @@ export class CityDistrictsView {
     const mesh=this.art.box(w,h,d,material,x,y,z);this.occluders.push(mesh);return mesh;
   }
   private building(b:CityBuilding,index:number){
+    // The drive-in workshop has its own open shell, moving gate and cutaway roof.
+    if(b.x===GARAGE_BUILDING.x&&b.z===GARAGE_BUILDING.z)return;
     const art=this.art,{surfaces}=art,w=b.halfX*2-.75,d=b.halfZ*2-.75,h=b.height,roof=surfaces.roof,trim=surfaces.concrete;
     art.box(w+.2,.25,d+.2,trim,b.x,.055,b.z);
     const brick=art.tinted(surfaces.brick,index%2?0xcfc1ad:0xe2c9b1),pastel=art.tinted(surfaces.stucco,HOME_COLORS[index%HOME_COLORS.length]);
