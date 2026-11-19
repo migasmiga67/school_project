@@ -636,6 +636,8 @@ function buildEngineBay(c:BayContext):EngineBay{
     time+=dt;
     current={hood:ease(current.hood,pose.hood,6,dt),dipstick:ease(current.dipstick,pose.dipstick,8,dt),cap:ease(current.cap,pose.cap,9,dt),plug:ease(current.plug,pose.plug,9,dt)};
     c.hood.rotation.x=current.hood*1.12;
+    // Under a closed bonnet the bay is invisible anyway; skip its draw calls.
+    group.visible=pose.service||current.hood>.01;
     const rpm=pose.running?Math.max(650,pose.rpm):0,hz=rpm/60;
     block.position.set(0,pose.running?Math.sin(time*hz*Math.PI*2)*.0012+Math.sin(time*13)*.0006:0,0);
     block.rotation.z=pose.running?Math.sin(time*hz*Math.PI)*.0025:0;

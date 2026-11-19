@@ -1,0 +1,29 @@
+.inventory-overlay{position:fixed;inset:0;z-index:21;display:grid;place-items:center;padding:24px;background:#07131cd9;backdrop-filter:blur(10px);color:#f2ecdc;pointer-events:auto}
+.inventory-shell{width:min(560px,100%);max-height:calc(100dvh - 48px);display:flex;flex-direction:column;border:1px solid #b2d4cb40;border-radius:18px;background:linear-gradient(145deg,#243944,#101f2a);box-shadow:0 24px 100px #0007;overflow:hidden}
+.inventory-shell--shop{width:min(1040px,100%)}
+.inventory-header{display:flex;justify-content:space-between;align-items:center;gap:20px;padding:22px 26px;border-bottom:1px solid #d5e3d51c;background:#203541}
+.inventory-eyebrow{font-size:9px;letter-spacing:2.2px;color:#bde7d7}.inventory-header h1{margin:8px 0 0;font-size:28px;letter-spacing:-.5px}
+.inventory-header-side{display:flex;align-items:center;gap:18px}.inventory-wallet{text-align:right}.inventory-wallet small{display:block;font-size:8px;letter-spacing:1.5px;color:#a9bfc7}.inventory-wallet strong{display:block;margin-top:4px;font-size:20px;font-weight:500}
+.inventory-body{display:grid;grid-template-columns:1fr;gap:22px;padding:22px 26px;overflow:auto}
+.inventory-shell--shop .inventory-body{grid-template-columns:1.25fr 1fr}
+.inventory-button{min-height:38px;padding:8px 12px;border:1px solid #bde7d749;border-radius:7px;background:#bde7d71b;color:#d6eddf;font-size:11px;font-weight:600;white-space:nowrap}
+.inventory-button:hover:not(:disabled){background:#bde7d737}.inventory-button:disabled{opacity:.45;cursor:default}
+.inventory-button--quiet{background:transparent;color:#bfccd0}.inventory-button--primary{background:#9dd8b52e;border-color:#9dd8b5;color:#d9f5e3}
+.inventory-bill{display:flex;justify-content:space-between;align-items:center;gap:12px;margin-bottom:14px;padding:12px 14px;border:1px solid #ffcf6b80;border-radius:10px;background:#ffcf6b14}
+.inventory-bill strong{display:block;font-size:13px}.inventory-bill small{font-size:10px;color:#c9b993}
+.inventory-shelf{list-style:none;margin:0;padding:0;display:grid;gap:8px}
+.inventory-shelf li{display:grid;grid-template-columns:40px 1fr auto;gap:12px;align-items:center;padding:10px 12px;border:1px solid #a9c9bd22;border-radius:10px;background:#0d1e293b}
+.inventory-shelf strong{font-size:12px}.inventory-shelf small{display:block;margin-top:3px;font-size:10px;line-height:1.45;color:#afc1ca}.inventory-shelf em{font-style:normal;font-size:9px;color:#8fa6b1}
+.inventory-icon{display:grid;place-items:center;width:40px;height:40px;border-radius:9px;background:#ffffff10;font-size:22px}
+.inventory-weight{display:flex;align-items:center;gap:10px;margin-bottom:12px;font-size:10px;color:#a9bfc7}
+.inventory-bar{flex:1;height:5px;border-radius:4px;background:#ffffff1c;overflow:hidden}.inventory-bar i{display:block;height:100%;background:#c5e0ba}
+.inventory-grid{display:grid;grid-template-columns:repeat(4,1fr);gap:8px}
+.inventory-slot{position:relative;aspect-ratio:1;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:4px;padding:6px;border:1px solid #a9c9bd33;border-radius:10px;background:#0d1e2966;color:inherit;font-size:24px}
+.inventory-slot b{position:absolute;right:6px;top:4px;font-size:10px;color:#ffc69f}.inventory-slot small{font-size:8.5px;line-height:1.2;text-align:center;color:#c4d3d4}
+.inventory-slot--selected{border-color:#9dd8b5;background:#9dd8b51f}.inventory-slot--empty{border-style:dashed;opacity:.35}
+.inventory-detail{display:grid;grid-template-columns:40px 1fr;gap:12px;margin-top:14px;padding:12px;border:1px solid #a9c9bd22;border-radius:10px}
+.inventory-detail strong{font-size:13px}.inventory-detail p{margin:4px 0 0;font-size:10.5px;line-height:1.5;color:#c4d3d4}
+.inventory-actions{grid-column:1/-1;display:flex;gap:8px;justify-content:flex-end;align-items:center}.inventory-passive{font-size:10px;color:#9dd8b5}
+.inventory-empty{font-size:11px;color:#a9bfc7}
+.inventory-footer{padding:12px 26px;border-top:1px solid #d5e3d51c;font-size:11px;color:#c9d7d8}.inventory-footer p{margin:0}
+@media(max-width:760px){.inventory-shell--shop .inventory-body{grid-template-columns:1fr}.inventory-header{padding:16px}.inventory-body{padding:16px}.inventory-shelf li{grid-template-columns:32px 1fr}.inventory-shelf li .inventory-button{grid-column:1/-1}}

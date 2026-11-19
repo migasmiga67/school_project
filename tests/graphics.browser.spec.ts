@@ -119,7 +119,7 @@ test('wybór grafiki działa na żywym obrazie, zachowuje grę i pozostaje po od
   const retainedCanvas = await page.locator('#world canvas').elementHandle();
   expect(retainedCanvas).not.toBeNull();
   const before = await probe(page, retainedCanvas);
-  expect(before.ui.options).toEqual(['auto', 'low', 'medium', 'high']);
+  expect(before.ui.options).toEqual(['auto', 'low', 'medium', 'high', 'ultra']);
   const lowStage = await choosePreset(page, 'low', before.rendering.frames, retainedCanvas);
   const lowBuffer = expectDrawingBufferMatchesPreset(lowStage), low = lowStage.rendering.graphics;
   const highStage = await choosePreset(page, 'high', lowStage.rendering.frames, retainedCanvas);

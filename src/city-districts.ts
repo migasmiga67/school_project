@@ -42,6 +42,8 @@ export class CityDistrictsView {
       }
       for(let x=-towerW/2+2;x<towerW/2;x+=3.7)for(const side of[-1,1])art.instance('box',art.material(0x94a9aa),b.x+x,podium+(h-podium)/2,b.z+side*(towerD/2+.025),.08,h-podium,.08);
       art.box(w+.12,.32,d+.12,trim,b.x,podium+.2,b.z);
+      // The podium gets lobby and office windows on its side and rear walls.
+      this.windows(b,w,d,podium,index,3.6);
       this.storefront(b,w,d,'AETHER  /  FINANCIAL',index);
     }else if(b.style==='townhouse'){
       const count=w>17?3:2,unit=w/count;
@@ -165,18 +167,43 @@ export class CityDistrictsView {
       }
     }
   }
-  private window(x:number,y:number,z:number,w:number,h:number,rotation:number,index:number){
+  /** A framed opening: reveal frame, glass, stone sill and lintel and, when wide, a cross mullion. */
+  private window(x:number,y:number,z:number,w:number,h:number,rotation:number,index:number,balcony=false){
     const art=this.art,material=index%6===0?art.surfaces.litWindow:art.surfaces.windowGlass;
-    if(!art.software)art.instance('box',art.material(0x687674),x,y,z,w+.19,h+.19,.07,rotation);
-    art.instance(art.software?'plane':'box',material,x+Math.sin(rotation)*.055,y,z+Math.cos(rotation)*.055,w,h,.07,rotation);
+    const out=(depth:number):[number,number]=>[x+Math.sin(rotation)*depth,z+Math.cos(rotation)*depth];
+    if(!art.software){
+      art.instance('box',art.material(0x687674),x,y,z,w+.19,h+.19,.07,rotation);
+      const[sx,sz]=out(.12);art.instance('box',art.surfaces.concrete,sx,y-h/2-.08,sz,w+.34,.09,.22,rotation);
+      const[lx,lz]=out(.07);art.instance('box',art.material(0xc9c1ad),lx,y+h/2+.11,lz,w+.28,.14,.12,rotation);
+      if(w>1.05){const[mx,mz]=out(.09);const frame=art.material(0xe4e0d4);art.instance('box',frame,mx,y,mz,.05,h,.04,rotation);art.instance('box',frame,mx,y+h*.22,mz,w,.05,.04,rotation);}
+      if(balcony){
+        const[bx,bz]=out(.5),rail=art.material(0x3e4a4d);
+        art.instance('box',art.surfaces.concrete,bx,y-h/2-.18,bz,w+1.1,.14,1,rotation);
+        const[rx,rz]=out(.98);art.instance('box',rail,rx,y-h/2+.32,rz,w+1.1,.05,.05,rotation);
+        for(let post=-1;post<=1;post+=.25){const px=rx+Math.cos(rotation)*post*(w+1.1)/2,pz=rz-Math.sin(rotation)*post*(w+1.1)/2;art.instance('box',rail,px,y-h/2+.08,pz,.035,.48,.035,rotation);}
+      }
+    }
+    const[gx,gz]=out(.055);art.instance(art.software?'plane':'box',material,gx,y,gz,w,h,.07,rotation);
   }
-  private windows(b:CityBuilding,w:number,d:number,h:number,index:number,spacing:number,zOffset=0){
-    for(let y=5.2;y<h-1;y+=3.4)for(const side of[0,1,2,3]){
+  /** Windows on every storey, including the ground floor on the side and rear walls. */
+  private windows(b:CityBuilding,w:number,d:number,h:number,index:number,spacing:number,zOffset=0,groundFront=false){
+    const residential=b.district==='westwood'||b.district==='south-bay'||b.style==='townhouse'||b.style==='villa';
+    const rows:number[]=[];if(h>3.2)rows.push(1.95);for(let y=5.2;y<h-1;y+=3.4)rows.push(y);
+    for(const y of rows)for(const side of[0,1,2,3]){
+      // The street front keeps its shop windows and door at ground level.
+      if(y<3&&side===0&&!groundFront)continue;
       const span=side%2?d:w;
       for(let offset=-span/2+2.2;offset<span/2-1.2;offset+=spacing){
         const x=side===1?b.x+w/2+.03:side===3?b.x-w/2-.03:b.x+offset,z=(side===0?b.z+d/2+.03:side===2?b.z-d/2-.03:b.z+offset)+zOffset;
-        this.window(x,y,z,Math.min(1.45,spacing*.48),1.85,side*Math.PI/2,index+side+Math.round(offset+y));
+        const balcony=residential&&side===0&&y>4&&Math.round(offset/spacing+y)%2===0;
+        this.window(x,y,z,Math.min(1.45,spacing*.48),y<3?1.6:1.85,side*Math.PI/2,index+side+Math.round(offset+y),balcony);
       }
+    }
+    // String courses between storeys tie the facade together (hardware only).
+    if(!this.art.software)for(let y=3.9;y<h-.8;y+=3.4){
+      const band=this.art.surfaces.concrete;
+      this.art.instance('box',band,b.x,y,b.z+d/2+.06+zOffset,w+.12,.14,.12);this.art.instance('box',band,b.x,y,b.z-d/2-.06+zOffset,w+.12,.14,.12);
+      this.art.instance('box',band,b.x+w/2+.06,y,b.z+zOffset,.12,.14,d+.12);this.art.instance('box',band,b.x-w/2-.06,y,b.z+zOffset,.12,.14,d+.12);
     }
   }
   private awning(x:number,z:number,w:number,y:number,index:number){

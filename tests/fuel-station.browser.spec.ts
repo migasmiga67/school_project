@@ -108,9 +108,15 @@ test('the player refuels at a PetroCoast pump and pays at the till', async ({ pa
   await follow(page, [{ x: pump.point.x - along.x * 2.4 - out.x * .6, z: pump.point.z - along.z * 2.4 - out.z * .6, foot: true }, { x: door.x, z: door.z, foot: true }], 40000);
   await page.screenshot({ path: info.outputPath('station-shop.png') });
   await page.keyboard.press('e');
+  await expect(page.locator('#inventory-root')).toBeVisible();
+  await page.locator('#inventory-pay').click();
   await expect.poll(async () => (await snapshot(page)).fuel.bill).toBeNull();
+  await page.locator('#inventory-buy-canister').click();
+  await expect(page.locator('#inventory-message')).toContainText('Kanister');
+  await page.screenshot({ path: info.outputPath('station-shop-panel.png') });
+  await page.locator('#inventory-close').click();
   const paid = await snapshot(page);
-  expect(paid.state.money).toBe(money - bill);
+  expect(paid.state.money).toBe(money - bill - 14);
   // Paying never raises the wanted level (driving incidents on the way may have).
   expect(paid.state.wanted).toBeLessThanOrEqual(parked.state.wanted);
   expect(before).toBeLessThan(20);

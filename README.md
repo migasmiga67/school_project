@@ -17,6 +17,7 @@ Oryginalny, niewielki sandbox 3D w przeglądarce, inspirowany miejskimi grami ak
 - Wymiana oleju własnoręcznie w widoku pierwszej osoby: maska, bagnet, korek wlewu, korek spustowy pod autem, filtr i kanister ze świeżym olejem.
 - Pięć stacji paliw PetroCoast (Downtown, Westwood, North Financial, Port Nelson, South Bay) z wiatą, dystrybutorami, sklepem i pylonem z cenami. Auto spala paliwo; tankujesz sam w pierwszej osobie i płacisz przy kasie.
 - Ruch prawostronny na pasach dopasowanych do szerokości ulic, zaokrąglone zakręty, zatrzymywanie przed światłami i kolejkami; patrole korzystają z tych samych zasad.
+- Budynki mają okna na wszystkich ścianach i na parterze (także cokoły wieżowców i warsztat MOD SHOP), a przy grafice sprzętowej parapety, nadproża, szprosy, gzymsy między piętrami i balkony w dzielnicach mieszkalnych.
 - Postać gracza o ludzkiej anatomii: tułów z klatką piersiową, talią i barkami, szyja, ramiona z krótkimi rękawami, przedramiona, dłonie z palcami, uda i łydki, buty sportowe; głowa z linią żuchwy, uszami, nosem, powiekami, tęczówkami i ustami. Animowane kolana i łokcie; przechodnie korzystają z tego samego kształtu głowy w wydajnych instancjach.
 - Widok pierwszoosobowy z dłońmi i ruchem ramion podczas chodzenia oraz kokpitem, zegarem prędkości i skręcającą kierownicą podczas jazdy. Rozglądanie myszką zachowuje położenie kokpitu względem auta.
 - Auto sportowe i sedany, zaparkowane pojazdy i ruch uliczny; można wysiadać, chodzić, sprintować i przejmować auta.
@@ -70,6 +71,7 @@ To mały samodzielny prototyp, a nie projekt o skali pełnej produkcji AAA. Nie 
 | X | w serwisie: kucnij / wstań (korek spustowy jest pod autem) |
 | Q | w serwisie: uruchom / zgaś silnik |
 | N | trasa GPS do najbliższej stacji paliw |
+| I | plecak: przedmioty, użycie i wyrzucanie |
 | E | pieszo przy dystrybutorze: tankowanie; przy drzwiach sklepu: kasa |
 | P / Esc | pauza i zwolnienie kursora |
 | H / ? | pomoc |
@@ -111,13 +113,17 @@ Klawisz **Q** uruchamia silnik przy otwartej masce: kręci się pasek osprzętu 
 
 Bak twojego auta mieści **50 L**; na starcie jest w nim około 14 L. Paliwo ubywa podczas jazdy (więcej przy wysokich obrotach) i trochę na wolnych obrotach. Wskaźnik **⛽** przy liczniku świeci na żółto przy rezerwie (poniżej 7 L). Z pustym bakiem silnik gaśnie; **R** wzywa pomoc drogową, która dowozi 6 L za $25. **N** wyznacza trasę do najbliższej stacji, a stacje są zaznaczone na minimapie zielonym kwadratem.
 
+### Ekwipunek i sklep
+
+**I** otwiera plecak: 12 miejsc i limit 20 kg. Przedmioty kupisz w sklepie 24h na każdej stacji PetroCoast (**E** przy drzwiach — tam też płacisz za paliwo): kanister 5 L ($14), olej 1 L ($11), zestaw naprawczy (+35% stanu auta, $45), apteczkę (+60 zdrowia, $30), hot-doga (+25, $6), kawę (+10 zdrowia i szybszy sprint przez minutę, $4), wodę (+12, $2) i latarkę ($18), która nocą świeci pieszo przed tobą. Kanister, olej i zestaw naprawczy używasz pieszo przy własnym aucie. Plecak zapisuje się z profilem solo.
+
 Tankowanie: zatrzymaj auto przy dystrybutorze tak, by **klapka wlewu (prawy tył)** była przy wysepce. Wysiądź, podejdź do dystrybutora i naciśnij **E**. W widoku pierwszej osoby celuj myszą i naciskaj **E** albo klikaj:
 
 1. otwórz klapkę wlewu,
 2. wybierz paliwo na dystrybutorze: **95** ($1,79/L), **98** ($1,99/L, odrobinę więcej mocy) albo **ON** ($1,69/L),
 3. zdejmij pistolet, włóż go do wlewu — tankowanie trwa, a pistolet odbija przy pełnym baku,
 4. wyjmij i odwieś pistolet, zamknij klapkę, odejdź (**O**),
-5. zapłać przy kasie: **E** przy drzwiach sklepu. Przy kasie bez rachunku kupisz hot-doga i kawę (+25 zdrowia, $6).
+5. zapłać przy kasie: **E** przy drzwiach sklepu otwiera sklep z przyciskiem zapłaty.
 
 Twoje auto ma silnik benzynowy: olej napędowy (ON) odbiera moc i powoli niszczy silnik. Odjazd ze stacji bez płacenia sprawia, że kasjer wzywa policję.
 
@@ -145,6 +151,8 @@ Przycisk **GRAFIKA** znajduje się w menu początkowym i w pauzie. Wybór dział
 - **Niska** ogranicza rozdzielczość renderowania, zasięg widzenia i kosztowne efekty.
 - **Średnia** zwiększa zasięg i szczegółowość; przy akceleracji sprzętowej włącza cienie i reflektory dla najbliższego auta.
 - **Wysoka** zapewnia dalszy widok, większą rozdzielczość i dokładniejsze cienie; przy akceleracji sprzętowej dodatkowe reflektory obsługują dwa najbliższe auta.
+
+- **Ultra 4K** renderuje obraz w rozdzielczości do 3840×2160: natywnie na ekranie 4K, a na mniejszych ekranach jako wygładzanie przez nadpróbkowanie. Do tego miękkie cienie 4096, zasięg widzenia 900 m i światła sześciu najbliższych aut. Wymaga akceleracji sprzętowej; przy programowym WebGL działa jak Wysoka.
 
 Programowy WebGL zachowuje ograniczenia także po ręcznym wybraniu Wysokiej: bez cieni i dodatkowych świateł reflektorów, z lżejszymi materiałami i zasięgiem widzenia do 245 m. Renderowany obraz ma maksymalnie około 450 tys. pikseli na Niskiej, 650 tys. na Średniej i 900 tys. na Wysokiej; rzeczywista rozdzielczość zależy też od rozmiaru okna. Geometria i okna są grupowane w lokalne sektory, a odległe auta korzystają z prostszych modeli. Przestawienie jakości nie zmienia fizyki, kolizji, pieniędzy ani postępu zleceń.
 

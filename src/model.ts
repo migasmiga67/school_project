@@ -12,7 +12,7 @@ export interface PursuitState {
   /** Time without visual contact; a concealed safehouse clears the chase after six seconds. */
   searchSeconds:number; concealmentSeconds:number; patrols:Vehicle[]; roadblocks:Roadblock[]; helicopter:PoliceHelicopter|null;
 }
-export interface GameState { interior:'casino'|null; player: Point & {heading:number;mode:'drive'|'foot';vehicleId:string|null;health:number;passengerOf?:string|null}; vehicles:Vehicle[]; police:Vehicle[]; pursuit?:PursuitState; garageGate?:GarageGateState;garageVisitors?:GarageVisitor[]; money:number; wanted:number; heat:number; mission:Mission; time:number; arrestProgress:number; missionsWon:number; bestRace:number|null; collisionCooldown:number; escapeTimer:number; }
+export interface GameState { interior:'casino'|null; player: Point & {heading:number;mode:'drive'|'foot';vehicleId:string|null;health:number;passengerOf?:string|null;/** Seconds of faster sprinting left after a coffee. */caffeine?:number}; vehicles:Vehicle[]; police:Vehicle[]; pursuit?:PursuitState; garageGate?:GarageGateState;garageVisitors?:GarageVisitor[]; money:number; wanted:number; heat:number; mission:Mission; time:number; arrestProgress:number; missionsWon:number; bestRace:number|null; collisionCooldown:number; escapeTimer:number; }
 export interface Input { throttle:boolean;brake:boolean;left:boolean;right:boolean;handbrake:boolean;boost:boolean;sprint:boolean;interact:boolean;nextMission:boolean;reset:boolean;viewHeading?:number }
 export interface GameEvent { kind:'info'|'damage'|'reward'|'wanted'|'arrest'|'mission'|'interior'|'poker'; text:string; amount?:number }
 export { ROADS, ROAD_X, ROAD_Z, ROAD_NODES, WORLD_BOUNDS, NATURAL_BLOCKS, BUILDINGS } from './city-map';
