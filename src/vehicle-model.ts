@@ -136,13 +136,13 @@ export function createVehicleModel(kind:RoadCarKind,color:number,options:Vehicle
   const stations:number[]=[];
   {
     const add=(z:number)=>{if(!stations.some(value=>Math.abs(value-z)<.012))stations.push(z);};
-    const coarse=software?.16:.09,fine=software?.075:.035;
+    const coarse=software?.24:.09,fine=software?.1:.035;
     for(let z=front;z<=rear+1e-6;z+=coarse)add(z);
     for(const axle of[-AXLE,AXLE])for(let dz=-ARCH-.04;dz<=ARCH+.04;dz+=fine)add(axle+dz);
     for(const z of[front+.012,front+.04,front+.1,rear-.1,rear-.04,rear-.012,rear,cabin.a0])add(z);
     stations.sort((a,b)=>a-b);
   }
-  const K=software?9:16;
+  const K=software?7:16;
   const ringSize=2*K;
   const ring=(z:number)=>{
     const points:[number,number][]=[];
@@ -207,7 +207,7 @@ export function createVehicleModel(kind:RoadCarKind,color:number,options:Vehicle
   // ---- Greenhouse --------------------------------------------------------
   {
     const glassTris:number[]=[],roofTris:number[]=[],trimTris:number[]=[];
-    const S=software?2:4,U=software?3:6,baseTheta=Math.PI*.29;
+    const S=software?2:4,U=software?2:6,baseTheta=Math.PI*.29;
     const Hmax=(z:number)=>cabin.roof-.025*((z-(cabin.a1+cabin.r0)/2)/((cabin.r0-cabin.a1)/2))**2;
     const height=(z:number)=>{
       const base=contour(z,baseTheta)[1];
@@ -217,7 +217,7 @@ export function createVehicleModel(kind:RoadCarKind,color:number,options:Vehicle
       else{const t=THREE.MathUtils.clamp((z-cabin.r0)/(cabin.r1-cabin.r0),0,1);f=sport?1-t**1.35:(1-t)**.85;}
       return{base,f,top:base+(Hmax(z)-base)*f};
     };
-    const gz:number[]=[];const n=software?16:34;
+    const gz:number[]=[];const n=software?11:34;
     for(let i=0;i<=n;i++){const t=i/n;gz.push(cabin.a0+(cabin.r1-cabin.a0)*(t<.5?2*t*t:1-2*(1-t)**2)*.999+.0005);}
     for(const z of[cabin.a1,cabin.r0,cabin.bPillar-.06,cabin.bPillar+.06])if(z>cabin.a0&&z<cabin.r1)gz.push(z);
     gz.sort((a,b)=>a-b);
@@ -669,18 +669,20 @@ function label(text:string,side:number,y:number,z:number,material:THREE.Material
 
 /** Tyre with a rounded sidewall and tread grooves, one of four rim designs and a brake disc. Face is +X. */
 function makeWheel(software:boolean,style:VehicleStyle){
-  const parts:THREE.BufferGeometry[]=[],segments=software?16:28;
+  const parts:THREE.BufferGeometry[]=[],segments=software?12:28;
   const rimTone=RIM_COLORS[style.rimColor]?.color??0xc3cacc;
   const add=(shape:THREE.BufferGeometry,color:number,x=0,y=0,z=0,rx=0,ry=0,rz=0)=>{const g=shape.index?shape.toNonIndexed():shape;if(g!==shape)shape.dispose();g.deleteAttribute('uv');g.rotateX(rx);g.rotateY(ry);g.rotateZ(rz);g.translate(x,y,z);const c=new THREE.Color(color),colors=new Float32Array(g.getAttribute('position').count*3);for(let i=0;i<colors.length;i+=3){colors[i]=c.r;colors[i+1]=c.g;colors[i+2]=c.b;}g.setAttribute('color',new THREE.BufferAttribute(colors,3));parts.push(g);};
   // Lathe profile (radius, axial offset) from the inner bead around the tread to the outer bead.
   const profile:[number,number][]=[[.255,-.116],[.32,-.128],[.356,-.12],[.37,-.098],[.37,-.06],[.363,-.055],[.363,-.045],[.37,-.04],[.37,0],[.363,.005],[.363,.015],[.37,.02],[.37,.06],[.363,.065],[.363,.075],[.37,.08],[.37,.098],[.356,.12],[.32,.128],[.255,.116]];
-  const tyre=new THREE.LatheGeometry(profile.map(([r,a])=>new THREE.Vector2(r,a)),segments);
+  // Software rendering keeps the rounded sidewall but drops the tread grooves.
+  const simple:[number,number][]=[[.255,-.116],[.34,-.128],[.37,-.09],[.37,.09],[.34,.128],[.255,.116]];
+  const tyre=new THREE.LatheGeometry((software?simple:profile).map(([r,a])=>new THREE.Vector2(r,a)),segments);
   add(tyre,0x1a1d1f,0,0,0,0,0,-Math.PI/2);
   // Sidewall lettering band.
-  add(new THREE.TorusGeometry(.31,.005,3,segments),0x3a3f42,.129,0,0,0,Math.PI/2);
+  if(!software)add(new THREE.TorusGeometry(.31,.005,3,segments),0x3a3f42,.129,0,0,0,Math.PI/2);
   // Rim barrel and lip.
   add(new THREE.CylinderGeometry(.254,.254,.22,segments,1,true),0x3b4144,0,0,0,0,0,Math.PI/2);
-  add(new THREE.TorusGeometry(.249,.011,4,segments),rimTone,.114,0,0,0,Math.PI/2);
+  add(new THREE.TorusGeometry(.249,.011,software?3:4,segments),rimTone,.114,0,0,0,Math.PI/2);
   // Ventilated brake disc and hub.
   add(new THREE.CylinderGeometry(.205,.205,.024,segments),0x7d868a,.02,0,0,0,0,Math.PI/2);
   add(new THREE.CylinderGeometry(.11,.11,.03,segments),0x4b5256,.035,0,0,0,0,Math.PI/2);
@@ -703,6 +705,6 @@ function makeWheel(software:boolean,style:VehicleStyle){
   // Centre cap and lug nuts.
   add(new THREE.CylinderGeometry(.052,.056,.03,software?8:14),rimTone,.11,0,0,0,0,Math.PI/2);
   add(new THREE.CylinderGeometry(.03,.03,.034,software?8:14),0x20262a,.112,0,0,0,0,Math.PI/2);
-  for(let i=0;i<5;i++){const a=i*Math.PI*2/5+.3;add(new THREE.CylinderGeometry(.011,.011,.03,6),0xd3d7d4,.104,Math.cos(a)*.075,Math.sin(a)*.075,0,0,Math.PI/2);}
+  if(!software)for(let i=0;i<5;i++){const a=i*Math.PI*2/5+.3;add(new THREE.CylinderGeometry(.011,.011,.03,6),0xd3d7d4,.104,Math.cos(a)*.075,Math.sin(a)*.075,0,0,Math.PI/2);}
   const merged=mergeGeometries(parts,false)!;parts.forEach(p=>p.dispose());merged.computeBoundingSphere();return merged;
 }
