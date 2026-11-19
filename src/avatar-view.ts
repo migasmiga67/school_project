@@ -43,7 +43,7 @@ export class AvatarView {
   // Button placket.
   this.box(this.group,.014,.38,.012,seam,0,1.19,-.165);
   for(const y of[1.06,1.18,1.3,1.41])this.oval(this.group,.018,.018,.01,sole,0,y,-.172);
-  this.part(this.group,createHeadGeometry(this.software?14:24),this.skin,0,1.79,-.015);
+  this.part(this.group,createHeadGeometry(this.software?12:24),this.skin,0,1.79,-.015);
   const face=createCharacterFaceParts();this.part(this.group,face.skin,this.skin,0,1.79,-.015).name='avatar-face-skin';this.part(this.group,face.features,features,0,1.79,-.015).name='avatar-face-features';this.part(this.group,face.brows,this.hair,0,1.79,-.015);
   for(const x of[-.1,.1]){
    // Thigh tapering to the knee; calf with a muscle belly and a slim ankle.
@@ -100,7 +100,7 @@ export class AvatarView {
  }
  private material(color:number):AvatarMaterial{return this.software?new THREE.MeshLambertMaterial({color}):new THREE.MeshStandardMaterial({color,roughness:.8,metalness:.02});}
  private part(parent:THREE.Object3D,geometry:THREE.BufferGeometry,material:THREE.Material,x:number,y:number,z:number){const mesh=new THREE.Mesh(geometry,material);mesh.position.set(x,y,z);mesh.castShadow=!this.software;mesh.receiveShadow=true;parent.add(mesh);return mesh;}
- private lathe(profile:readonly (readonly [number,number])[],sx=1,sz=1){const geometry=new THREE.LatheGeometry(profile.map(([r,y])=>new THREE.Vector2(r,y)),this.software?10:18);geometry.scale(sx,1,sz);return geometry;}
+ private lathe(profile:readonly (readonly [number,number])[],sx=1,sz=1){const geometry=new THREE.LatheGeometry(profile.map(([r,y])=>new THREE.Vector2(r,y)),this.software?8:18);geometry.scale(sx,1,sz);return geometry;}
  private capsule(w:number,h:number,d:number){const geometry=new THREE.CapsuleGeometry(.5,1,3,8);geometry.scale(w,h/2,d);return geometry;}
  private round(parent:THREE.Object3D,w:number,h:number,d:number,material:THREE.Material,x:number,y:number,z:number){return this.part(parent,this.capsule(w,h,d),material,x,y,z);}
  private oval(parent:THREE.Object3D,w:number,h:number,d:number,material:THREE.Material,x:number,y:number,z:number){const geometry=new THREE.SphereGeometry(.5,8,6);geometry.scale(w,h,d);return this.part(parent,geometry,material,x,y,z);}
