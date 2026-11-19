@@ -21,7 +21,12 @@ describe('graphics resource budgets',()=>{
   expect(graphicsProfile('auto',true,1440,900).resolved).toBe('low');
   expect(graphicsProfile('auto',false,390,844).resolved).toBe('medium');
   expect(graphicsProfile('auto',false,1440,900).resolved).toBe('high');
-  for(const value of [null,{},'ultra',42])expect(parseGraphicsQuality(value)).toBe('auto');
+  for(const value of [null,{},'4k',42])expect(parseGraphicsQuality(value)).toBe('auto');
+  expect(parseGraphicsQuality('ultra')).toBe('ultra');
+  const ultra=graphicsProfile('ultra',false,1920,1080,1),uhd=graphicsProfile('ultra',false,3840,2160,1),soft=graphicsProfile('ultra',true,1920,1080,1);
+  expect(ultra.ultra).toBe(true);expect(1920*ultra.pixelRatio).toBeCloseTo(3840,0);expect(uhd.pixelRatio).toBeCloseTo(1,5);
+  expect(ultra.shadowMapSize).toBe(4096);expect(ultra.viewDistance).toBeGreaterThan(graphicsProfile('high',false,1920,1080,1).viewDistance);
+  expect(soft.ultra).toBe(false);expect(soft).toEqual({...graphicsProfile('high',true,1920,1080,1),requested:'ultra'});
   expect(parseGraphicsQuality('high')).toBe('high');
  });
 });

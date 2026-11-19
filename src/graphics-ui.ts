@@ -2,7 +2,7 @@ import './graphics.css';
 import type { GraphicsProfile, GraphicsQuality } from './graphics';
 
 interface GraphicsCallbacks {getProfile():GraphicsProfile;software:boolean;onChange(quality:GraphicsQuality):boolean;onClose():void}
-const names={auto:'Automatyczna',low:'Niska',medium:'Średnia',high:'Wysoka'} as const;
+const names={auto:'Automatyczna',low:'Niska',medium:'Średnia',high:'Wysoka',ultra:'Ultra 4K'} as const;
 
 export class GraphicsUI {
  private root:HTMLElement|null=null;
@@ -33,7 +33,7 @@ export class GraphicsUI {
  private status(saved?:boolean){
   if(saved!==undefined)this.saved=saved;
   const profile=this.callbacks.getProfile();
-  const text=`Aktywna jakość: ${names[profile.resolved]}.${this.saved===undefined?'':this.saved?' Ustawienie zapamiętane.':' Ustawienie działa w tej sesji; zapis przeglądarki jest niedostępny.'}`;
+  const text=`Aktywna jakość: ${profile.ultra?names.ultra:names[profile.resolved]}${profile.requested==='ultra'&&!profile.ultra?' (Ultra wymaga akceleracji sprzętowej)':''}.${this.saved===undefined?'':this.saved?' Ustawienie zapamiętane.':' Ustawienie działa w tej sesji; zapis przeglądarki jest niedostępny.'}`;
   const status=this.root!.querySelector('#graphics-status')!;if(status.textContent!==text)status.textContent=text;
  }
 }

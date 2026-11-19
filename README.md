@@ -151,6 +151,8 @@ Przycisk **GRAFIKA** znajduje się w menu początkowym i w pauzie. Wybór dział
 - **Średnia** zwiększa zasięg i szczegółowość; przy akceleracji sprzętowej włącza cienie i reflektory dla najbliższego auta.
 - **Wysoka** zapewnia dalszy widok, większą rozdzielczość i dokładniejsze cienie; przy akceleracji sprzętowej dodatkowe reflektory obsługują dwa najbliższe auta.
 
+- **Ultra 4K** renderuje obraz w rozdzielczości do 3840×2160: natywnie na ekranie 4K, a na mniejszych ekranach jako wygładzanie przez nadpróbkowanie. Do tego miękkie cienie 4096, zasięg widzenia 900 m i światła sześciu najbliższych aut. Wymaga akceleracji sprzętowej; przy programowym WebGL działa jak Wysoka.
+
 Programowy WebGL zachowuje ograniczenia także po ręcznym wybraniu Wysokiej: bez cieni i dodatkowych świateł reflektorów, z lżejszymi materiałami i zasięgiem widzenia do 245 m. Renderowany obraz ma maksymalnie około 450 tys. pikseli na Niskiej, 650 tys. na Średniej i 900 tys. na Wysokiej; rzeczywista rozdzielczość zależy też od rozmiaru okna. Geometria i okna są grupowane w lokalne sektory, a odległe auta korzystają z prostszych modeli. Przestawienie jakości nie zmienia fizyki, kolizji, pieniędzy ani postępu zleceń.
 
 ## Wydarzenia miejskie

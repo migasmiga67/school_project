@@ -626,10 +626,12 @@ export class CityView {
     const profile=graphicsProfile(this.requestedQuality,this.softwareRendering,this.parent.clientWidth,this.parent.clientHeight,window.devicePixelRatio||1);
     if(this.qualityProfile&&JSON.stringify(profile)===JSON.stringify(this.qualityProfile))return;
     this.qualityProfile=profile;this.renderer.setPixelRatio(profile.pixelRatio);
-    const shadowChanged=this.renderer.shadowMap.enabled!==profile.shadows;
+    const shadowType=profile.softShadows?THREE.PCFSoftShadowMap:THREE.PCFShadowMap;
+    const shadowChanged=this.renderer.shadowMap.enabled!==profile.shadows||this.renderer.shadowMap.type!==shadowType;
+    this.renderer.shadowMap.type=shadowType;
     this.renderer.shadowMap.enabled=profile.shadows;this.sunlight.castShadow=profile.shadows;
     if(this.sunlight.shadow.mapSize.x!==profile.shadowMapSize){this.sunlight.shadow.map?.dispose();this.sunlight.shadow.map=null;this.sunlight.shadow.mapSize.set(profile.shadowMapSize,profile.shadowMapSize);}
-    const extent=profile.resolved==='high'?78:60;
+    const extent=profile.ultra?96:profile.resolved==='high'?78:60;
     Object.assign(this.sunlight.shadow.camera,{left:-extent,right:extent,top:extent,bottom:-extent});this.sunlight.shadow.camera.updateProjectionMatrix();
     this.camera.far=profile.viewDistance;this.camera.updateProjectionMatrix();
     this.atmosphere.group.scale.setScalar(Math.min(1,profile.viewDistance*.9/540));
