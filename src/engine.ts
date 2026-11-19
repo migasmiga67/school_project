@@ -11,6 +11,8 @@ export interface EngineCare {
   /** Mechanical damage, 1 = seized (limp mode). */
   wear: number;
   km: number;
+  /** Litres in the fuel tank, diesel wrongly pumped into it and the share of 98-octane fuel. */
+  fuel: number; wrongFuel: number; premium: number;
 }
 /** Live state of the running engine. */
 export interface EngineRun { running: boolean; rpm: number; gear: number; temp: number }
@@ -26,13 +28,14 @@ const TYRE_RADIUS = .37;
 const clamp = (value: number, min: number, max: number) => Math.max(min, Math.min(max, value));
 const finite = (value: unknown, fallback: number) => typeof value === 'number' && Number.isFinite(value) ? value : fallback;
 
-export const createEngineCare = (): EngineCare => ({ oil: 3.7, life: .3, filter: .3, wear: 0, km: 48210 });
+export const FUEL_CAPACITY = 50;
+export const createEngineCare = (): EngineCare => ({ oil: 3.7, life: .3, filter: .3, wear: 0, km: 48210, fuel: 14, wrongFuel: 0, premium: 0 });
 export const createEngineRun = (): EngineRun => ({ running: true, rpm: IDLE_RPM, gear: 0, temp: 86 });
 export function parseEngineCare(value: unknown): EngineCare {
   const base = createEngineCare();
   if (!value || typeof value !== 'object') return base;
   const v = value as Record<string, unknown>;
-  return { oil: clamp(finite(v.oil, base.oil), 0, 6), life: clamp(finite(v.life, base.life), 0, 1), filter: clamp(finite(v.filter, base.filter), 0, 1), wear: clamp(finite(v.wear, 0), 0, 1), km: clamp(finite(v.km, base.km), 0, 1e7) };
+  return { oil: clamp(finite(v.oil, base.oil), 0, 6), life: clamp(finite(v.life, base.life), 0, 1), filter: clamp(finite(v.filter, base.filter), 0, 1), wear: clamp(finite(v.wear, 0), 0, 1), km: clamp(finite(v.km, base.km), 0, 1e7), fuel: clamp(finite(v.fuel, base.fuel), 0, FUEL_CAPACITY), wrongFuel: clamp(finite(v.wrongFuel, 0), 0, FUEL_CAPACITY), premium: clamp(finite(v.premium, 0), 0, 1) };
 }
 
 /** Multiplier for acceleration and top speed. Neglect costs power but never strands the player. */
@@ -40,9 +43,12 @@ export function enginePower(care: EngineCare): number {
   let power = 1 - care.wear * .55;
   if (care.life < .2) power -= (.2 - care.life) * .9;
   if (care.oil < 2.6) power -= (2.6 - care.oil) * .12;
-  return clamp(power, .35, 1);
+  // Diesel in a petrol engine knocks and misfires; 98-octane gives a small edge.
+  if (care.wrongFuel > 1.5) power -= Math.min(.4, care.wrongFuel / Math.max(1, care.fuel) * .8);
+  power += care.premium * .04;
+  return clamp(power, .35, 1.04);
 }
-export type EngineWarning = 'no-oil' | 'low-oil' | 'old-oil' | 'overfilled' | 'hot' | 'damaged';
+export type EngineWarning = 'no-oil' | 'low-oil' | 'old-oil' | 'overfilled' | 'hot' | 'damaged' | 'low-fuel' | 'no-fuel' | 'wrong-fuel';
 export function engineWarnings(care: EngineCare, run?: EngineRun): EngineWarning[] {
   const list: EngineWarning[] = [];
   if (care.oil < 1.4) list.push('no-oil'); else if (care.oil < 3) list.push('low-oil');
@@ -50,17 +56,21 @@ export function engineWarnings(care: EngineCare, run?: EngineRun): EngineWarning
   if (care.life < .25) list.push('old-oil');
   if (run && run.temp > 108) list.push('hot');
   if (care.wear > .35) list.push('damaged');
+  if (care.fuel <= .01) list.push('no-fuel'); else if (care.fuel < 7) list.push('low-fuel');
+  if (care.wrongFuel > 1.5) list.push('wrong-fuel');
   return list;
 }
 export const WARNING_TEXT: Record<EngineWarning, string> = {
   'no-oil': 'BRAK OLEJU — zatrzymaj silnik!', 'low-oil': 'Niski poziom oleju', 'old-oil': 'Olej zużyty — wymień w MOD SHOP',
   overfilled: 'Za dużo oleju', hot: 'Silnik się przegrzewa', damaged: 'Silnik uszkodzony',
+  'low-fuel': 'Rezerwa paliwa — zatankuj (N: najbliższa stacja)', 'no-fuel': 'Brak paliwa! R — pomoc drogowa', 'wrong-fuel': 'Olej napędowy w baku benzynowym! Opróżnij bak w MOD SHOP',
 };
 
 export interface EngineInput { speed: number; throttle: boolean; driving: boolean; dt: number }
 /** Automatic six-speed gearbox, oil ageing and lubrication damage. Mutates both records. */
 export function stepEngine(care: EngineCare, run: EngineRun, input: EngineInput): void {
   const dt = clamp(finite(input.dt, 0), 0, .25), speed = Math.abs(finite(input.speed, 0));
+  if (run.running && care.fuel <= 0) { run.running = false; }
   if (!run.running) { run.rpm = Math.max(0, run.rpm - dt * 3000); run.temp += (24 - run.temp) * (1 - Math.exp(-dt / 400)); return; }
   const wheelRpm = speed / (2 * Math.PI * TYRE_RADIUS) * 60;
   if (input.driving && speed > .4) {
@@ -78,6 +88,12 @@ export function stepEngine(care: EngineCare, run: EngineRun, input: EngineInput)
   }
   const km = input.driving ? speed * dt / 1000 : 0;
   care.km += km;
+  // Game-scaled consumption (about 0.5 L/km cruising) plus idle use, more at high revs.
+  const burn = km * .5 * (.6 + run.rpm / 6000 * .7) * (input.throttle ? 1.2 : 1) + dt * run.rpm / 900000;
+  const before = care.fuel;
+  care.fuel = Math.max(0, care.fuel - burn);
+  if (care.wrongFuel > 0 && before > 0) care.wrongFuel = Math.max(0, care.wrongFuel * care.fuel / before);
+  if (care.wrongFuel > 1.5) care.wear = clamp(care.wear + dt * .002 * Math.min(1, care.wrongFuel / 8), 0, 1);
   // Oil ages with distance and high revs; a clogged filter accelerates it.
   const strain = 1 + Math.max(0, run.rpm - 5000) / 2500;
   care.life = clamp(care.life - km / 9 * strain * (care.filter < .25 ? 1.5 : 1), 0, 1);

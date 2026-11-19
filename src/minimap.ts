@@ -1,6 +1,7 @@
 import { CASINO } from './casino-location';
 import { WORLD_BOUNDS, type GameState, type Point } from './model';
 import { CITY_BUILDINGS, CITY_SPACES, CITY_STREETS, routeStreets } from './city-map';
+import { FUEL_STATIONS } from './fuel-stations';
 import type { OnlineMember } from './multiplayer-model';
 import { GARAGE_LOCATION } from './garage';
 import { HOMES, CREW_BASE } from './career';
@@ -99,6 +100,10 @@ export function renderMinimap(ctx: CanvasRenderingContext2D, state: GameState, o
     ctx.strokeStyle=pavement?'#84918c':street.kind==='alley'||street.kind==='service'?'#495452':'#303c42';
     ctx.lineWidth=(street.width+(pavement?street.sidewalkWidth*2:0))*scale;
     ctx.beginPath();street.points.map(mapPoint).forEach((point,index)=>index?ctx.lineTo(point.x,point.y):ctx.moveTo(point.x,point.y));ctx.stroke();
+  }
+  for(const station of FUEL_STATIONS){
+    const p=mapPoint(station);if(!visible(p,6))continue;
+    ctx.fillStyle='#1f8f4f';ctx.fillRect(p.x-5,p.y-5,10,10);ctx.fillStyle='#ffffff';ctx.font='bold 8px Arial';ctx.textAlign='center';ctx.textBaseline='middle';ctx.fillText('⛽',p.x,p.y+.5);
   }
   for (const building of CITY_BUILDINGS) {
     const p = mapPoint({ x: building.x - building.halfX, z: building.z - building.halfZ });

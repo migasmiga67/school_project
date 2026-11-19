@@ -22,7 +22,7 @@ describe('running engine', () => {
     engine.running = false; expect(gearLabel(engine, 0)).toBe('OFF');
   });
   it('ages oil with distance, costs power and damages an engine run without oil', () => {
-    const care = createEngineCare(), engine = createEngineRun(); care.life = 1; care.oil = OIL_CAPACITY;
+    const care = createEngineCare(), engine = createEngineRun(); care.life = 1; care.oil = OIL_CAPACITY; care.fuel = 50;
     expect(enginePower(care)).toBe(1);
     for (let i = 0; i < 2400; i++) stepEngine(care, engine, { speed: 30, throttle: true, driving: true, dt: .25 });
     expect(care.km).toBeGreaterThan(createEngineCare().km + 17);
@@ -37,7 +37,7 @@ describe('running engine', () => {
   it('parses damaged saves into safe values', () => {
     expect(parseEngineCare(null)).toEqual(createEngineCare());
     const parsed = parseEngineCare({ oil: 99, life: -3, filter: 'x', wear: NaN, km: 12 });
-    expect(parsed).toEqual({ oil: 6, life: 0, filter: createEngineCare().filter, wear: 0, km: 12 });
+    expect(parsed).toEqual({ oil: 6, life: 0, filter: createEngineCare().filter, wear: 0, km: 12, fuel: createEngineCare().fuel, wrongFuel: 0, premium: 0 });
   });
   it('applies engine condition to real driving physics', () => {
     const healthy = createGame(), worn = createGame();
