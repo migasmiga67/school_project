@@ -59,8 +59,8 @@ export class VehicleLodLibrary {
     for(const side of[-1,1]){
       detail(.05,sporty?.38:.5,1.45,0x78a4b1,side*.83,sporty?1.28:1.42,.15);
       for(const z of[-1.4,1.4]){
-        const wheel=new THREE.CylinderGeometry(.42,.42,.26,6,1,false,Math.PI/2);wheel.rotateZ(Math.PI/2);
-        append(details,wheel,side*1.02,.45,z,0x20252a);
+        const wheel=new THREE.CylinderGeometry(.37,.37,.25,6,1,false,Math.PI/2);wheel.rotateZ(Math.PI/2);
+        append(details,wheel,side*1.02,.4,z,0x20252a);
       }
       detail(.48,.18,.08,0xfff1c7,side*.65,.78,-length/2-.04);
       detail(.56,.15,.08,0xca5965,side*.65,.8,length/2+.04);

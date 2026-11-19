@@ -8,7 +8,7 @@ describe('shared detailed road vehicle',()=>{
       const model=createVehicleModel(kind,0x42759a,{software});
       try{
         expect(model.stats.drawCalls).toBe(kind==='police'?11:9);
-        expect(model.stats.triangles).toBeLessThan(18000);
+        expect(model.stats.triangles).toBeLessThan(software?14000:26000);
         const bounds=new THREE.Box3().setFromObject(model.group),size=bounds.getSize(new THREE.Vector3());
         expect(bounds.min.y).toBeCloseTo(.03,5);expect(bounds.max.y).toBeLessThan(2.2);
         expect(size.x).toBeLessThan(2.4);expect(size.z).toBeLessThan(5);
@@ -30,9 +30,10 @@ describe('shared detailed road vehicle',()=>{
       for(let i=0;i<glassPosition.count;i++)if(Math.abs(glassPosition.getZ(i)+.96)<.0001){expect(normals.getZ(i)).toBeLessThan(-.5);expect(normals.getY(i)).toBeGreaterThan(0);}
       const trim=model.chassis.getObjectByName('batched-trim-and-livery')as THREE.Mesh;
       const p=trim.geometry.getAttribute('position'),c=trim.geometry.getAttribute('color'),ink=new THREE.Color(0x18354c);
+      // Letters sit on the curved door skin; reading direction depends on the side.
       const pixel=(side:number,col:number,row:number)=>{
-        const x=(col*.028-(6*4-1)*.028/2),y=.83+(2-row)*.028;
-        for(let i=0;i<p.count;i++)if(Math.abs(c.getX(i)-ink.r)<1e-6&&Math.abs(c.getY(i)-ink.g)<1e-6&&Math.abs(c.getZ(i)-ink.b)<1e-6&&Math.abs(p.getX(i)-side*1.009)<.004&&Math.abs(-side*(p.getZ(i)-.36)-x)<.014&&Math.abs(p.getY(i)-y)<.014)return true;
+        const x=(col*.028-(6*4-1)*.028/2),y=.74+(2-row)*.028;
+        for(let i=0;i<p.count;i++)if(Math.abs(c.getX(i)-ink.r)<1e-6&&Math.abs(c.getY(i)-ink.g)<1e-6&&Math.abs(c.getZ(i)-ink.b)<1e-6&&side*p.getX(i)>.9&&Math.abs(-side*(p.getZ(i)-.32)-x)<.014&&Math.abs(p.getY(i)-y)<.014)return true;
         return false;
       };
       // On both doors the first P has its lower stem on the reader's left.
@@ -55,12 +56,48 @@ describe('shared detailed road vehicle',()=>{
     const model=createVehicleModel('police',0x20313d);
     try{
       for(const [material,front] of[[model.head,true],[model.brake,false]]as const){
-        const mesh=model.chassis.children.find(child=>child instanceof THREE.Mesh&&child.material===material)as THREE.Mesh;
+        let mesh:THREE.Mesh|undefined;model.chassis.traverse(child=>{if(!mesh&&child instanceof THREE.Mesh&&child.material===material)mesh=child;});
+        if(!mesh)throw new Error('lamp mesh missing');
         const box=new THREE.Box3().setFromBufferAttribute(mesh.geometry.getAttribute('position')as THREE.BufferAttribute);
         expect(front?box.max.z< -2:box.min.z>2).toBe(true);
       }
       expect(model.red).toBeDefined();expect(model.blue).toBeDefined();expect(model.red).not.toBe(model.blue);
     }finally{model.dispose();}
+  });
+
+  it('builds visual tuning into the shell and keeps the stock car the default',()=>{
+    const stock=createVehicleModel('sport',0x42759a),tuned=createVehicleModel('sport',0x42759a,{style:{spoiler:3,rims:3,rimColor:2,kit:2,hood:1,exhaust:2,height:2,tint:2,finish:2}});
+    try{
+      expect(stock.styleKey).not.toBe(tuned.styleKey);
+      const top=(model:typeof stock)=>new THREE.Box3().setFromObject(model.chassis).max.y;
+      // A GT wing raises the silhouette; lowered springs drop the body towards the wheels.
+      const wing=new THREE.Box3().setFromObject(tuned.chassis),plain=new THREE.Box3().setFromObject(stock.chassis);
+      expect(wing.min.y).toBeLessThan(plain.min.y);expect(top(tuned)).toBeGreaterThan(1.3);
+      expect(tuned.stats.triangles).toBeGreaterThan(stock.stats.triangles);
+      expect((tuned.paint as THREE.MeshStandardMaterial).roughness).toBeGreaterThan((stock.paint as THREE.MeshStandardMaterial).roughness);
+      const glass=(model:typeof stock)=>(model.chassis.getObjectByName('tapered-glazing') as THREE.Mesh).material as THREE.Material;
+      expect(glass(tuned).opacity).toBeGreaterThan(glass(stock).opacity);
+    }finally{stock.dispose();tuned.dispose();}
+  });
+
+  it('gives only the hero car a hinged bonnet and serviceable engine parts',()=>{
+    const traffic=createVehicleModel('sedan',0x223344),hero=createVehicleModel('sedan',0x223344,{hero:true});
+    try{
+      expect(traffic.engine).toBeUndefined();
+      const bay=hero.engine!;expect(bay.targets.map(target=>target.id).sort()).toEqual(['bottle','cap','dipstick','drainPlug','filter','hood']);
+      const before=new THREE.Box3().setFromObject(bay.hood).max.y;
+      bay.update({hood:1,dipstick:1,cap:1,plug:1,filter:'new',draining:1,pouring:false,pan:.5,oilColor:0xc58f1d,oilLevel:1,running:true,rpm:3000,service:true,highlight:'cap'},5);
+      hero.group.updateMatrixWorld(true);
+      expect(new THREE.Box3().setFromObject(bay.hood).max.y).toBeGreaterThan(before+.6);
+      const named=(name:string)=>hero.group.getObjectByName(name)!;
+      expect(named('new-oil-filter').parent!.visible).toBe(true);expect(named('old-oil-filter').parent!.visible).toBe(false);
+      expect(named('oil-stream').visible).toBe(true);expect(named('drain-pan').visible).toBe(true);
+      expect(named('sump-drain-plug').visible).toBe(false);
+      let highlighted=0;hero.group.traverse(object=>{if(object.name==='part-highlight'&&object.visible)highlighted++;});expect(highlighted).toBeGreaterThan(0);
+      // The running engine turns its pulleys.
+      const pulleys=named('crank-pulleys'),angle=pulleys.rotation.x;bay.update({hood:1,dipstick:0,cap:0,plug:0,filter:'new',draining:0,pouring:false,pan:0,oilColor:0xc58f1d,oilLevel:1,running:true,rpm:3000,service:false,highlight:null},.1);
+      expect(pulleys.rotation.x).not.toBe(angle);expect(named('drain-pan').visible).toBe(false);
+    }finally{traffic.dispose();hero.dispose();}
   });
 
   it('each car owns mutable paint and releases shared wheel resources exactly once',()=>{

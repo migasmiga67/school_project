@@ -132,7 +132,7 @@ function command(value: unknown): value is RoomCommand {
   if (value.type === 'pose') return record(value.pose);
   if (value.type === 'ride') return typeof value.driverId==='string' && /^[A-Za-z0-9_-]{1,128}$/.test(value.driverId);
   if (value.type === 'cityEventClaim') return typeof value.eventId==='string' && value.eventId.length<=80;
-  if (value.type === 'garage') return record(value.action) && ['buy','select','paint','upgrade'].includes(String(value.action.type));
+  if (value.type === 'garage') return record(value.action) && ['buy','select','paint','upgrade','part'].includes(String(value.action.type));
   if (value.type === 'career') return record(value.action) && ['buyHome','furnish','storeCar','retrieveCar','repairCar','rest','contractStart','contractVisit','contractCancel'].includes(String(value.action.type));
   if (value.type === 'crewBase') return record(value.action) && ['buy','furnish'].includes(String(value.action.type));
   if (value.type === 'home') return record(value.action) && (value.action.kind==='exit'||value.action.kind==='enter'&&['canal','loft','crew'].includes(String(value.action.home)));

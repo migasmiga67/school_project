@@ -1,4 +1,6 @@
 import './garage.css';
+import { RIM_COLORS, VEHICLE_PARTS, VEHICLE_PART_IDS, createVehicleStyle } from './vehicle-style';
+import { ENGINE_REBUILD_PRICE, OIL_CAPACITY, type EngineCare } from './engine';
 import { GARAGE_CARS, GARAGE_PAINTS, GARAGE_PAINT_PRICE, GARAGE_UPGRADE_NAMES, GARAGE_MAX_LEVEL, GARAGE_ELITE_REPUTATION, garageUpgradePrice, parseGarage, type GarageAction, type GarageState, type GarageUpgrade } from './garage';
 
 export interface GarageCallbacks {
@@ -10,6 +12,8 @@ export interface GarageCallbacks {
   onMessage: (text: string) => void;
   isOnline?: () => boolean;
   getReputation?: () => number;
+  getEngine?: () => EngineCare;
+  onEngineRebuild?: () => void;
 }
 const money = (value: number) => `$${Math.max(0, value).toLocaleString('pl-PL')}`;
 const hex = (color: number) => `#${color.toString(16).padStart(6, '0')}`;
@@ -56,7 +60,7 @@ export class GarageUI {
   /** Supply a rejection/notice to acknowledge an unchanged authority snapshot. */
   refresh(message?: string) {
     if (!this.visible) return;
-    const signature = JSON.stringify([this.callbacks.getGarage(), this.callbacks.getWallet(), this.callbacks.isOnline?.() ?? false, this.callbacks.getReputation?.() ?? 0]);
+    const signature = JSON.stringify([this.callbacks.getGarage(), this.callbacks.getWallet(), this.callbacks.isOnline?.() ?? false, this.callbacks.getReputation?.() ?? 0, this.callbacks.getEngine?.()]);
     if (signature === this.signature && !message) return;
     this.signature = signature; this.pending = false; this.clearWait();
     if (message) this.message = message;
@@ -91,6 +95,7 @@ export class GarageUI {
     const rawReputation = this.callbacks.getReputation?.() ?? 0;
     const reputation = Number.isSafeInteger(rawReputation) && rawReputation >= 0 ? rawReputation : 0;
     const model = GARAGE_CARS[garage.selected];
+    const style = settings.style ?? createVehicleStyle(), engine = this.callbacks.getEngine?.();
     this.root.innerHTML = `<section class="garage-shell"><header class="garage-header"><div><span class="garage-eyebrow">NEON COAST · MOD SHOP</span><h1 id="garage-heading">Twój garaż.</h1><p>Wybierz auto, nadaj mu kolor i przygotuj je na noc.</p></div><div class="garage-header-actions"><span class="garage-wallet"><small>${this.callbacks.isOnline?.() ? 'PORTFEL ONLINE' : 'TWÓJ PORTFEL'}</small><strong id="garage-wallet">${money(wallet)}</strong></span><button id="garage-close" class="garage-button garage-button--quiet" aria-label="Zamknij garaż">Wróć na ulicę ×</button></div></header>
     <div class="garage-content"><section class="garage-catalog" aria-label="Samochody w garażu">${Object.values(GARAGE_CARS).map(car => {
       const owned = garage.owned.includes(car.id), selected = garage.selected === car.id, color = garage.cars[car.id]?.paint ?? car.paint;
@@ -102,7 +107,16 @@ export class GarageUI {
       const price = garageUpgradePrice(garage, upgrade), current = settings[upgrade];
       const locked = current === GARAGE_MAX_LEVEL - 1 && reputation < GARAGE_ELITE_REPUTATION;
       return `<section class="garage-upgrade"><div><h3>${GARAGE_UPGRADE_NAMES[upgrade]}</h3><span class="garage-level" id="garage-level-${upgrade}">Poziom ${current}/${GARAGE_MAX_LEVEL}</span></div><p>${upgradeDescriptions[upgrade]}</p><div class="garage-upgrade-footer"><span class="garage-level-bars" aria-hidden="true">${Array.from({length:GARAGE_MAX_LEVEL},(_,index)=>`<i class="${current > index ? 'is-filled' : ''}"></i>`).join('')}</span><button id="garage-upgrade-${upgrade}" class="garage-button" ${this.pending || price === null || wallet < price || locked ? 'disabled' : ''}>${price === null ? 'Maksymalny poziom' : locked ? `Poziom 3 · od ${GARAGE_ELITE_REPUTATION} REP` : `Ulepsz · ${money(price)}`}</button></div></section>`;
-    }).join('')}</div></section></div>
+    }).join('')}</div>
+    <section class="garage-parts" aria-labelledby="garage-parts-heading"><div class="garage-parts-title"><h3 id="garage-parts-heading">Wygląd i części</h3><span>Mechanik montuje od razu — zobaczysz zmianę na aucie.</span></div>
+    ${VEHICLE_PART_IDS.filter(part => part !== 'rimColor').map(part => {
+      const definition = VEHICLE_PARTS[part], current = style[part];
+      return `<div class="garage-part"><div class="garage-part-name"><strong>${definition.name}</strong><small>${definition.description}</small></div><div class="garage-part-options" role="group" aria-label="${definition.name}">${definition.options.map((option, index) => `<button id="garage-part-${part}-${index}" class="garage-chip ${current === index ? 'garage-chip--selected' : ''}" aria-pressed="${current === index}" ${this.pending || current === index || wallet < option.price ? 'disabled' : ''}>${option.name}<small>${current === index ? 'zamontowane' : option.price ? money(option.price) : 'seryjne'}</small></button>`).join('')}</div></div>`;
+    }).join('')}
+    <div class="garage-part"><div class="garage-part-name"><strong>${VEHICLE_PARTS.rimColor.name}</strong><small>${VEHICLE_PARTS.rimColor.description}</small></div><div class="garage-swatches">${RIM_COLORS.map((item, index) => `<button id="garage-part-rimColor-${index}" class="garage-swatch ${style.rimColor === index ? 'garage-swatch--selected' : ''}" style="--paint:${hex(item.color)}" aria-label="Felgi ${item.name}${index ? ` za $${VEHICLE_PARTS.rimColor.options[index].price}` : ''}" aria-pressed="${style.rimColor === index}" title="${item.name}" ${this.pending || style.rimColor === index || wallet < VEHICLE_PARTS.rimColor.options[index].price ? 'disabled' : ''}><span>${style.rimColor === index ? '✓' : ''}</span></button>`).join('')}</div></div>
+    </section>
+    ${engine ? `<section class="garage-engine" aria-labelledby="garage-engine-heading"><h3 id="garage-engine-heading">Silnik</h3><p id="garage-engine-state">Olej ${engine.oil.toLocaleString('pl-PL', { maximumFractionDigits: 1 })} / ${OIL_CAPACITY.toLocaleString('pl-PL')} L · jakość ${Math.round(engine.life * 100)}% · zużycie ${Math.round(engine.wear * 100)}% · przebieg ${Math.round(engine.km).toLocaleString('pl-PL')} km</p><p class="garage-engine-tip">Wymianę oleju robisz sam: zamknij panel, wysiądź przy aucie i naciśnij <kbd>O</kbd>. Otworzysz maskę w widoku pierwszej osoby.</p>${engine.wear > .02 ? `<button id="garage-engine-rebuild" class="garage-button" ${this.pending || wallet < ENGINE_REBUILD_PRICE ? 'disabled' : ''}>Remont silnika · ${money(ENGINE_REBUILD_PRICE)}</button>` : ''}</section>` : ''}
+    </section></div>
     <footer class="garage-footer"><p id="garage-message" role="status" aria-live="polite">${safe(this.pending ? 'Warsztat potwierdza zlecenie…' : this.message || 'Kupno i tuning nie naprawiają uszkodzeń samochodu.')}</p><span>ESC · WRÓĆ</span></footer></section>`;
     this.query('#garage-close')?.addEventListener('click', () => this.close());
     for (const car of Object.values(GARAGE_CARS)) {
@@ -111,6 +125,8 @@ export class GarageUI {
     }
     for (const item of GARAGE_PAINTS) this.query(`#garage-paint-${item.color.toString(16)}`)?.addEventListener('click', () => this.request({ type: 'paint', color: item.color }));
     for (const upgrade of ['engine', 'brakes', 'nitro'] as const) this.query(`#garage-upgrade-${upgrade}`)?.addEventListener('click', () => this.request({ type: 'upgrade', upgrade }));
+    for (const part of VEHICLE_PART_IDS) VEHICLE_PARTS[part].options.forEach((_, value) => this.query(`#garage-part-${part}-${value}`)?.addEventListener('click', () => this.request({ type: 'part', part, value })));
+    this.query('#garage-engine-rebuild')?.addEventListener('click', () => this.callbacks.onEngineRebuild?.());
     const focus = focusId ? this.query<HTMLButtonElement>(`#${CSS.escape(focusId)}`) : null;
     if (focus && !focus.disabled) focus.focus({ preventScroll: true });
     else if (!this.root.contains(document.activeElement)) this.query('#garage-close')?.focus({ preventScroll: true });

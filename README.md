@@ -11,9 +11,12 @@ Oryginalny, niewielki sandbox 3D w przeglądarce, inspirowany miejskimi grami ak
 - Dokładniejsze elewacje, witryny, dachy, tekstury asfaltu i chodników, nawierzchnie ciemniejące od deszczu, zaokrąglone nadwozia i sylwetki postaci oraz woda z odbiciem nieba i pianą przy brzegu.
 - Ustawienia grafiki dostępne z menu i pauzy: Automatyczna, Niska, Średnia i Wysoka, z oddzielnymi limitami dla programowego WebGL.
 - Płynniejszy ruch nadwozia i zawieszenia, obrót kół, światła hamowania i reflektory rozświetlające ulicę po zmroku.
-- Dokładniejsze wspólne modele aut graczy, NPC i policji: profilowane szyby, nadkola, felgi, grille, detale drzwi i oznaczenia radiowozów. Odległe auta zachowują uproszczone modele.
+- Realistyczniejsze modele aut graczy, NPC i policji: nadwozie budowane z gładkich przekrojów z wyciętymi nadkolami, przeszklona kabina z widocznym wnętrzem (deska, kierownica, fotele), światła dopasowane do krzywizny karoserii, opony z bieżnikiem, felgi z tarczami hamulcowymi, lusterka, klamki, tablice i końcówki wydechu. Odległe auta zachowują uproszczone modele.
+- Tuning wyglądu w MOD SHOP: spojler (lotka, skrzydło, GT), cztery wzory i sześć kolorów felg, pakiety nadwozia (sport, szeroki), maska z wlotem lub karbonowa, wydech pojedynczy/podwójny/poczwórny, obniżone zawieszenie, przyciemniane szyby, wykończenie lakieru (połysk, metalik, mat) i 14 lakierów. Części widzą też inni gracze online.
+- Działający silnik twojego auta: obroty, sześciobiegowa automatyczna skrzynia, temperatura, dźwięk zależny od obrotów, kontrolki OLEJ i SILNIK. Olej zużywa się z przebiegiem; zużyty lub brakujący olej odbiera moc, a jazda bez oleju niszczy silnik.
+- Wymiana oleju własnoręcznie w widoku pierwszej osoby: maska, bagnet, korek wlewu, korek spustowy pod autem, filtr i kanister ze świeżym olejem.
 - Ruch prawostronny na pasach dopasowanych do szerokości ulic, zaokrąglone zakręty, zatrzymywanie przed światłami i kolejkami; patrole korzystają z tych samych zasad.
-- Dokładniejsze twarze, dłonie, ubrania i obuwie postaci; gracz ma animowane kolana i łokcie, a przechodnie zachowują wydajne wspólne instancje geometrii.
+- Postać gracza o ludzkiej anatomii: tułów z klatką piersiową, talią i barkami, szyja, ramiona z krótkimi rękawami, przedramiona, dłonie z palcami, uda i łydki, buty sportowe; głowa z linią żuchwy, uszami, nosem, powiekami, tęczówkami i ustami. Animowane kolana i łokcie; przechodnie korzystają z tego samego kształtu głowy w wydajnych instancjach.
 - Widok pierwszoosobowy z dłońmi i ruchem ramion podczas chodzenia oraz kokpitem, zegarem prędkości i skręcającą kierownicą podczas jazdy. Rozglądanie myszką zachowuje położenie kokpitu względem auta.
 - Auto sportowe i sedany, zaparkowane pojazdy i ruch uliczny; można wysiadać, chodzić, sprintować i przejmować auta.
 - Gaz, hamulec, jazda wstecz, ręczny, nitro i kolizje z zabudową oraz pojazdami.
@@ -61,6 +64,10 @@ To mały samodzielny prototyp, a nie projekt o skali pełnej produkcji AAA. Nie 
 | Y | dziennik kampanii, decyzje i kolejny rozdział |
 | F | online: wsiadanie jako pasażer lub wysiadanie po zatrzymaniu |
 | R | powrót na drogę i naprawa za opłatą |
+| O | w MOD SHOP, pieszo przy własnym aucie: serwis silnika (ponownie O — zakończ) |
+| E / klik | w serwisie: użyj części wskazanej celownikiem |
+| X | w serwisie: kucnij / wstań (korek spustowy jest pod autem) |
+| Q | w serwisie: uruchom / zgaś silnik |
 | P / Esc | pauza i zwolnienie kursora |
 | H / ? | pomoc |
 
@@ -77,6 +84,25 @@ Zatrzymaj samochód w środku i naciśnij **G**, aby otworzyć tuning. **E** poz
 Dostępne są **Stratus XS** (auto początkowe), **Sentinel GT za $900** i **Comet RS za $2000**. Comet zawiera pierwszy poziom silnika i nitro. Kupienie auta wybiera je do jazdy; posiadane modele można później przełączać bez kolejnego zakupu. Lakier kosztuje **$80**. Po dwóch podstawowych poziomach silnika, hamulców i nitro, przy **200 REP** odblokowuje się trzeci: odpowiednio **$1000 / $750 / $900**. Tuning zmienia osiągi samochodu.
 
 Garaż solo zapisuje się razem z lokalnym profilem. W pokoju online masz osobny garaż i portfel sesji; zakupy, tuning oraz nagrody online nie zmieniają garażu ani gotówki solo. Po opuszczeniu pokoju wraca własny profil. Garaż online nie jest przenoszony do kolejnego pokoju.
+
+### Wygląd i części
+
+Pod ulepszeniami panelu tuningu jest sekcja **Wygląd i części**. Każda opcja pokazuje cenę; wybór seryjnej części jest bezpłatny. Zamontowane części od razu zmieniają model auta w warsztacie. Obniżone zawieszenie poprawia skręcanie. W pokoju online części kupuje się z portfela pokoju, a pozostali gracze widzą twoje auto z tymi częściami.
+
+### Silnik i wymiana oleju
+
+Twoje auto ma symulowany silnik: obroty i bieg na liczniku pochodzą z sześciobiegowej skrzyni automatycznej, a dźwięk podąża za obrotami. Olej starzeje się z przebiegiem (szybciej na wysokich obrotach i ze starym filtrem) i powoli ubywa. Kontrolka **OLEJ** świeci na żółto przy niskim poziomie lub zużytym oleju i miga na czerwono, gdy oleju brakuje. Zużyty olej obniża moc; jazda prawie bez oleju przegrzewa i uszkadza silnik. Nawet uszkodzony silnik zachowuje część mocy, aby dojechać do warsztatu; w panelu tuningu jest **remont silnika za $350**. Na starcie olej jest już do wymiany.
+
+Aby wymienić olej: wjedź do MOD SHOP, wysiądź, stań przy aucie i naciśnij **O**. Postać staje przed maską w widoku pierwszej osoby. Kliknij obraz, aby celować myszą (lub przeciągaj z prawym przyciskiem), i naciskaj **E** albo klikaj, gdy celownik podświetli część. Panel po lewej prowadzi przez kroki:
+
+1. otwórz maskę i wyciągnij bagnet (poziom i kolor oleju),
+2. odkręć korek wlewu — olej spłynie szybciej,
+3. kucnij (**X**) i odkręć korek spustowy pod przednim zderzakiem; stary olej spływa do miski,
+4. wykręć stary filtr i załóż nowy (**$18**), wkręć korek spustowy,
+5. weź kanister i wlej świeży olej do **4,5 L** (**$9 za litr**); nadmiar można spuścić korkiem spustowym,
+6. zakręć korek, sprawdź bagnet i zamknij maskę, potem **O**.
+
+Klawisz **Q** uruchamia silnik przy otwartej masce: kręci się pasek osprzętu i wentylator, a blok drga na wolnych obrotach. Uruchomienie bez oleju lub bez filtra szkodzi silnikowi. Serwisu nie da się zakończyć z odkręconym korkiem spustowym ani bez filtra. Stan silnika każdego auta zapisuje się lokalnie.
 
 ## Żyjące miasto
 

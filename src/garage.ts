@@ -1,8 +1,9 @@
 import type { GameState, Point, VehicleKind } from './model';
+import { VEHICLE_PARTS, createVehicleStyle, isVehiclePart, parseVehicleStyle, validPartOption, type VehiclePart, type VehicleStyle } from './vehicle-style';
 
 export type GarageCarId = 'stratus' | 'sentinel' | 'comet';
 export type GarageUpgrade = 'engine' | 'brakes' | 'nitro';
-export interface GarageCarSettings { paint: number; engine: number; brakes: number; nitro: number }
+export interface GarageCarSettings { paint: number; engine: number; brakes: number; nitro: number; style: VehicleStyle }
 export interface GarageState {
   owned: GarageCarId[];
   selected: GarageCarId;
@@ -11,7 +12,8 @@ export interface GarageState {
 export type GarageAction =
   | { type: 'buy' | 'select'; car: GarageCarId }
   | { type: 'paint'; color: number }
-  | { type: 'upgrade'; upgrade: GarageUpgrade };
+  | { type: 'upgrade'; upgrade: GarageUpgrade }
+  | { type: 'part'; part: VehiclePart; value: number };
 export type GarageResult = { ok: true; garage: GarageState; wallet: number; message: string } | { ok: false; reason: string };
 export interface GarageCarDefinition { id: GarageCarId; name: string; kind: VehicleKind; price: number; paint: number; description: string }
 
@@ -25,6 +27,10 @@ export const GARAGE_PAINTS = [
   { color: 0xded8cb, name: 'Perłowy' }, { color: 0x387e9a, name: 'Oceaniczny' },
   { color: 0xe88a67, name: 'Koralowy' }, { color: 0x8d7cba, name: 'Ametystowy' },
   { color: 0x63a9a2, name: 'Miętowy' }, { color: 0x263341, name: 'Grafitowy' },
+  { color: 0xa5161f, name: 'Wyścigowa czerwień' }, { color: 0x0e1114, name: 'Głęboka czerń' },
+  { color: 0xf1f1ec, name: 'Alpejska biel' }, { color: 0xe8b320, name: 'Słoneczny żółty' },
+  { color: 0x1d4f9c, name: 'Królewski niebieski' }, { color: 0x2f5a3c, name: 'Brytyjska zieleń' },
+  { color: 0x8a8f93, name: 'Srebrny' }, { color: 0xd8662a, name: 'Pomarańczowy' },
 ] as const;
 export const GARAGE_PAINT_PRICE = 80;
 export const GARAGE_MAX_LEVEL = 3;
@@ -38,7 +44,7 @@ const isRecord = (value: unknown): value is Record<string, unknown> => Boolean(v
 const isCar = (value: unknown): value is GarageCarId => typeof value === 'string' && carIds.includes(value as GarageCarId);
 const isUpgrade = (value: unknown): value is GarageUpgrade => value === 'engine' || value === 'brakes' || value === 'nitro';
 const level = (value: unknown) => Number.isInteger(value) && Number(value) >= 0 && Number(value) <= GARAGE_MAX_LEVEL ? Number(value) : 0;
-const defaults = (id: GarageCarId): GarageCarSettings => ({ paint: GARAGE_CARS[id].paint, engine: id === 'comet' ? 1 : 0, brakes: 0, nitro: id === 'comet' ? 1 : 0 });
+const defaults = (id: GarageCarId): GarageCarSettings => ({ paint: GARAGE_CARS[id].paint, engine: id === 'comet' ? 1 : 0, brakes: 0, nitro: id === 'comet' ? 1 : 0, style: { ...createVehicleStyle(), ...(id === 'comet' ? { spoiler: 1, rims: 2 } : {}) } });
 const paint = (value: unknown, fallback: number) => GARAGE_PAINTS.some(item => item.color === value) ? Number(value) : fallback;
 
 export function createGarage(): GarageState { return { owned: ['stratus'], selected: 'stratus', cars: { stratus: defaults('stratus') } }; }
@@ -51,7 +57,7 @@ export function parseGarage(value: unknown): GarageState {
   for (const id of result.owned) {
     const stored = isRecord(value.cars) ? value.cars[id] : undefined;
     const settings = defaults(id);
-    if (isRecord(stored)) Object.assign(settings, { paint: paint(stored.paint, settings.paint), engine: level(stored.engine), brakes: level(stored.brakes), nitro: level(stored.nitro) });
+    if (isRecord(stored)) Object.assign(settings, { paint: paint(stored.paint, settings.paint), engine: level(stored.engine), brakes: level(stored.brakes), nitro: level(stored.nitro), style: isRecord(stored.style) ? parseVehicleStyle(stored.style) : settings.style });
     result.cars[id] = settings;
   }
   if (isCar(value.selected) && result.owned.includes(value.selected)) result.selected = value.selected;
@@ -99,6 +105,15 @@ export function garageAction(original: GarageState, wallet: number, action: Gara
     if (wallet < cost) return fail(`Potrzebujesz $${cost} na to ulepszenie.`);
     settings[action.upgrade]++;
     message = `${GARAGE_UPGRADE_NAMES[action.upgrade]}: poziom ${settings[action.upgrade]}/${GARAGE_MAX_LEVEL}.`;
+  } else if (action.type === 'part') {
+    if (!isVehiclePart(action.part)) return fail('Nieznana część tuningu.');
+    if (!validPartOption(action.part, action.value)) return fail('Ta część nie pasuje do samochodu.');
+    const settings = garage.cars[garage.selected]!, definition = VEHICLE_PARTS[action.part], option = definition.options[action.value];
+    if (settings.style[action.part] === action.value) return fail(`${definition.name}: ${option.name.toLowerCase()} — już zamontowane.`);
+    cost = option.price;
+    if (wallet < cost) return fail(`Potrzebujesz $${cost} na: ${definition.name.toLowerCase()} — ${option.name.toLowerCase()}.`);
+    settings.style = { ...settings.style, [action.part]: action.value };
+    message = `${definition.name}: ${option.name}. Mechanik zamontował część.`;
   } else return fail('Nieznane zlecenie garażu.');
   return { ok: true, garage, wallet: wallet - cost, message };
 }
@@ -106,7 +121,7 @@ export function garageAction(original: GarageState, wallet: number, action: Gara
 /** Car configuration never repairs, moves or respawns the current vehicle. */
 export function garageVehicle(garage: GarageState) {
   const profile = parseGarage(garage), model = GARAGE_CARS[profile.selected], settings = profile.cars[profile.selected]!;
-  return { kind: model.kind, color: settings.paint, label: model.name, tuning: { engine: settings.engine, brakes: settings.brakes, nitro: settings.nitro } };
+  return { kind: model.kind, color: settings.paint, label: model.name, tuning: { engine: settings.engine, brakes: settings.brakes, nitro: settings.nitro }, style: { ...settings.style } };
 }
 export function applyGarage(state: GameState, garage: GarageState): void {
   const vehicle = state.vehicles.find(car => car.id === 'stratus');

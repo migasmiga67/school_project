@@ -20,7 +20,7 @@ describe('vehicle presentation motion',()=>{
  it('rolls tyres by signed travelled distance independently of rendering frame rate',()=>{
   for(const speed of [12,-6]){
    const slow=drive(30,2,()=>({...input,speed})),fast=drive(120,2,()=>({...input,speed}));
-   expect(slow.wheelRotation).toBeCloseTo(speed*2/.42,8);expect(fast.wheelRotation).toBeCloseTo(slow.wheelRotation,8);
+   expect(slow.wheelRotation).toBeCloseTo(speed*2/.37,8);expect(fast.wheelRotation).toBeCloseTo(slow.wheelRotation,8);
   }
  });
  it('keeps steering response stable across frame rates and returns smoothly to centre',()=>{

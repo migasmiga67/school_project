@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { activeVehicle, createGame, step } from '../src/game';
 import { applyGarage, createGarage, GARAGE_CARS, GARAGE_PAINTS, GARAGE_ELITE_REPUTATION, garageAction, garageVehicle, parseGarage, type GarageAction, type GarageState, type GarageUpgrade } from '../src/garage';
 import type { Input } from '../src/model';
+import { createVehicleStyle } from '../src/vehicle-style';
 
 function transaction(garage: GarageState, wallet: number, action: GarageAction) {
   const result = garageAction(garage, wallet, action);
@@ -29,8 +30,8 @@ describe('atomic garage transactions and saved profiles', () => {
   it('rejects unknown saved models, inaccessible selections and invalid tuning values', () => {
     const parsed = parseGarage({ owned: ['stratus', 'stratus', 'unknown', 'sentinel'], selected: 'comet', cars: { stratus: { paint: -1, engine: 100, brakes: -.5, nitro: Infinity }, sentinel: { paint: GARAGE_PAINTS[4].color, engine: 1, brakes: 2, nitro: 0 }, comet: { engine: 2 } } });
     expect(parsed.owned).toEqual(['stratus', 'sentinel']); expect(parsed.selected).toBe('stratus');
-    expect(parsed.cars.stratus).toEqual({ paint: GARAGE_CARS.stratus.paint, engine: 0, brakes: 0, nitro: 0 });
-    expect(parsed.cars.sentinel).toEqual({ paint: GARAGE_PAINTS[4].color, engine: 1, brakes: 2, nitro: 0 });
+    expect(parsed.cars.stratus).toEqual({ paint: GARAGE_CARS.stratus.paint, engine: 0, brakes: 0, nitro: 0, style: createVehicleStyle() });
+    expect(parsed.cars.sentinel).toEqual({ paint: GARAGE_PAINTS[4].color, engine: 1, brakes: 2, nitro: 0, style: createVehicleStyle() });
     expect(parsed.cars.comet).toBeUndefined();
   });
   it('round-trips valid per-car ownership, selections and upgrades through JSON', () => {
@@ -117,7 +118,7 @@ describe('atomic garage transactions and saved profiles', () => {
     expect(garage.cars.stratus!.engine).toBe(2);
   });
   it('round-trips acquired elite tuning while rejecting levels beyond three', () => {
-    const garage=createGarage();garage.cars.stratus={paint:GARAGE_PAINTS[0].color,engine:3,brakes:3,nitro:3};
+    const garage=createGarage();garage.cars.stratus={paint:GARAGE_PAINTS[0].color,engine:3,brakes:3,nitro:3,style:createVehicleStyle()};
     expect(parseGarage(JSON.parse(JSON.stringify(garage)))).toEqual(garage);
     const malformed=structuredClone(garage);malformed.cars.stratus!.engine=4;
     expect(parseGarage(malformed).cars.stratus).toMatchObject({engine:0,brakes:3,nitro:3});
@@ -150,7 +151,7 @@ describe('purchased tuning changes driving physics', () => {
   });
   it('uses nitro and engine upgrades while keeping boosted speed within 45', () => {
     const stock = driveState(), tuned = driveState();
-    const garage = createGarage(); garage.cars.stratus = { paint: GARAGE_PAINTS[0].color, engine: 2, brakes: 0, nitro: 2 }; applyGarage(tuned, garage);
+    const garage = createGarage(); garage.cars.stratus = { paint: GARAGE_PAINTS[0].color, engine: 2, brakes: 0, nitro: 2, style: createVehicleStyle() }; applyGarage(tuned, garage);
     activeVehicle(stock)!.speed = 44; activeVehicle(tuned)!.speed = 44;
     advance(stock, .1, { throttle: true, boost: true }); advance(tuned, .1, { throttle: true, boost: true });
     expect(activeVehicle(stock)!.speed).toBe(35); expect(activeVehicle(tuned)!.speed).toBe(45);
