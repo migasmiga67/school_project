@@ -70,6 +70,7 @@ To mały samodzielny prototyp, a nie projekt o skali pełnej produkcji AAA. Nie 
 | X | w serwisie: kucnij / wstań (korek spustowy jest pod autem) |
 | Q | w serwisie: uruchom / zgaś silnik |
 | N | trasa GPS do najbliższej stacji paliw |
+| I | plecak: przedmioty, użycie i wyrzucanie |
 | E | pieszo przy dystrybutorze: tankowanie; przy drzwiach sklepu: kasa |
 | P / Esc | pauza i zwolnienie kursora |
 | H / ? | pomoc |
@@ -111,13 +112,17 @@ Klawisz **Q** uruchamia silnik przy otwartej masce: kręci się pasek osprzętu 
 
 Bak twojego auta mieści **50 L**; na starcie jest w nim około 14 L. Paliwo ubywa podczas jazdy (więcej przy wysokich obrotach) i trochę na wolnych obrotach. Wskaźnik **⛽** przy liczniku świeci na żółto przy rezerwie (poniżej 7 L). Z pustym bakiem silnik gaśnie; **R** wzywa pomoc drogową, która dowozi 6 L za $25. **N** wyznacza trasę do najbliższej stacji, a stacje są zaznaczone na minimapie zielonym kwadratem.
 
+### Ekwipunek i sklep
+
+**I** otwiera plecak: 12 miejsc i limit 20 kg. Przedmioty kupisz w sklepie 24h na każdej stacji PetroCoast (**E** przy drzwiach — tam też płacisz za paliwo): kanister 5 L ($14), olej 1 L ($11), zestaw naprawczy (+35% stanu auta, $45), apteczkę (+60 zdrowia, $30), hot-doga (+25, $6), kawę (+10 zdrowia i szybszy sprint przez minutę, $4), wodę (+12, $2) i latarkę ($18), która nocą świeci pieszo przed tobą. Kanister, olej i zestaw naprawczy używasz pieszo przy własnym aucie. Plecak zapisuje się z profilem solo.
+
 Tankowanie: zatrzymaj auto przy dystrybutorze tak, by **klapka wlewu (prawy tył)** była przy wysepce. Wysiądź, podejdź do dystrybutora i naciśnij **E**. W widoku pierwszej osoby celuj myszą i naciskaj **E** albo klikaj:
 
 1. otwórz klapkę wlewu,
 2. wybierz paliwo na dystrybutorze: **95** ($1,79/L), **98** ($1,99/L, odrobinę więcej mocy) albo **ON** ($1,69/L),
 3. zdejmij pistolet, włóż go do wlewu — tankowanie trwa, a pistolet odbija przy pełnym baku,
 4. wyjmij i odwieś pistolet, zamknij klapkę, odejdź (**O**),
-5. zapłać przy kasie: **E** przy drzwiach sklepu. Przy kasie bez rachunku kupisz hot-doga i kawę (+25 zdrowia, $6).
+5. zapłać przy kasie: **E** przy drzwiach sklepu otwiera sklep z przyciskiem zapłaty.
 
 Twoje auto ma silnik benzynowy: olej napędowy (ON) odbiera moc i powoli niszczy silnik. Odjazd ze stacji bez płacenia sprawia, że kasjer wzywa policję.
 

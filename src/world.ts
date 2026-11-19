@@ -124,6 +124,8 @@ export class CityView {
   private fuelPose:(FuelViewPose&{flapOpen:boolean;hoseTarget:THREE.Vector3|null})|null=null;
   private enginePose:EngineBayPose|null=null;
   private crouchTarget=0;
+  private readonly flashlight:THREE.SpotLight;
+  private flashlightOn=false;
   private crouch=0;
 
   constructor(parent: HTMLElement,quality:GraphicsQuality='auto') {
@@ -175,6 +177,8 @@ export class CityView {
     this.batchStaticGeometry();
     this.garageBuilding=new GarageBuildingView(this.softwareRendering,this.surfaces);this.scene.add(this.garageBuilding.group);this.occluders.push(...this.garageBuilding.occluders);
     this.fuelStations=new FuelStationsView(this.softwareRendering,this.surfaces);this.scene.add(this.fuelStations.group);
+    // Always present at zero intensity, so switching it never recompiles shaders.
+    this.flashlight=new THREE.SpotLight(0xfff1d6,0,26,.42,.55,1.4);this.flashlight.castShadow=false;this.scene.add(this.flashlight,this.flashlight.target);
     this.entrances=new BuildingEntrancesView(this.softwareRendering);this.scene.add(this.entrances.group);
     this.avatar();
     for(const child of this.hero.children)child.visible=false;
@@ -546,7 +550,9 @@ export class CityView {
     });
     if(this.fuelPose&&this.fuelPose.nozzle==='hand'){const hand=new THREE.Vector3(.22,-.32,-.55).applyQuaternion(this.camera.quaternion).add(this.camera.position);this.fuelPose.hoseTarget=hand;}
     else if(this.fuelPose&&this.fuelPose.nozzle==='car'){const flap=this.cars.get('stratus')?.flap?.target;this.fuelPose.hoseTarget=flap?flap.getWorldPosition(new THREE.Vector3()).add(new THREE.Vector3(0,-.4,0)):null;}
-    this.fuelStations.update(inside?null:this.fuelPose);this.firstPerson.setHolding(this.fuelPose?.nozzle==='hand');
+    this.fuelStations.update(inside?null:this.fuelPose);
+    {const night=1-environment.daylight,on=this.flashlightOn&&night>.45&&!inside;this.flashlight.intensity+=((on?14*night:0)-this.flashlight.intensity)*Math.min(1,dt*8);
+     const direction=new THREE.Vector3();this.camera.getWorldDirection(direction);this.flashlight.position.copy(this.camera.position).addScaledVector(direction,.3).add(new THREE.Vector3(0,-.25,0));this.flashlight.target.position.copy(this.camera.position).addScaledVector(direction,10);}this.firstPerson.setHolding(this.fuelPose?.nozzle==='hand');
     this.atmosphere.update(environment,this.camera.position,citySeconds);this.renderer.render(this.scene, this.camera);this.firstPerson.render(this.renderer);this.renderFrames++;
   }
   private updateHome(state:GameState,dt:number,cameraMode:number,pose?:CameraPose){
@@ -596,6 +602,7 @@ export class CityView {
     const centre=box.getCenter(new THREE.Vector3()),delta=centre.sub(this.camera.position);
     return{yaw:Math.atan2(delta.x,-delta.z),pitch:Math.atan2(-delta.y,Math.hypot(delta.x,delta.z))};
   }
+  setFlashlight(on:boolean){this.flashlightOn=on;}
   setFuelSession(pose:Omit<FuelViewPose,'hoseTarget'>&{flapOpen:boolean}|null){this.fuelPose=pose?{...pose,hoseTarget:this.fuelPose?.hoseTarget??null}:null;}
   /** Pump button, nozzle or the car's filler flap under the crosshair. */
   pickFuelPart():FuelPart|null{

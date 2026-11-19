@@ -17,7 +17,8 @@ export class OrbitCamera implements CameraPose {
   rotate(dx:number,dy:number) {
     if(!Number.isFinite(dx)||!Number.isFinite(dy))return;
     this.yaw=wrap(this.yaw+clamp(dx,-500,500)*0.003);
-    const [min,max]=this.mode===2?[-1.1,1.1]:this.mode===1?[0.5,1.35]:[0.08,1.2];
+    // First person can look almost straight down, e.g. at a fuel flap or pedals.
+    const [min,max]=this.mode===2?[-1.1,1.4]:this.mode===1?[0.5,1.35]:[0.08,1.2];
     this.pitch=clamp(this.pitch+clamp(dy,-500,500)*0.0025,min,max);
     this.lastMouse=this.time;
   }

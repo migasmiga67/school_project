@@ -230,7 +230,7 @@ function walk(s: GameState, input: Input, dt: number) {
   const z = -Math.cos(viewHeading) * forward + Math.sin(viewHeading) * right;
   const norm = Math.hypot(x, z);
   if (norm) {
-    const speed = input.sprint ? 6 : 3.2;
+    const speed = input.sprint ? ((s.player.caffeine ?? 0) > 0 ? 7 : 6) : 3.2;
     s.player.heading = Math.atan2(x, -z);
     if (s.interior === 'casino') moveIndoor(s.player, x / norm * speed * dt, z / norm * speed * dt, .55);
     else {
