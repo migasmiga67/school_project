@@ -17,6 +17,7 @@ Oryginalny, niewielki sandbox 3D w przeglądarce, inspirowany miejskimi grami ak
 - Wymiana oleju własnoręcznie w widoku pierwszej osoby: maska, bagnet, korek wlewu, korek spustowy pod autem, filtr i kanister ze świeżym olejem.
 - Pięć stacji paliw PetroCoast (Downtown, Westwood, North Financial, Port Nelson, South Bay) z wiatą, dystrybutorami, sklepem i pylonem z cenami. Auto spala paliwo; tankujesz sam w pierwszej osobie i płacisz przy kasie.
 - Ruch prawostronny na pasach dopasowanych do szerokości ulic, zaokrąglone zakręty, zatrzymywanie przed światłami i kolejkami; patrole korzystają z tych samych zasad.
+- Budynki mają okna na wszystkich ścianach i na parterze (także cokoły wieżowców i warsztat MOD SHOP), a przy grafice sprzętowej parapety, nadproża, szprosy, gzymsy między piętrami i balkony w dzielnicach mieszkalnych.
 - Postać gracza o ludzkiej anatomii: tułów z klatką piersiową, talią i barkami, szyja, ramiona z krótkimi rękawami, przedramiona, dłonie z palcami, uda i łydki, buty sportowe; głowa z linią żuchwy, uszami, nosem, powiekami, tęczówkami i ustami. Animowane kolana i łokcie; przechodnie korzystają z tego samego kształtu głowy w wydajnych instancjach.
 - Widok pierwszoosobowy z dłońmi i ruchem ramion podczas chodzenia oraz kokpitem, zegarem prędkości i skręcającą kierownicą podczas jazdy. Rozglądanie myszką zachowuje położenie kokpitu względem auta.
 - Auto sportowe i sedany, zaparkowane pojazdy i ruch uliczny; można wysiadać, chodzić, sprintować i przejmować auta.

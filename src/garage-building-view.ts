@@ -63,6 +63,11 @@ export class GarageBuildingView {
       for(let offset=0;offset<2;offset++)this.art.instance('plane',surfaces.windowGlass,b.x+side*(6.7+offset*2.5),y,b.frontZ+.025,1.5,1.9,1);
       this.art.instance('box',trim,b.x+side*8.2,y-1.1,b.frontZ+.045,7.1,.16,.2);
     }
+    // Office floors above the workshop also have windows on the side and rear walls.
+    for(let y=8.8;y<height-1;y+=3.6){
+      for(let z=b.z-b.halfZ+2;z<b.frontZ-1;z+=3.2)for(const side of[-1,1])this.art.instance('plane',surfaces.windowGlass,b.x+side*(b.halfX+.03),y,z,1.4,1.9,1,side*Math.PI/2);
+      for(let x=b.x-b.halfX+2.2;x<b.x+b.halfX-1;x+=3.2)this.art.instance('plane',surfaces.windowGlass,x,y,b.z-b.halfZ-.03,1.4,1.9,1,Math.PI);
+    }
     for(let y=8.8;y<height-1;y+=3.6)for(const x of[-2.8,0,2.8]){
       const window=new THREE.Mesh(new THREE.PlaneGeometry(1.5,1.9),surfaces.windowGlass);window.position.set(b.x+x,y,b.frontZ+.03);this.upper.add(window);
     }
