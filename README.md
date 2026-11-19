@@ -15,6 +15,7 @@ Oryginalny, niewielki sandbox 3D w przeglądarce, inspirowany miejskimi grami ak
 - Tuning wyglądu w MOD SHOP: spojler (lotka, skrzydło, GT), cztery wzory i sześć kolorów felg, pakiety nadwozia (sport, szeroki), maska z wlotem lub karbonowa, wydech pojedynczy/podwójny/poczwórny, obniżone zawieszenie, przyciemniane szyby, wykończenie lakieru (połysk, metalik, mat) i 14 lakierów. Części widzą też inni gracze online.
 - Działający silnik twojego auta: obroty, sześciobiegowa automatyczna skrzynia, temperatura, dźwięk zależny od obrotów, kontrolki OLEJ i SILNIK. Olej zużywa się z przebiegiem; zużyty lub brakujący olej odbiera moc, a jazda bez oleju niszczy silnik.
 - Wymiana oleju własnoręcznie w widoku pierwszej osoby: maska, bagnet, korek wlewu, korek spustowy pod autem, filtr i kanister ze świeżym olejem.
+- Pięć stacji paliw PetroCoast (Downtown, Westwood, North Financial, Port Nelson, South Bay) z wiatą, dystrybutorami, sklepem i pylonem z cenami. Auto spala paliwo; tankujesz sam w pierwszej osobie i płacisz przy kasie.
 - Ruch prawostronny na pasach dopasowanych do szerokości ulic, zaokrąglone zakręty, zatrzymywanie przed światłami i kolejkami; patrole korzystają z tych samych zasad.
 - Postać gracza o ludzkiej anatomii: tułów z klatką piersiową, talią i barkami, szyja, ramiona z krótkimi rękawami, przedramiona, dłonie z palcami, uda i łydki, buty sportowe; głowa z linią żuchwy, uszami, nosem, powiekami, tęczówkami i ustami. Animowane kolana i łokcie; przechodnie korzystają z tego samego kształtu głowy w wydajnych instancjach.
 - Widok pierwszoosobowy z dłońmi i ruchem ramion podczas chodzenia oraz kokpitem, zegarem prędkości i skręcającą kierownicą podczas jazdy. Rozglądanie myszką zachowuje położenie kokpitu względem auta.
@@ -68,6 +69,8 @@ To mały samodzielny prototyp, a nie projekt o skali pełnej produkcji AAA. Nie 
 | E / klik | w serwisie: użyj części wskazanej celownikiem |
 | X | w serwisie: kucnij / wstań (korek spustowy jest pod autem) |
 | Q | w serwisie: uruchom / zgaś silnik |
+| N | trasa GPS do najbliższej stacji paliw |
+| E | pieszo przy dystrybutorze: tankowanie; przy drzwiach sklepu: kasa |
 | P / Esc | pauza i zwolnienie kursora |
 | H / ? | pomoc |
 
@@ -103,6 +106,20 @@ Aby wymienić olej: wjedź do MOD SHOP, wysiądź, stań przy aucie i naciśnij 
 6. zakręć korek, sprawdź bagnet i zamknij maskę, potem **O**.
 
 Klawisz **Q** uruchamia silnik przy otwartej masce: kręci się pasek osprzętu i wentylator, a blok drga na wolnych obrotach. Uruchomienie bez oleju lub bez filtra szkodzi silnikowi. Serwisu nie da się zakończyć z odkręconym korkiem spustowym ani bez filtra. Stan silnika każdego auta zapisuje się lokalnie.
+
+### Paliwo i stacje PetroCoast
+
+Bak twojego auta mieści **50 L**; na starcie jest w nim około 14 L. Paliwo ubywa podczas jazdy (więcej przy wysokich obrotach) i trochę na wolnych obrotach. Wskaźnik **⛽** przy liczniku świeci na żółto przy rezerwie (poniżej 7 L). Z pustym bakiem silnik gaśnie; **R** wzywa pomoc drogową, która dowozi 6 L za $25. **N** wyznacza trasę do najbliższej stacji, a stacje są zaznaczone na minimapie zielonym kwadratem.
+
+Tankowanie: zatrzymaj auto przy dystrybutorze tak, by **klapka wlewu (prawy tył)** była przy wysepce. Wysiądź, podejdź do dystrybutora i naciśnij **E**. W widoku pierwszej osoby celuj myszą i naciskaj **E** albo klikaj:
+
+1. otwórz klapkę wlewu,
+2. wybierz paliwo na dystrybutorze: **95** ($1,79/L), **98** ($1,99/L, odrobinę więcej mocy) albo **ON** ($1,69/L),
+3. zdejmij pistolet, włóż go do wlewu — tankowanie trwa, a pistolet odbija przy pełnym baku,
+4. wyjmij i odwieś pistolet, zamknij klapkę, odejdź (**O**),
+5. zapłać przy kasie: **E** przy drzwiach sklepu. Przy kasie bez rachunku kupisz hot-doga i kawę (+25 zdrowia, $6).
+
+Twoje auto ma silnik benzynowy: olej napędowy (ON) odbiera moc i powoli niszczy silnik. Odjazd ze stacji bez płacenia sprawia, że kasjer wzywa policję.
 
 ## Żyjące miasto
 

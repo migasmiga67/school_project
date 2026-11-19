@@ -29,6 +29,8 @@ import { isInsideGarageBay } from './garage-building';
 import { BuildingEntrancesView } from './building-entrances-view';
 import type { BuildingEntranceId, EntranceActor } from './building-entrances';
 import { FirstPersonView } from './first-person-view';
+import { FuelStationsView, type FuelViewPose } from './fuel-view';
+import type { FuelPart } from './fuel-stations';
 
 type LitMaterial = THREE.MeshStandardMaterial | THREE.MeshLambertMaterial;
 
@@ -51,6 +53,7 @@ interface CarVisual {
   styleKey:string;
   hero:boolean;
   engine?:EngineBay;
+  flap?:import('./vehicle-model').FuelFlap;
 }
 
 /** All art is generated here. The simulation, collisions and missions stay in game.ts. */
@@ -117,6 +120,8 @@ export class CityView {
   private readonly occluders: THREE.Mesh[] = [];
   private readonly raycaster = new THREE.Raycaster();
   private readonly partRay = new THREE.Raycaster();
+  private readonly fuelStations:FuelStationsView;
+  private fuelPose:(FuelViewPose&{flapOpen:boolean;hoseTarget:THREE.Vector3|null})|null=null;
   private enginePose:EngineBayPose|null=null;
   private crouchTarget=0;
   private crouch=0;
@@ -169,6 +174,7 @@ export class CityView {
     this.skyline();
     this.batchStaticGeometry();
     this.garageBuilding=new GarageBuildingView(this.softwareRendering,this.surfaces);this.scene.add(this.garageBuilding.group);this.occluders.push(...this.garageBuilding.occluders);
+    this.fuelStations=new FuelStationsView(this.softwareRendering,this.surfaces);this.scene.add(this.fuelStations.group);
     this.entrances=new BuildingEntrancesView(this.softwareRendering);this.scene.add(this.entrances.group);
     this.avatar();
     for(const child of this.hero.children)child.visible=false;
@@ -347,8 +353,8 @@ export class CityView {
     const hero=CityView.isHero(vehicle);
     const model=createVehicleModel(vehicle.kind==='police'?'police':vehicle.kind==='sport'?'sport':'sedan',vehicle.color,{software:this.softwareRendering,material:(color,props)=>this.material(color,props),style:vehicle.style,hero});
     group.add(...model.group.children);
-    const {chassis,wheels,frontWheels,paint,head,brake,red,blue,engine}=model;
-    const visual:CarVisual={group,chassis,motion:createVehicleMotion(),wheels,frontWheels,paint,head,brake,red,blue,paintColor:vehicle.color,kind:vehicle.kind,smoke:[],styleKey:vehicleStyleKey(vehicle.style),hero,engine};
+    const {chassis,wheels,frontWheels,paint,head,brake,red,blue,engine,fuelFlap}=model;
+    const visual:CarVisual={group,chassis,motion:createVehicleMotion(),wheels,frontWheels,paint,head,brake,red,blue,paintColor:vehicle.color,kind:vehicle.kind,smoke:[],styleKey:vehicleStyleKey(vehicle.style),hero,engine,flap:fuelFlap};
     for (let i = 0; i < 3; i++) {
       const smoke = new THREE.Sprite(new THREE.SpriteMaterial({ map: this.smokeTexture, color: 0x9ea3a6, opacity: 0, transparent: true, depthWrite: false })); group.add(smoke); visual.smoke.push(smoke);
     }
@@ -408,6 +414,7 @@ export class CityView {
     }
     const environment=getCityEnvironment(citySeconds);
     this.garageBuilding.update(state,this.camera.position);this.garageBuilding.group.visible=!inside;
+    this.fuelStations.group.visible=!inside;
     const actors:EntranceActor[]=[{...state.player,interior:state.interior,access:this.entranceAccess},...this.onlineMembers.filter(member=>member.id!==this.onlineSelf).map(member=>({...member.pose,access:['casino'] as BuildingEntranceId[]}))];
     this.entrances.update(actors,dt);this.entrances.group.visible=!inside;
     if(inside)this.casino.updateDoor(state.player,dt);
@@ -449,6 +456,10 @@ export class CityView {
       }
       visual.wheels.forEach(wheel => { wheel.rotation.x = visual.motion.wheelRotation; }); visual.frontWheels.forEach(wheel => { wheel.rotation.y = visual.motion.steering; });
       visual.chassis.rotation.set(visual.motion.pitch,visual.motion.yaw,visual.motion.roll);visual.chassis.position.y=visual.motion.heave;
+      if(visual.hero&&this.cars.get(vehicle.id)===visual){
+        const flap=this.cars.get(vehicle.id)?.flap;
+        flap?.update(Boolean(this.fuelPose?.flapOpen),this.fuelPose?.nozzle==='car',this.fuelPose?.highlight==='fuelFlap',dt);
+      }
       if(visual.engine){
         const driving=state.player.mode==='drive'&&state.player.vehicleId===vehicle.id;
         visual.engine.update(this.enginePose??{hood:0,dipstick:0,cap:0,plug:0,filter:'old',draining:0,pouring:false,pan:0,oilColor:0x2a1a08,oilLevel:.8,running:driving,rpm:900+Math.abs(vehicle.speed)*120,service:false,highlight:null},dt);
@@ -533,6 +544,9 @@ export class CityView {
       lookYaw:Math.atan2(Math.sin(heading-p.heading),Math.cos(heading-p.heading)),
       lookPitch:pitch,daylight:inside?1:environment.daylight,
     });
+    if(this.fuelPose&&this.fuelPose.nozzle==='hand'){const hand=new THREE.Vector3(.22,-.32,-.55).applyQuaternion(this.camera.quaternion).add(this.camera.position);this.fuelPose.hoseTarget=hand;}
+    else if(this.fuelPose&&this.fuelPose.nozzle==='car'){const flap=this.cars.get('stratus')?.flap?.target;this.fuelPose.hoseTarget=flap?flap.getWorldPosition(new THREE.Vector3()).add(new THREE.Vector3(0,-.4,0)):null;}
+    this.fuelStations.update(inside?null:this.fuelPose);this.firstPerson.setHolding(this.fuelPose?.nozzle==='hand');
     this.atmosphere.update(environment,this.camera.position,citySeconds);this.renderer.render(this.scene, this.camera);this.firstPerson.render(this.renderer);this.renderFrames++;
   }
   private updateHome(state:GameState,dt:number,cameraMode:number,pose?:CameraPose){
@@ -580,6 +594,23 @@ export class CityView {
     const box=new THREE.Box3();target.traverse(object=>{if(object instanceof THREE.Mesh&&object.name!=='part-highlight')box.expandByObject(object);});
     if(box.isEmpty())return null;
     const centre=box.getCenter(new THREE.Vector3()),delta=centre.sub(this.camera.position);
+    return{yaw:Math.atan2(delta.x,-delta.z),pitch:Math.atan2(-delta.y,Math.hypot(delta.x,delta.z))};
+  }
+  setFuelSession(pose:Omit<FuelViewPose,'hoseTarget'>&{flapOpen:boolean}|null){this.fuelPose=pose?{...pose,hoseTarget:this.fuelPose?.hoseTarget??null}:null;}
+  /** Pump button, nozzle or the car's filler flap under the crosshair. */
+  pickFuelPart():FuelPart|null{
+    if(!this.fuelPose)return null;
+    this.partRay.setFromCamera(new THREE.Vector2(0,0),this.camera);this.partRay.far=3.4;
+    const owners=new Map<THREE.Object3D,FuelPart>(),meshes:THREE.Object3D[]=[];
+    for(const target of this.fuelStations.pickTargets){owners.set(target.object,target.part);meshes.push(target.object);}
+    const flap=this.cars.get('stratus')?.flap?.target;
+    if(flap)flap.traverse(object=>{if(object instanceof THREE.Mesh&&object.name!=='part-highlight'){owners.set(object,'fuelFlap');meshes.push(object);}});
+    for(const hit of this.partRay.intersectObjects(meshes,false)){const part=owners.get(hit.object);if(part)return part;}
+    return null;
+  }
+  aimAtFuelPart(part:FuelPart):{yaw:number;pitch:number}|null{
+    const target=part==='fuelFlap'?this.cars.get('stratus')?.flap?.target:this.fuelStations.pickTargets.find(item=>item.part===part)?.object;if(!target)return null;
+    const centre=target.getWorldPosition(new THREE.Vector3()),delta=centre.sub(this.camera.position);
     return{yaw:Math.atan2(delta.x,-delta.z),pitch:Math.atan2(-delta.y,Math.hypot(delta.x,delta.z))};
   }
   get graphicsProfile(){return {...this.qualityProfile,lighting:this.vehicleLighting.snapshot};}

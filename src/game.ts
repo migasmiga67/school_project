@@ -5,6 +5,7 @@ import { routeDrivingLanes } from './traffic-lanes';
 import { nextSignalOpening } from './traffic-signals';
 import { advanceGarageGate,createGarageGate,garageGateCollision,garageSolidCollision,isGarageBuildingCollider } from './garage-building';
 import type { GarageVisitor } from './garage-building';
+import { fuelStationCollision } from './fuel-stations';
 import { CASINO } from './casino-location';
 import { BIKE_LOCATION, DOCK, advanceBikeFlight, advanceBoat, canBoardDockBoat, canDisembarkBoat, resetMobilityMotion } from './mobility';
 import type { GameEvent, GameState, Input, Point, Vehicle, PursuitState, Roadblock } from './model';
@@ -104,7 +105,7 @@ function moveIndoor(p: Point, dx: number, dz: number, radius: number) {
 }
 function blocked(s:GameState,p: Point, radius: number): boolean {
   return BUILDINGS.some(b => !isGarageBuildingCollider(b)&&p.x > b.x - b.halfX - radius && p.x < b.x + b.halfX + radius && p.z > b.z - b.halfZ - radius && p.z < b.z + b.halfZ + radius)
-    ||garageSolidCollision(p,radius)||garageGateCollision(p,radius,s.garageGate);
+    ||garageSolidCollision(p,radius)||garageGateCollision(p,radius,s.garageGate)||fuelStationCollision(p,radius);
 }
 function move(s:GameState,p: Point, dx: number, dz: number, radius: number): boolean {
   let hit = false;
@@ -201,7 +202,7 @@ function drive(s: GameState, car: Vehicle, input: Input, dt: number, events: Gam
   const tuning = car.tuning;
   const tuningLevel = (value: number | undefined) => Number.isFinite(value) ? clamp(Math.floor(value!), 0, 3) : 0;
   const engine = tuningLevel(tuning?.engine), brakes = tuningLevel(tuning?.brakes), nitro = tuningLevel(tuning?.nitro);
-  const power = Number.isFinite(car.power) ? clamp(car.power!, .2, 1) : 1, grip = 1 + (car.style?.height ?? 0) * .05;
+  const power = Number.isFinite(car.power) ? clamp(car.power!, .2, 1.05) : 1, grip = 1 + (car.style?.height ?? 0) * .05;
   const acceleration = input.throttle ? power * (bike?(input.boost?23:18):(input.boost ? 19 + engine * 2 + nitro * 3 : 13 * (1 + engine * .18))) : input.brake ? (car.speed > .5 ? (bike?-28:-23 * (1 + brakes * .25)) : -10) : -Math.sign(car.speed) * Math.min(Math.abs(car.speed) / Math.max(dt, .0001), (bike?2.6:3.6) + Math.abs(car.speed) * .12);
   car.speed = clamp(car.speed + acceleration * dt, bike?-5:-9, (.55 + .45 * power) * (bike?(input.boost?42:34):(input.boost ? 35 + engine * 2 + nitro * 3 : 26 + engine * 3)));
   if (input.handbrake) car.speed *= Math.exp(-dt * (3.5 + brakes * .6));

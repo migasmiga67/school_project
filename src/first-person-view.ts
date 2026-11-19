@@ -44,6 +44,7 @@ export class FirstPersonView {
  private motion={visible:false,mode:'foot' as 'foot'|'drive',speed:0,steering:0,phase:0,hands:0};
  private idle=0;
  private reachTime=0;
+ private readonly nozzle=new THREE.Group();
  private signature='';
 
  constructor(software=false){
@@ -80,6 +81,12 @@ export class FirstPersonView {
   this.box(this.wheel,.036,.026,.006,metal,0,.006,.026);
   this.wheel.position.set(0,-.285,-.59);this.wheel.rotation.x=-.18;this.cockpitFrame.add(this.wheel);
   this.cockpit.add(this.cockpitFrame);this.group.add(this.foot,this.cockpit);this.group.visible=false;
+  {const green=lit(0x2f8f4e),steel=lit(0x9aa1a5),black=lit(0x111316);
+   this.box(this.nozzle,.05,.15,.06,green,0,0,0).rotation.x=.4;
+   const spout=this.mesh(this.nozzle,new THREE.CylinderGeometry(.01,.01,.17,8),steel,0,.06,-.09);spout.rotation.x=Math.PI/2-.45;
+   this.box(this.nozzle,.028,.06,.06,black,0,-.075,.02);
+   const hose=this.mesh(this.nozzle,new THREE.CylinderGeometry(.016,.016,.4,8),black,0,-.25,.05);hose.rotation.x=.25;
+   this.nozzle.position.set(.25,-.2,-.5);this.nozzle.visible=false;this.group.add(this.nozzle);}
   this.scene.add(this.group,this.ambient);
   this.key.position.set(-.6,.9,.4);this.scene.add(this.key);
   this.setAppearance(createAppearance());
@@ -118,6 +125,8 @@ export class FirstPersonView {
   const colors=appearanceColors(appearance,crewColor),signature=`${colors.skin}/${colors.shirt}`;if(signature===this.signature)return;this.signature=signature;
   this.skin.color.setHex(colors.skin);this.sleeve.color.setHex(colors.shirt);this.nails.color.setHex(colors.skin).lerp(new THREE.Color(0xffdfcb),.22);
  }
+ /** Shows a fuel pump nozzle gripped in the right hand. */
+ setHolding(holding:boolean){this.nozzle.visible=holding&&this.foot.visible;}
  /** Brief forward reach of the right hand, used when working on a part. */
  reach(){this.reachTime=.5;}
  get snapshot():FirstPersonSnapshot{return{...this.motion};}

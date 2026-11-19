@@ -34,12 +34,18 @@ export interface EngineBay {
   readonly occluders:readonly THREE.Object3D[];
   update(pose:EngineBayPose,dt:number):void;
 }
+/** Hinged filler flap on the right rear quarter of the hero car. */
+export interface FuelFlap {
+  readonly target:THREE.Object3D;
+  update(open:boolean,nozzle:boolean,highlight:boolean,dt:number):void;
+}
 export interface VehicleModel {
   group:THREE.Group;chassis:THREE.Group;
   wheels:THREE.Group[];frontWheels:THREE.Group[];
   paint:VehicleMaterial;head:VehicleMaterial;brake:VehicleMaterial;
   red?:VehicleMaterial;blue?:VehicleMaterial;
   engine?:EngineBay;
+  fuelFlap?:FuelFlap;
   readonly styleKey:string;
   readonly stats:{drawCalls:number;triangles:number};
   dispose():void;
@@ -292,7 +298,7 @@ export function createVehicleModel(kind:RoadCarKind,color:number,options:Vehicle
     }
   }
   // Inner floor between the arches and dark underbody.
-  detail(1.55,.03,front*-2-.7,0x111417,0,.31,0);
+  detail(1.55,.03,AXLE*2+.3,0x111417,0,.31,0);
 
   // ---- Front ---------------------------------------------------------------
   /** First station whose outline reaches height y: the front face at that height. */
@@ -449,9 +455,38 @@ export function createVehicleModel(kind:RoadCarKind,color:number,options:Vehicle
   }
 
   const engine=hero?buildEngineBay({group,body,hood:hoodGroup,hoodMeshes:[hoodShell!,hoodLining!],shell:shell!,front,hoodRear,T,drop,software,material,colour,geometries,materials}):undefined;
+  let fuelFlap:FuelFlap|undefined;
+  if(hero){
+    const z=sport?1.55:1.6,y=.82,x=sideX(z,y)+.004;
+    const mount=new THREE.Group();mount.name='fuel-filler';mount.position.set(x,y,z);body.add(mount);
+    const recess=new THREE.Mesh(new THREE.CylinderGeometry(.075,.075,.02,software?10:18),details);
+    colour(recess.geometry,0x121416);recess.geometry.rotateZ(Math.PI/2);recess.position.x=-.008;mount.add(recess);geometries.add(recess.geometry);
+    const neck=new THREE.Group();mount.add(neck);
+    const neckMesh=new THREE.Mesh(colour(new THREE.CylinderGeometry(.032,.032,.03,software?8:14).rotateZ(Math.PI/2),0x2a2d30),details);neckMesh.position.x=.004;neck.add(neckMesh);geometries.add(neckMesh.geometry);
+    const cap=new THREE.Mesh(colour(new THREE.CylinderGeometry(.034,.034,.025,software?8:14).rotateZ(Math.PI/2),0x1c1e20),details);cap.position.x=.02;neck.add(cap);geometries.add(cap.geometry);
+    // The flap hinges on its front edge (towards -Z).
+    const hinge=new THREE.Group();hinge.position.set(.006,0,-.08);mount.add(hinge);
+    const panel=new THREE.Mesh(new THREE.BoxGeometry(.012,.15,.16).translate(0,0,.08),paint);panel.name='fuel-flap-panel';hinge.add(panel);geometries.add(panel.geometry);
+    // Pistol nozzle shown in the neck while refuelling.
+    const nozzle=new THREE.Group();nozzle.name='inserted-nozzle';mount.add(nozzle);
+    const nozzleParts=[
+      colour(new THREE.CylinderGeometry(.012,.012,.16,8).rotateZ(Math.PI/2).translate(.07,.02,0),0x9aa1a5),
+      colour(new THREE.BoxGeometry(.06,.18,.05).rotateZ(.5).translate(.17,-.03,0),0x2f8f4e),
+      colour(new THREE.BoxGeometry(.03,.08,.035).translate(.19,-.12,0),0x111316),
+      colour(new THREE.CylinderGeometry(.018,.018,.5,8).translate(.22,-.4,0),0x111316),
+    ].map(part=>part.index?part.toNonIndexed():part);
+    const nozzleMesh=new THREE.Mesh(mergeGeometries(nozzleParts,false)!,details);nozzleParts.forEach(part=>part.dispose());geometries.add(nozzleMesh.geometry);nozzle.add(nozzleMesh);nozzle.visible=false;
+    const glow=new THREE.MeshBasicMaterial({color:0x8ff0d0,transparent:true,opacity:.45,depthWrite:false});materials.add(glow);
+    const ring=new THREE.Mesh(new THREE.TorusGeometry(.11,.012,6,24).rotateY(Math.PI/2),glow);ring.position.x=.02;ring.visible=false;ring.name='part-highlight';mount.add(ring);geometries.add(ring.geometry);
+    let angle=0;
+    fuelFlap={target:mount,update(open,withNozzle,highlight,dt){
+      angle+=((open||withNozzle?1.9:0)-angle)*(1-Math.exp(-dt*9));hinge.rotation.y=angle;
+      cap.visible=!open&&!withNozzle;nozzle.visible=withNozzle;ring.visible=highlight;
+    }};
+  }
   let triangles=0,drawCalls=0;group.traverse(object=>{if(object instanceof THREE.Mesh&&object.visible){drawCalls++;triangles+=(object.geometry.index?.count??object.geometry.getAttribute('position').count)/3;}});
   let disposed=false;
-  return{group,chassis,wheels,frontWheels,paint,head,brake,red,blue,engine,styleKey:vehicleStyleKey(style),stats:{drawCalls,triangles},dispose(){if(disposed)return;disposed=true;group.removeFromParent();group.clear();geometries.forEach(g=>g.dispose());materials.forEach(m=>m.dispose());}};
+  return{group,chassis,wheels,frontWheels,paint,head,brake,red,blue,engine,fuelFlap,styleKey:vehicleStyleKey(style),stats:{drawCalls,triangles},dispose(){if(disposed)return;disposed=true;group.removeFromParent();group.clear();geometries.forEach(g=>g.dispose());materials.forEach(m=>m.dispose());}};
 }
 
 interface BayContext{
@@ -465,7 +500,9 @@ interface BayContext{
 function buildEngineBay(c:BayContext):EngineBay{
   const {software,material,colour,geometries}=c;
   const metal=material(0xffffff,{vertexColors:true,roughness:.48,metalness:.55});
-  const group=new THREE.Group();group.name='engine-bay';c.body.add(group);
+  // The whole bay sits low enough to clear the closed bonnet of the low sports body.
+  const BAY_DROP=.15;
+  const group=new THREE.Group();group.name='engine-bay';group.position.y=-BAY_DROP;c.body.add(group);
   const block=new THREE.Group();block.name='engine-block';group.add(block);
   const seg=software?8:16;
   const parts=new Map<THREE.Object3D,THREE.BufferGeometry[]>();
@@ -519,7 +556,7 @@ function buildEngineBay(c:BayContext):EngineBay{
   cyl(block,.06,.12,0x9aa1a5,[.33,.72,ez-.17],[0,0,Math.PI/2]);
   for(let i=0;i<4;i++)box(block,.035,.05,.035,0x111316,-.18+i*.12,.925,ez+.06);
   // Oil filter housing on the head (the canister is a separate part).
-  cyl(block,.058,.03,0x111316,[-.2,.85,ez-.29]);
+  cyl(block,.058,.03,0x111316,[-.2,.8,ez-.29]);
   // Dipstick guide tube.
   tube(block,[.2,.42,ez+.2],[.22,.86,ez+.24],.009,0x9ea6aa);
   bake(block,metal,'engine-block-mesh');
@@ -549,7 +586,7 @@ function buildEngineBay(c:BayContext):EngineBay{
   const tipMaterial=material(0x2a1a08,{roughness:.2,metalness:.1});
   const tip=new THREE.Mesh(new THREE.CylinderGeometry(.0065,.0065,1,6),tipMaterial);tip.name='dipstick-oil-film';geometries.add(tip.geometry);tip.position.y=-.41;dipstick.add(tip);
   for(const mark of[-.39,-.43]){const m=new THREE.Mesh(new THREE.BoxGeometry(.02,.003,.004),metal);geometries.add(m.geometry);m.position.y=mark;dipstick.add(m);}
-  const filter=new THREE.Group();filter.name='oil-filter';filter.position.set(-.2,.865,ez-.29);block.add(filter);
+  const filter=new THREE.Group();filter.name='oil-filter';filter.position.set(-.2,.815,ez-.29);block.add(filter);
   const filterMat=material(0xffffff,{vertexColors:true,roughness:.45,metalness:.2});
   const oldFilter=new THREE.Group(),newFilter=new THREE.Group();filter.add(oldFilter,newFilter);
   cyl(oldFilter,.05,.11,0x5a3a1c,[0,.055,0]);cyl(oldFilter,.03,.012,0x2b2118,[0,.115,0]);
@@ -567,7 +604,7 @@ function buildEngineBay(c:BayContext):EngineBay{
   const oilMaterial=material(0x1b1206,{roughness:.08,metalness:.1});
   const panOil=new THREE.Mesh(new THREE.CylinderGeometry(.25,.25,.06,seg),oilMaterial);panOil.name='drained-oil';geometries.add(panOil.geometry);pan.add(panOil);
   const stream=new THREE.Mesh(new THREE.CylinderGeometry(.007,.01,1,6),oilMaterial);stream.name='oil-stream';geometries.add(stream.geometry);c.group.add(stream);
-  const streamTop=.24-.04-c.drop,streamBottom=floor+.05;stream.position.set(.06,(streamTop+streamBottom)/2,ez-.12);stream.scale.y=streamTop-streamBottom;
+  const streamTop=.24-.04-c.drop-BAY_DROP,streamBottom=floor+.05;stream.position.set(.06,(streamTop+streamBottom)/2,ez-.12);stream.scale.y=streamTop-streamBottom;
   const bottle=new THREE.Group();bottle.name='oil-bottle';c.group.add(bottle);
   const jug=new THREE.Group();bottle.add(jug);
   box(jug,.18,.28,.1,0xd8a62a,0,.14,0);cyl(jug,.025,.05,0x1b1b1b,[.06,.3,0]);box(jug,.05,.08,.05,0xd8a62a,-.06,.25,0);
@@ -613,7 +650,7 @@ function buildEngineBay(c:BayContext):EngineBay{
     pan.visible=pose.service;panOil.visible=pose.pan>.01;panOil.scale.y=Math.max(.02,pose.pan);panOil.position.y=.012+.03*pose.pan;oilMaterial.color.setHex(pose.oilColor);
     bottle.visible=pose.service;
     // Tilted so the spout sits just above the open filler neck.
-    if(pose.pouring){bottle.position.set(-.12,1.23-c.drop,ez+.02);bottle.rotation.set(0,0,-2.0);pour.visible=true;pour.position.set(.13,1.0-c.drop,ez+.02);pour.scale.y=.1;}
+    if(pose.pouring){bottle.position.set(-.12,1.23-c.drop-BAY_DROP,ez+.02);bottle.rotation.set(0,0,-2.0);pour.visible=true;pour.position.set(.13,1.0-c.drop-BAY_DROP,ez+.02);pour.scale.y=.1;}
     else{bottle.position.copy(bottleHome);bottle.rotation.set(0,.4,0);pour.visible=false;}
     for(const[id,list]of outlines)for(const outline of list)outline.visible=pose.highlight===id;
   };
