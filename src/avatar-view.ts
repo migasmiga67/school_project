@@ -2,7 +2,7 @@ import * as THREE from 'three';
 import { appearanceColors, createAppearance, type AppearanceState } from './appearance';
 import { AvatarMotion, type AvatarMotionInput } from './avatar-motion';
 import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
-import { createCharacterFaceParts,CHARACTER_HAIR_THETA,CHARACTER_HEAD_SCALE } from './character-geometry';
+import { createCharacterFaceParts,createHeadGeometry,CHARACTER_HAIR_THETA,CHARACTER_HEAD_SCALE } from './character-geometry';
 
 type AvatarMaterial=THREE.MeshLambertMaterial|THREE.MeshStandardMaterial;
 /** One independently colored avatar. Parent sets world position and heading. */
@@ -27,31 +27,54 @@ export class AvatarView {
  constructor(private readonly software=false){
   this.group.name='custom-player-avatar';
   this.shirt=this.material(0xd1c6ae);this.trousers=this.material(0x324654);this.skin=this.material(0xc19074);this.hair=this.material(0x303333);this.accessory=this.material(0x162b37);
-  const torso=new THREE.CylinderGeometry(.29,.235,.66,12);torso.scale(1,1,.64);this.part(this.group,torso,this.shirt,0,1.18,0).name='avatar-torso';
-  const seam=this.material(0x59616a),shoe=this.material(0x202a30),sole=this.material(0x787d7d),features=this.material(0xffffff);features.vertexColors=true;
-  this.round(this.group,.49,.25,.31,this.trousers,0,.85,0);this.round(this.group,.145,.18,.145,this.skin,0,1.56,0);
-  for(const side of[-1,1]){const collar=this.box(this.group,.12,.14,.025,this.shirt,side*.068,1.47,-.134);collar.rotation.z=side*.45;}
-  this.box(this.group,.016,.4,.015,seam,0,1.19,-.187);this.box(this.group,.47,.045,.31,seam,0,.91,0);
-  for(const y of[1.11,1.26,1.4])this.oval(this.group,.024,.024,.016,sole,0,y,-.2);
-  this.oval(this.group,.38,.44,.35,this.skin,0,1.79,-.015);
+  // Torso: chest, waist and sloping trapezius from one lathe profile, flattened front to back.
+  const torso=this.lathe([[0,-.3],[.17,-.3],[.183,-.22],[.172,-.12],[.178,-.04],[.2,.05],[.222,.14],[.232,.21],[.232,.26],[.215,.3],[.17,.335],[.09,.355],[0,.36]],1.14,.64);
+  {const p=torso.getAttribute('position');for(let i=0;i<p.count;i++){const y=p.getY(i),z=p.getZ(i);if(z<0&&y>.02&&y<.27)p.setZ(i,z*(1+.13*Math.sin((y-.02)/.25*Math.PI)));if(z>0&&y>.1)p.setZ(i,z*.94);}torso.computeVertexNormals();}
+  this.part(this.group,torso,this.shirt,0,1.18,0).name='avatar-torso';
+  const seam=this.material(0x59616a),shoe=this.material(0x202a30),sole=this.material(0xd9d6cc),features=this.material(0xffffff);features.vertexColors=true;
+  // Hips and seat of the trousers, belt and fly seam.
+  this.part(this.group,this.lathe([[0,-.13],[.14,-.13],[.185,-.07],[.2,.01],[.19,.09],[0,.1]],1.06,.7),this.trousers,0,.9,0);
+  const belt=new THREE.TorusGeometry(.19,.016,5,20);belt.rotateX(Math.PI/2);belt.scale(1.07,1,.71);this.part(this.group,belt,seam,0,.96,0);
+  this.box(this.group,.05,.035,.012,sole,0,.96,-.136);
+  this.box(this.group,.012,.12,.01,seam,0,.86,-.14);
+  // Neck rising from the collar.
+  this.part(this.group,this.lathe([[0,-.1],[.074,-.1],[.068,-.02],[.064,.06],[.066,.1],[0,.11]],1,.95),this.skin,0,1.58,.01);
+  const collar=new THREE.TorusGeometry(.08,.018,5,16);collar.rotateX(Math.PI/2+.2);collar.scale(1,1,.95);this.part(this.group,collar,this.shirt,0,1.535,.0);
+  // Button placket.
+  this.box(this.group,.014,.38,.012,seam,0,1.19,-.165);
+  for(const y of[1.06,1.18,1.3,1.41])this.oval(this.group,.018,.018,.01,sole,0,y,-.172);
+  this.part(this.group,createHeadGeometry(this.software?14:24),this.skin,0,1.79,-.015);
   const face=createCharacterFaceParts();this.part(this.group,face.skin,this.skin,0,1.79,-.015).name='avatar-face-skin';this.part(this.group,face.features,features,0,1.79,-.015).name='avatar-face-features';this.part(this.group,face.brows,this.hair,0,1.79,-.015);
-  for(const x of[-.145,.145]){
-   const geometry=this.capsule(.225,.43,.255);geometry.translate(0,-.19,0);const leg=this.part(this.group,geometry,this.trousers,x,.85,0);leg.name='avatar-thigh';
-   const knee=new THREE.Group();knee.position.y=-.39;leg.add(knee);this.knees.push(knee);
-   this.round(knee,.19,.37,.215,this.trousers,0,-.17,0);this.round(knee,.025,.31,.018,seam,Math.sign(x)*.083,-.17,-.074);
-   const foot=this.round(knee,.24,.145,.39,shoe,0,-.36,-.07);foot.name='avatar-shoe';this.round(knee,.244,.04,.385,sole,0,-.407,-.07);
+  for(const x of[-.1,.1]){
+   // Thigh tapering to the knee; calf with a muscle belly and a slim ankle.
+   const leg=this.part(this.group,this.lathe([[0,.04],[.088,.03],[.1,-.06],[.094,-.18],[.08,-.32],[.066,-.4],[0,-.42]],1,.98),this.trousers,x,.85,0);leg.name='avatar-thigh';
+   const knee=new THREE.Group();knee.position.y=-.4;leg.add(knee);this.knees.push(knee);
+   this.part(knee,this.lathe([[0,.03],[.066,.02],[.07,-.08],[.066,-.17],[.052,-.3],[.046,-.37],[0,-.39]],1,1.02),this.trousers,0,0,0);
+   this.box(knee,.008,.34,.008,seam,Math.sign(x)*.068,-.18,0);
+   // Trainers: rounded upper with a toe box, a thick pale midsole and a tongue.
+   const foot=this.oval(knee,.112,.09,.27,shoe,0,-.4,-.055);foot.name='avatar-shoe';
+   this.oval(knee,.1,.07,.12,shoe,0,-.37,.005);
+   this.round(knee,.116,.03,.285,sole,0,-.437,-.055);
+   this.box(knee,.06,.05,.02,sole,0,-.36,-.11);
    this.legs.push(leg);
   }
-  for(const x of[-.325,.325]){
-   const arm=new THREE.Group();arm.position.set(x,1.45,0);this.group.add(arm);this.round(arm,.22,.32,.245,this.shirt,0,-.1,0);
-   const elbow=new THREE.Group();elbow.position.y=-.26;arm.add(elbow);this.elbows.push(elbow);
-   const forearm=new THREE.CylinderGeometry(.079,.062,.285,10);this.part(elbow,forearm,this.skin,0,-.13,0);
-   this.round(elbow,.107,.145,.095,this.skin,0,-.32,-.006).name='avatar-palm';
-   for(let finger=0;finger<4;finger++)this.round(elbow,.022,.072-(finger===3?.016:0),.03,this.skin,-.034+finger*.023,-.407+Math.abs(1.5-finger)*.006,-.012);
-   const thumb=this.round(elbow,.038,.09,.045,this.skin,Math.sign(x)*.058,-.324,-.01);thumb.rotation.z=Math.sign(x)*.5;
+  for(const x of[-.31,.31]){
+   const side=Math.sign(x),arm=new THREE.Group();arm.position.set(x,1.45,0);this.group.add(arm);
+   // Rounded deltoid inside a short sleeve, then the bare upper arm.
+   this.oval(arm,.125,.17,.135,this.shirt,side*-.03,-.045,0);
+   this.part(arm,this.lathe([[0,0],[.066,-.01],[.064,-.08],[.062,-.14],[.056,-.15],[0,-.152]]),this.shirt,0,0,0);
+   this.part(arm,this.lathe([[0,-.1],[.054,-.11],[.052,-.18],[.045,-.25],[.042,-.27],[0,-.28]]),this.skin,0,0,0);
+   const elbow=new THREE.Group();elbow.position.y=-.27;arm.add(elbow);this.elbows.push(elbow);
+   this.part(elbow,this.lathe([[0,.02],[.043,.01],[.05,-.06],[.044,-.15],[.032,-.24],[.03,-.26],[0,-.27]]),this.skin,0,0,0);
+   // Hand: palm facing the thigh, four fingers, thumb towards the front.
+   this.oval(elbow,.04,.1,.085,this.skin,0,-.31,-.004).name='avatar-palm';
+   for(let finger=0;finger<4;finger++){const z=-.03+finger*.02,length=[.07,.078,.074,.06][finger];this.round(elbow,.019,length,.019,this.skin,0,-.355-length/2+.012,z);}
+   const thumb=this.round(elbow,.022,.065,.024,this.skin,side*-.004,-.32,-.05);thumb.rotation.x=.45;
    this.arms.push(arm);
   }
-  const short=new THREE.Group();this.hairCap(short,1.05,1.12);this.round(short,.35,.2,.12,this.hair,0,1.86,.13);this.hairstyles.set('short',short);
+  const short=new THREE.Group();this.hairCap(short,1.05,1.12);this.oval(short,.3,.1,.3,this.hair,0,1.965,.01);this.oval(short,.37,.3,.2,this.hair,0,1.83,.115);
+  for(const side of[-1,1])this.oval(short,.03,.09,.06,this.hair,side*.183,1.81,-.02);
+  this.hairstyles.set('short',short);
   const buzz=new THREE.Group();this.hairCap(buzz,1,1.04);this.hairstyles.set('buzz',buzz);
   const long=new THREE.Group();this.hairCap(long,1.06,1.14);this.oval(long,.39,.52,.16,this.hair,0,1.72,.14);for(const x of[-.185,.185])this.round(long,.075,.39,.22,this.hair,x,1.76,.035);this.hairstyles.set('long',long);
   const glasses=new THREE.Group();for(const x of[-.095,.095])this.oval(glasses,.155,.095,.028,this.accessory,x,1.83,-.19);this.box(glasses,.06,.024,.025,this.accessory,0,1.84,-.207);this.accessories.set('glasses',glasses);
@@ -77,6 +100,7 @@ export class AvatarView {
  }
  private material(color:number):AvatarMaterial{return this.software?new THREE.MeshLambertMaterial({color}):new THREE.MeshStandardMaterial({color,roughness:.8,metalness:.02});}
  private part(parent:THREE.Object3D,geometry:THREE.BufferGeometry,material:THREE.Material,x:number,y:number,z:number){const mesh=new THREE.Mesh(geometry,material);mesh.position.set(x,y,z);mesh.castShadow=!this.software;mesh.receiveShadow=true;parent.add(mesh);return mesh;}
+ private lathe(profile:readonly (readonly [number,number])[],sx=1,sz=1){const geometry=new THREE.LatheGeometry(profile.map(([r,y])=>new THREE.Vector2(r,y)),this.software?10:18);geometry.scale(sx,1,sz);return geometry;}
  private capsule(w:number,h:number,d:number){const geometry=new THREE.CapsuleGeometry(.5,1,3,8);geometry.scale(w,h/2,d);return geometry;}
  private round(parent:THREE.Object3D,w:number,h:number,d:number,material:THREE.Material,x:number,y:number,z:number){return this.part(parent,this.capsule(w,h,d),material,x,y,z);}
  private oval(parent:THREE.Object3D,w:number,h:number,d:number,material:THREE.Material,x:number,y:number,z:number){const geometry=new THREE.SphereGeometry(.5,8,6);geometry.scale(w,h,d);return this.part(parent,geometry,material,x,y,z);}

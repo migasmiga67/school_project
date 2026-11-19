@@ -44,7 +44,7 @@ export function stepVehicleMotion(previous:Readonly<VehicleMotion>,input:Readonl
   const brakingThreshold=5.6+Math.abs(previous.previousSpeed)*.12;
   const braking=approach(previous.braking,clamp((deceleration-brakingThreshold)/12,0,1),deceleration>brakingThreshold?20:8,dt);
   return{
-    steering,wheelRotation:previous.wheelRotation+speed*dt/.42,
+    steering,wheelRotation:previous.wheelRotation+speed*dt/.37,
     pitch:pitch.position,pitchVelocity:pitch.velocity,roll:roll.position,rollVelocity:roll.velocity,
     heave:heave.position,heaveVelocity:heave.velocity,
     yaw:approach(previous.yaw,clamp(yawRate*.018,-.045,.045)*moving,9,dt),braking,

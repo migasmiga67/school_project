@@ -20,7 +20,8 @@ import { VehicleLodLibrary, type DistantCarVisual } from './vehicle-lod';
 import { CityStreetsView } from './city-streets';
 import { CityDistrictsView } from './city-districts';
 import { createVehicleMotion, stepVehicleMotion, type VehicleMotion } from './vehicle-motion';
-import { createVehicleModel } from './vehicle-model';
+import { createVehicleModel, type EngineBay, type EngineBayPose, type EnginePartId } from './vehicle-model';
+import { vehicleStyleKey } from './vehicle-style';
 import { graphicsProfile, type GraphicsProfile, type GraphicsQuality } from './graphics';
 import { VehicleLighting, type VehicleLightSource } from './vehicle-lighting';
 import { GarageBuildingView } from './garage-building-view';
@@ -47,6 +48,9 @@ interface CarVisual {
   head: LitMaterial;
   full?:THREE.Group;
   distant?:DistantCarVisual;
+  styleKey:string;
+  hero:boolean;
+  engine?:EngineBay;
 }
 
 /** All art is generated here. The simulation, collisions and missions stay in game.ts. */
@@ -112,6 +116,10 @@ export class CityView {
   private motion = 0;
   private readonly occluders: THREE.Mesh[] = [];
   private readonly raycaster = new THREE.Raycaster();
+  private readonly partRay = new THREE.Raycaster();
+  private enginePose:EngineBayPose|null=null;
+  private crouchTarget=0;
+  private crouch=0;
 
   constructor(parent: HTMLElement,quality:GraphicsQuality='auto') {
     this.parent = parent;
@@ -336,10 +344,11 @@ export class CityView {
     const group = new THREE.Group(); this.scene.add(group);
     const shadow = new THREE.Mesh(new THREE.PlaneGeometry(3.1, 5.6), new THREE.MeshBasicMaterial({ map:this.smokeTexture,color:0x101722,transparent:true,opacity:.38,depthWrite:false }));
     shadow.rotation.x = -Math.PI / 2; shadow.position.y = 0.046; group.add(shadow);
-    const model=createVehicleModel(vehicle.kind==='police'?'police':vehicle.kind==='sport'?'sport':'sedan',vehicle.color,{software:this.softwareRendering,material:(color,props)=>this.material(color,props)});
+    const hero=CityView.isHero(vehicle);
+    const model=createVehicleModel(vehicle.kind==='police'?'police':vehicle.kind==='sport'?'sport':'sedan',vehicle.color,{software:this.softwareRendering,material:(color,props)=>this.material(color,props),style:vehicle.style,hero});
     group.add(...model.group.children);
-    const {chassis,wheels,frontWheels,paint,head,brake,red,blue}=model;
-    const visual:CarVisual={group,chassis,motion:createVehicleMotion(),wheels,frontWheels,paint,head,brake,red,blue,paintColor:vehicle.color,kind:vehicle.kind,smoke:[]};
+    const {chassis,wheels,frontWheels,paint,head,brake,red,blue,engine}=model;
+    const visual:CarVisual={group,chassis,motion:createVehicleMotion(),wheels,frontWheels,paint,head,brake,red,blue,paintColor:vehicle.color,kind:vehicle.kind,smoke:[],styleKey:vehicleStyleKey(vehicle.style),hero,engine};
     for (let i = 0; i < 3; i++) {
       const smoke = new THREE.Sprite(new THREE.SpriteMaterial({ map: this.smokeTexture, color: 0x9ea3a6, opacity: 0, transparent: true, depthWrite: false })); group.add(smoke); visual.smoke.push(smoke);
     }
@@ -425,7 +434,7 @@ export class CityView {
     for (const vehicle of [...state.vehicles, ...state.police]) {
       if(vehicle.kind==='bike'||vehicle.kind==='boat')continue;
       alive.add(vehicle.id); let visual = this.cars.get(vehicle.id);
-      if(visual&&visual.kind!==vehicle.kind){this.disposeCar(visual);this.cars.delete(vehicle.id);visual=undefined;}
+      if(visual&&(visual.kind!==vehicle.kind||visual.styleKey!==vehicleStyleKey(vehicle.style)||visual.hero!==CityView.isHero(vehicle))){this.disposeCar(visual);this.cars.delete(vehicle.id);visual=undefined;}
       if (!visual) { visual = this.car(vehicle); this.cars.set(vehicle.id, visual); }
       if(visual.paintColor!==vehicle.color){visual.paint.color.setHex(vehicle.color);visual.paintColor=vehicle.color;if(visual.distant)this.distantCars?.setColor(visual.distant,vehicle.color);}
       visual.group.visible = !inside && !this.remoteCars.has(vehicle.id) && !(cameraMode === 2 && state.player.mode === 'drive' && state.player.vehicleId === vehicle.id);
@@ -440,6 +449,10 @@ export class CityView {
       }
       visual.wheels.forEach(wheel => { wheel.rotation.x = visual.motion.wheelRotation; }); visual.frontWheels.forEach(wheel => { wheel.rotation.y = visual.motion.steering; });
       visual.chassis.rotation.set(visual.motion.pitch,visual.motion.yaw,visual.motion.roll);visual.chassis.position.y=visual.motion.heave;
+      if(visual.engine){
+        const driving=state.player.mode==='drive'&&state.player.vehicleId===vehicle.id;
+        visual.engine.update(this.enginePose??{hood:0,dipstick:0,cap:0,plug:0,filter:'old',draining:0,pouring:false,pan:0,oilColor:0x2a1a08,oilLevel:.8,running:driving,rpm:900+Math.abs(vehicle.speed)*120,service:false,highlight:null},dt);
+      }
       visual.brake.emissiveIntensity = .18+(1-environment.daylight)*.45+visual.motion.braking*2.1;
       visual.head.emissiveIntensity=.6+(1-environment.daylight)*1.4;
       if (visual.red && visual.blue) { const flash = Math.sin(state.time * 12 + vehicle.x) > 0; visual.red.emissiveIntensity = flash ? 2 : 0.1; visual.blue.emissiveIntensity = flash ? 0.1 : 2; }
@@ -478,7 +491,9 @@ export class CityView {
       lookAt = destination.clone().add(new THREE.Vector3(Math.sin(headYaw) * Math.cos(headPitch), -Math.sin(headPitch), -Math.cos(headYaw) * Math.cos(headPitch)).multiplyScalar(10));
     } else if (cameraMode === 2) {
       const vehicleForward = new THREE.Vector3(Math.sin(p.heading), 0, -Math.cos(p.heading));
-      destination = new THREE.Vector3(p.x, (inCar ? 1.45 : 1.9)+airHeight, p.z);
+      this.crouch+=(this.crouchTarget-this.crouch)*(1-Math.exp(-Math.min(dt,.2)*7));
+      destination = new THREE.Vector3(p.x, (inCar ? 1.45 : 1.72-this.crouch*1.38)+airHeight, p.z);
+      if(!inCar&&this.crouch>.01)destination.addScaledVector(new THREE.Vector3(Math.sin(heading),0,-Math.cos(heading)),this.crouch*.35);
       if(inCar)destination.addScaledVector(vehicleForward, roadCar ? .25 : .6);
       if(roadCar&&!riding)destination.addScaledVector(new THREE.Vector3(Math.cos(p.heading),0,Math.sin(p.heading)),-.42);
       if(riding)destination.add(new THREE.Vector3(Math.cos(p.heading),0,Math.sin(p.heading)).multiplyScalar(.48));
@@ -538,6 +553,34 @@ export class CityView {
     if(this.camera.fov!==58){this.camera.fov=58;this.camera.updateProjectionMatrix();}
     this.remote.update(this.onlineMembers,this.onlineSelf,null,dt,undefined,this.homeId);
     this.camera.lookAt(lookAt);this.firstPerson.update({visible:cameraMode===2,mode:'foot',speed,steer:0,dt,seconds:this.visualTime,fov:this.camera.fov,aspect:this.camera.aspect});this.renderer.render(this.homeScene,this.camera);this.firstPerson.render(this.renderer);this.renderFrames++;
+  }
+  /** The player's own car carries the serviceable engine bay. */
+  private static isHero(vehicle:Vehicle){return vehicle.id==='stratus'&&(vehicle.kind==='sport'||vehicle.kind==='sedan');}
+  setEngineBay(pose:EngineBayPose|null){this.enginePose=pose;}
+  firstPersonReach(){this.firstPerson.reach();}
+  setCrouch(amount:number){this.crouchTarget=THREE.MathUtils.clamp(amount,0,1);}
+  get crouchAmount(){return this.crouch;}
+  /** Part under the screen centre, within arm's reach, not hidden behind body panels. */
+  pickEnginePart(vehicleId='stratus'):EnginePartId|null{
+    const engine=this.cars.get(vehicleId)?.engine;if(!engine)return null;
+    this.partRay.setFromCamera(new THREE.Vector2(0,0),this.camera);this.partRay.far=2.6;
+    const owners=new Map<THREE.Object3D,EnginePartId>(),meshes:THREE.Object3D[]=[];
+    for(const target of engine.targets)target.object.traverse(object=>{if(object instanceof THREE.Mesh&&object.name!=='part-highlight'&&object.visible){owners.set(object,target.id);meshes.push(object);}});
+    for(const occluder of engine.occluders)meshes.push(occluder);
+    const hit=this.partRay.intersectObjects(meshes,false).find(item=>item.object.visible);
+    if(!hit)return null;
+    const owner=owners.get(hit.object);
+    if(owner)return owner;
+    // The closed bonnet itself is part of the body shell occluders.
+    return engine.occluders.slice(1).includes(hit.object)?'hood':null;
+  }
+  /** Camera yaw/pitch that centre a part in the first-person view (test and accessibility aid). */
+  aimAtEnginePart(part:EnginePartId,vehicleId='stratus'):{yaw:number;pitch:number}|null{
+    const target=this.cars.get(vehicleId)?.engine?.targets.find(item=>item.id===part)?.object;if(!target)return null;
+    const box=new THREE.Box3();target.traverse(object=>{if(object instanceof THREE.Mesh&&object.name!=='part-highlight')box.expandByObject(object);});
+    if(box.isEmpty())return null;
+    const centre=box.getCenter(new THREE.Vector3()),delta=centre.sub(this.camera.position);
+    return{yaw:Math.atan2(delta.x,-delta.z),pitch:Math.atan2(-delta.y,Math.hypot(delta.x,delta.z))};
   }
   get graphicsProfile(){return {...this.qualityProfile,lighting:this.vehicleLighting.snapshot};}
   setGraphicsQuality(quality:GraphicsQuality){this.requestedQuality=quality;this.configureGraphics();this.resize();}

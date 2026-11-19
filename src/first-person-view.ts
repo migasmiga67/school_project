@@ -43,6 +43,7 @@ export class FirstPersonView {
  private readonly geometries=new Set<THREE.BufferGeometry>();
  private motion={visible:false,mode:'foot' as 'foot'|'drive',speed:0,steering:0,phase:0,hands:0};
  private idle=0;
+ private reachTime=0;
  private signature='';
 
  constructor(software=false){
@@ -117,6 +118,8 @@ export class FirstPersonView {
   const colors=appearanceColors(appearance,crewColor),signature=`${colors.skin}/${colors.shirt}`;if(signature===this.signature)return;this.signature=signature;
   this.skin.color.setHex(colors.skin);this.sleeve.color.setHex(colors.shirt);this.nails.color.setHex(colors.skin).lerp(new THREE.Color(0xffdfcb),.22);
  }
+ /** Brief forward reach of the right hand, used when working on a part. */
+ reach(){this.reachTime=.5;}
  get snapshot():FirstPersonSnapshot{return{...this.motion};}
  update(input:FirstPersonInput){
   const daylight=clamp(finite(input.daylight,1),0,1);
@@ -132,7 +135,8 @@ export class FirstPersonView {
   this.motion.phase=(this.motion.phase+dt*(1.6+running*.9)*Math.PI*2*walking)%(Math.PI*2);
   const phase=this.motion.phase,breath=Math.sin(this.idle*1.65)*.003;
   this.foot.position.set(Math.sin(phase)*.008*walking,breath+Math.abs(Math.sin(phase))*(.008+running*.009)*walking,0);
-  this.footArms.forEach((arm,index)=>{const side=index===0?-1:1,swing=Math.sin(phase+index*Math.PI)*walking;arm.position.y=-.292+swing*(.012+running*.018);arm.position.z=-.59+swing*(.018+running*.025);arm.rotation.x=-.1+swing*(.065+running*.065);arm.rotation.z=side*-(.16+running*.06);});
+  this.reachTime=Math.max(0,this.reachTime-dt);const reach=Math.sin(Math.min(1,this.reachTime/.5)*Math.PI);
+  this.footArms.forEach((arm,index)=>{const side=index===0?-1:1,swing=Math.sin(phase+index*Math.PI)*walking,extend=side>0?reach:0;arm.position.y=-.292+swing*(.012+running*.018)+extend*.07;arm.position.z=-.59+swing*(.018+running*.025)-extend*.16;arm.rotation.x=-.1+swing*(.065+running*.065)+extend*.35;arm.rotation.z=side*-(.16+running*.06);});
   const fov=clamp(finite(input.fov,58),35,85),aspect=clamp(finite(input.aspect,1.5),.25,4);
   if(this.camera.fov!==fov||this.camera.aspect!==aspect){this.camera.fov=fov;this.camera.aspect=aspect;this.camera.updateProjectionMatrix();}
   const framing=Math.tan(fov*Math.PI/360)/Math.tan(29*Math.PI/180),narrow=clamp(aspect/1.25,.52,1);

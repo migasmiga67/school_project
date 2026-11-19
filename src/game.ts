@@ -201,13 +201,14 @@ function drive(s: GameState, car: Vehicle, input: Input, dt: number, events: Gam
   const tuning = car.tuning;
   const tuningLevel = (value: number | undefined) => Number.isFinite(value) ? clamp(Math.floor(value!), 0, 3) : 0;
   const engine = tuningLevel(tuning?.engine), brakes = tuningLevel(tuning?.brakes), nitro = tuningLevel(tuning?.nitro);
-  const acceleration = input.throttle ? (bike?(input.boost?23:18):(input.boost ? 19 + engine * 2 + nitro * 3 : 13 * (1 + engine * .18))) : input.brake ? (car.speed > .5 ? (bike?-28:-23 * (1 + brakes * .25)) : -10) : -Math.sign(car.speed) * Math.min(Math.abs(car.speed) / Math.max(dt, .0001), (bike?2.6:3.6) + Math.abs(car.speed) * .12);
-  car.speed = clamp(car.speed + acceleration * dt, bike?-5:-9, bike?(input.boost?42:34):(input.boost ? 35 + engine * 2 + nitro * 3 : 26 + engine * 3));
+  const power = Number.isFinite(car.power) ? clamp(car.power!, .2, 1) : 1, grip = 1 + (car.style?.height ?? 0) * .05;
+  const acceleration = input.throttle ? power * (bike?(input.boost?23:18):(input.boost ? 19 + engine * 2 + nitro * 3 : 13 * (1 + engine * .18))) : input.brake ? (car.speed > .5 ? (bike?-28:-23 * (1 + brakes * .25)) : -10) : -Math.sign(car.speed) * Math.min(Math.abs(car.speed) / Math.max(dt, .0001), (bike?2.6:3.6) + Math.abs(car.speed) * .12);
+  car.speed = clamp(car.speed + acceleration * dt, bike?-5:-9, (.55 + .45 * power) * (bike?(input.boost?42:34):(input.boost ? 35 + engine * 2 + nitro * 3 : 26 + engine * 3)));
   if (input.handbrake) car.speed *= Math.exp(-dt * (3.5 + brakes * .6));
   const axis = Number(input.right) - Number(input.left);
   car.steer += (axis - car.steer) * Math.min(1, dt * (bike?10:7));
   const previousHeading=car.heading;
-  car.heading = angle(car.heading + car.steer * Math.min(Math.abs(car.speed) / 5, 1) * Math.sign(car.speed || 1) * dt * (bike?(input.handbrake?3.1:2.15):(input.handbrake ? 2.4 : 1.45)) / (1 + Math.abs(car.speed) / 42));
+  car.heading = angle(car.heading + car.steer * Math.min(Math.abs(car.speed) / 5, 1) * Math.sign(car.speed || 1) * dt * (bike?(input.handbrake?3.1:2.15):(input.handbrake ? 2.4 : 1.45) * grip) / (1 + Math.abs(car.speed) / 42));
   if(garageSolidCollision(car,bike?.68:1.5))car.heading=previousHeading;
   const speed = car.speed;
   const previous={x:car.x,z:car.z};

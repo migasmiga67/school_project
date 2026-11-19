@@ -32,7 +32,7 @@ export interface CrewChallenge {
 export interface OnlineVehicle {
   id: string; kind: VehicleKind; x: number; z: number; heading: number;
   color: number; speed: number; health: number;
-  tuning?: { engine: number; brakes: number; nitro: number }; label?: string;
+  tuning?: { engine: number; brakes: number; nitro: number }; style?: import('./vehicle-style').VehicleStyle; label?: string;
   airHeight?: number; lean?: number;
 }
 export interface OnlinePose {

@@ -7,6 +7,7 @@ import { appearanceColors, type AppearanceState } from './appearance';
 import { createMobilityVehicle } from './mobility-view';
 import { AvatarMotion } from './avatar-motion';
 import { createVehicleModel } from './vehicle-model';
+import { vehicleStyleKey } from './vehicle-style';
 import { createVehicleMotion, stepVehicleMotion, type VehicleMotion } from './vehicle-motion';
 import { CHARACTER_HAIR_THETA, CHARACTER_HEAD_SCALE, createCharacterFaceGeometry } from './character-geometry';
 
@@ -33,6 +34,7 @@ interface RemoteVisual {
   phase: number;
   motion: AvatarMotion;
   kind: VehicleKind;
+  styleKey?: string;
   paintColor: number;
   location: 'casino' | null;
   mode: 'drive' | 'foot';
@@ -254,12 +256,12 @@ export class RemotePlayersView {
       const travel = jump ? 0 : Math.hypot(visual.root.position.x - previousX, visual.root.position.z - previousZ);
       if (driving) {
         const vehicle = pose.vehicle!;
-        if (vehicle.kind !== visual.kind) {
+        if (vehicle.kind !== visual.kind || (vehicle.kind !== 'bike' && vehicle.kind !== 'boat' && vehicleStyleKey(vehicle.style) !== (visual.styleKey ?? ''))) {
           this.removeMobility(visual);
           this.removeCarModel(visual);visual.carMotion=createVehicleMotion();
           if(vehicle.kind==='bike'||vehicle.kind==='boat'){visual.mobility=createMobilityVehicle(vehicle.kind,vehicle.color);visual.car.add(visual.mobility.group);}
-          else {visual.carModel=createVehicleModel(vehicle.kind,vehicle.color,{software:this.software});visual.car.add(visual.carModel.group);}
-          visual.kind = vehicle.kind;
+          else {visual.carModel=createVehicleModel(vehicle.kind,vehicle.color,{software:this.software,style:vehicle.style});visual.car.add(visual.carModel.group);}
+          visual.kind = vehicle.kind;visual.styleKey=vehicleStyleKey(vehicle.style);
         }
         const color = Number.isFinite(vehicle.color) ? (vehicle.color >>> 0) & 0xffffff : SLOT_COLORS[slot];
         if (color !== visual.paintColor) { visual.carModel?.paint.color.setHex(color); visual.paintColor = color; }
