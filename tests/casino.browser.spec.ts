@@ -64,7 +64,7 @@ async function visitCasinoTable(page: Page, capture?: (name: string) => Promise<
   await walkUntil(page, 'd', 'x', 18.5, true);
   // Approach the door after traversing the sidewalk; a rendered frame can pass
   // between the position read and key-up on a software GPU.
-  await walkUntil(page, 'w', 'z', 74.5, false);
+  await walkUntil(page, 'w', 'z', 74.9, false);
   const doorway = await snapshot(page);
   await capture?.('casino-entrance.png');
   // The doorway is walk-in: a step too far already carries the player inside.
@@ -226,8 +226,9 @@ test('blackjack i pełny obrót ruletki działają przy osobnych stołach w wido
   await expect.poll(async () => (await snapshot(page)).state.player.mode).toBe('foot');
   await walkUntil(page, 's', 'z', 75, true);
   await walkUntil(page, 'd', 'x', 18.5, true);
-  await walkUntil(page, 'w', 'z', 74.5, false);
-  await page.keyboard.press('e');
+  await walkUntil(page, 'w', 'z', 74.9, false);
+  // A slow frame may already have carried the player through the walk-in doorway.
+  if ((await snapshot(page)).state.interior !== 'casino') await page.keyboard.press('e');
   await expect.poll(async () => (await snapshot(page)).state.interior).toBe('casino');
   // Normal walking from the entrance reaches the left-hand blackjack station.
   await walkUntil(page, 'a', 'x', -6.8, false);

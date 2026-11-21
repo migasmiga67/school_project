@@ -123,6 +123,7 @@ describe('walkable casino and suspended city',()=>{
 describe('walk-in casino',()=>{
   it('walks from the pavement through the doorway into the hall and back out, without pressing E',()=>{
     const state=atDoor();Object.assign(state.player,{x:CASINO.door.x+.6,z:74.4});
+    advance(state,.3,{throttle:true,viewHeading:0});expect(state.interior).toBeNull();
     advance(state,1.5,{throttle:true,viewHeading:0});
     expect(state.interior).toBe('casino');
     // The hall frame is the tower's ground floor: local + offset lands inside the building.
