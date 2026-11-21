@@ -1,7 +1,7 @@
 import * as THREE from 'three';
 import type { CameraPose } from './camera-controls';
 import { CasinoView } from './casino-view';
-import { CASINO } from './casino-location';
+import { CASINO, casinoFloor, onVipFloor } from './casino-location';
 import type { Point } from './model';
 import type { PokerState } from './poker-model';
 import type { RouletteSnapshot } from './casino-games';
@@ -205,7 +205,8 @@ export class CityView {
     this.casinoAnchor.position.set(CASINO.offset.x,0,CASINO.offset.z);this.casinoAnchor.add(this.casino.interior);
     if(!this.softwareRendering){this.casinoLight=new THREE.PointLight(0xffddb0,0,24,2);this.casinoLight.position.set(0,6.2,-1);this.casinoAnchor.add(this.casinoLight);}
     this.scene.add(this.casino.exterior, this.casinoAnchor);
-    this.cityObjects = this.scene.children.filter(object => object !== this.hero && object !== this.marker && object !== this.casinoAnchor && object !== this.entrances.group);
+    // Lights stay on: hiding the street from inside the hall must never darken the hall itself.
+    this.cityObjects = this.scene.children.filter(object => object !== this.hero && object !== this.marker && object !== this.casinoAnchor && object !== this.entrances.group && !(object instanceof THREE.Light) && object !== this.sunlight.target);
     // A small retained overlay keeps hands clear of walls and self-occluding.
     this.firstPerson=new FirstPersonView(this.softwareRendering);
     this.cityBackground = this.scene.background;
@@ -424,7 +425,9 @@ export class CityView {
     }
     // Deep inside the hall the street is out of sight; skip drawing it.
     // Software WebGL keeps the street hidden from the hall altogether (the door is too costly to see through).
-    const hideCity=inside&&(this.softwareRendering||state.player.z<3);
+    const upstairs=inside&&onVipFloor(state.player);
+    // Upstairs the lounge's panorama windows look out over the street (on hardware rendering).
+    const hideCity=inside&&(this.softwareRendering||(upstairs?false:state.player.z<3));
     if(hideCity!==this.cityHidden){this.cityHidden=hideCity;for(const object of this.cityObjects)object.visible=!hideCity;}
     const doorDistance=inside?0:Math.hypot(state.player.x-CASINO.door.x,state.player.z-CASINO.door.z);
     this.casino.interior.visible=inside||doorDistance<(this.softwareRendering?9:38);if(this.casinoLight)this.casinoLight.intensity=inside?22:0;
@@ -491,7 +494,7 @@ export class CityView {
     this.vehicleLighting.update(lightSources,state.player,environment.daylight,dt,!hideCity,environment.rain);
     const p = state.player,riding=Boolean(p.passengerOf),inCar=p.mode==='drive'||riding;
     if((p.passengerOf??null)!==this.lastPassengerOf){this.lastPassengerOf=p.passengerOf??null;this.initialized=false;}
-    this.motion = this.lastPlayer ? Math.hypot(p.x - this.lastPlayer.x, p.z - this.lastPlayer.z) : 0; this.lastPlayer = {x:p.x,z:p.z}; this.hero.visible = !this.seated && !riding && p.mode === 'foot' && cameraMode !== 2; this.hero.position.set(p.x, 0.1, p.z); this.hero.rotation.y = -p.heading;
+    this.motion = this.lastPlayer ? Math.hypot(p.x - this.lastPlayer.x, p.z - this.lastPlayer.z) : 0; this.lastPlayer = {x:p.x,z:p.z}; this.hero.visible = !this.seated && !riding && p.mode === 'foot' && cameraMode !== 2; {const floor=inside?casinoFloor(p):{dx:0,dy:0};this.hero.position.set(p.x+floor.dx, 0.1+floor.dy, p.z);} this.hero.rotation.y = -p.heading;
     const walking = this.motion > 0.003;this.customAvatar.update(walking,this.visualTime,{speed:dt>0?this.motion/dt:0,heading:p.heading,dt}); this.heroLegs.forEach((leg, index) => { leg.rotation.x = walking ? Math.sin(state.time * 10 + index * Math.PI) * 0.45 : 0; }); this.heroArms.forEach((arm, index) => { arm.rotation.x = walking ? Math.sin(state.time * 10 + index * Math.PI) * -0.3 : 0; });
     if(crewTarget!==this.crewMarker){
       this.crewMarker=crewTarget;
@@ -534,9 +537,14 @@ export class CityView {
       lookAt = pivot.clone().addScaledVector(forward, cameraMode === 1 ? 0 : inCar ? 4 : 1.4);
     }
     if(inside) {
-      destination.x = THREE.MathUtils.clamp(destination.x, -9.9, 9.9);
-      destination.z = THREE.MathUtils.clamp(destination.z, -8.7, 9.2);
-      destination.y = THREE.MathUtils.clamp(destination.y, .6, 5.8);
+      if(!upstairs){
+        destination.x = THREE.MathUtils.clamp(destination.x, -9.9, 9.9);
+        destination.z = THREE.MathUtils.clamp(destination.z, -8.7, 9.2);
+        destination.y = THREE.MathUtils.clamp(destination.y, .6, 5.8);
+      }else{
+        const vip=CASINO.vip.bounds;destination.x=THREE.MathUtils.clamp(destination.x+0,vip.minX+.3,vip.maxX-.3);destination.z=THREE.MathUtils.clamp(destination.z,vip.minZ+.3,vip.maxZ+.2);destination.y=THREE.MathUtils.clamp(destination.y,.6,3.2);
+        destination.x+=CASINO.vip.shift;lookAt.x+=CASINO.vip.shift;destination.y+=CASINO.vip.floor;lookAt.y+=CASINO.vip.floor;
+      }
       destination.x+=CASINO.offset.x;destination.z+=CASINO.offset.z;lookAt.x+=CASINO.offset.x;lookAt.z+=CASINO.offset.z;
     }
     const fieldOfView = this.seated ? THREE.MathUtils.clamp((this.camera.aspect < 1 ? 78 : 62) / zoom, 42, 90) : cameraMode === 2 ? THREE.MathUtils.clamp(58 / zoom, 35, 85) : 58;

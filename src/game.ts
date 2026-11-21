@@ -6,7 +6,7 @@ import { nextSignalOpening } from './traffic-signals';
 import { advanceGarageGate,createGarageGate,garageGateCollision,garageSolidCollision,isGarageBuildingCollider } from './garage-building';
 import type { GarageVisitor } from './garage-building';
 import { fuelStationCollision } from './fuel-stations';
-import { CASINO, casinoToWorld } from './casino-location';
+import { CASINO, casinoToWorld, onVipFloor } from './casino-location';
 import { BIKE_LOCATION, DOCK, advanceBikeFlight, advanceBoat, canBoardDockBoat, canDisembarkBoat, resetMobilityMotion } from './mobility';
 import type { GameEvent, GameState, Input, Point, Vehicle, PursuitState, Roadblock } from './model';
 
@@ -86,9 +86,11 @@ export function nearestVehicle(s: GameState): Vehicle | undefined {
   return s.vehicles.filter(v => v.kind !== 'police' && v.health > 0 && (v.kind==='boat'?canBoardDockBoat(s.player,v):length(v, s.player) <= 4)).sort((a, b) => (a.kind==='boat'?1:length(a,s.player))-(b.kind==='boat'?1:length(b,s.player)))[0];
 }
 /** Contextual E prompt has the same priority as the actual interaction. */
-export function casinoAction(s: GameState): 'enter' | 'exit' | 'poker' | null {
+export function casinoAction(s: GameState): 'enter' | 'exit' | 'poker' | 'elevator' | null {
   if (s.player.mode !== 'foot') return null;
   if (s.interior === 'casino') {
+    if (length(s.player, onVipFloor(s.player) ? CASINO.vip.elevator : CASINO.elevator) <= 1.8) return 'elevator';
+    if (onVipFloor(s.player)) return null;
     if (length(s.player, CASINO.exit) <= 2) return 'exit';
     if (length(s.player, CASINO.table) <= 5.5) return 'poker';
     return null;
@@ -96,8 +98,8 @@ export function casinoAction(s: GameState): 'enter' | 'exit' | 'poker' | null {
   return length(s.player, CASINO.door) <= 3 ? 'enter' : null;
 }
 function moveIndoor(p: Point, dx: number, dz: number, radius: number) {
-  const { bounds, tableCollider } = CASINO;
-  const occupied = (point: Point) => [tableCollider, ...CASINO.furniture].some(table => point.x > table.x - table.halfX - radius && point.x < table.x + table.halfX + radius && point.z > table.z - table.halfZ - radius && point.z < table.z + table.halfZ + radius);
+  const vip = onVipFloor(p), bounds = vip ? CASINO.vip.bounds : CASINO.bounds, solids = vip ? CASINO.vip.colliders : [CASINO.tableCollider, ...CASINO.furniture];
+  const occupied = (point: Point) => solids.some(table => point.x > table.x - table.halfX - radius && point.x < table.x + table.halfX + radius && point.z > table.z - table.halfZ - radius && point.z < table.z + table.halfZ + radius);
   const x = clamp(p.x + dx, bounds.minX + radius, bounds.maxX - radius);
   if (!occupied({ x, z: p.z })) p.x = x;
   const z = clamp(p.z + dz, bounds.minZ + radius, bounds.maxZ - radius);
@@ -176,6 +178,16 @@ function interact(s: GameState, events: GameEvent[]) {
       s.interior = null;
       Object.assign(s.player, { x: CASINO.door.x, z: 73.6, heading: Math.PI, mode: 'foot', vehicleId: null });
       events.push({ kind: 'interior', text: 'Wyszedłeś z kasyna. Miasto znów czeka.' });
+      return;
+    }
+    if (action === 'elevator') {
+      if (onVipFloor(s.player)) {
+        Object.assign(s.player, { x: CASINO.elevator.x - 1.3, z: CASINO.elevator.z, heading: -Math.PI / 2 });
+        events.push({ kind: 'info', text: 'Winda zjechała na parter. Sala gier Sapphire.' });
+      } else {
+        Object.assign(s.player, { x: CASINO.vip.elevator.x + 1.4, z: CASINO.vip.elevator.z, heading: Math.PI / 2 });
+        events.push({ kind: 'info', text: 'Salon VIP na pierwszym piętrze: prywatny stół, bar z szampanem i widok na miasto.' });
+      }
       return;
     }
     if (action === 'poker') { events.push({ kind: 'poker', text: 'Texas Hold’em — zajmij miejsce przy stole.' }); return; }

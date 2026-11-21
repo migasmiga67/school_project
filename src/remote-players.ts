@@ -7,6 +7,7 @@ import { appearanceColors, type AppearanceState } from './appearance';
 import { createMobilityVehicle } from './mobility-view';
 import { AvatarMotion } from './avatar-motion';
 import { createVehicleModel } from './vehicle-model';
+import { casinoFloor } from './casino-location';
 import { vehicleStyleKey } from './vehicle-style';
 import { createVehicleMotion, stepVehicleMotion, type VehicleMotion } from './vehicle-motion';
 import { CHARACTER_HAIR_THETA, CHARACTER_HEAD_SCALE, createCharacterFaceGeometry } from './character-geometry';
@@ -237,7 +238,9 @@ export class RemotePlayersView {
         }
         visual.name = member.name; visual.slot = slot;
       }
-      const targetX = driving ? pose.vehicle!.x : rideVehicle?.x??pose.x, targetZ = driving ? pose.vehicle!.z : rideVehicle?.z??pose.z;
+      // Guests upstairs are drawn on the VIP floor above the hall.
+      const floor = pose.interior === 'casino' && !driving && !riding ? casinoFloor(pose) : { dx: 0, dy: 0 };
+      const targetX = (driving ? pose.vehicle!.x : rideVehicle?.x??pose.x) + floor.dx, targetZ = driving ? pose.vehicle!.z : rideVehicle?.z??pose.z;
       const heading = driving ? pose.vehicle!.heading : rideVehicle?.heading??pose.heading;
       const jump = !visual.initialized || visual.location !== pose.interior || visual.mode !== pose.mode || visual.passengerOf!==(pose.passengerOf??null) || Math.hypot(targetX - visual.root.position.x, targetZ - visual.root.position.z) > 18;
       const previousX = visual.root.position.x, previousZ = visual.root.position.z, oldHeading = visual.heading;
@@ -247,7 +250,7 @@ export class RemotePlayersView {
         visual.root.position.z += (targetZ - visual.root.position.z) * blend;
         visual.heading = wrap(visual.heading + wrap(heading - visual.heading) * blend);
       }
-      visual.root.position.y = driving||riding ? .05 : .1;
+      visual.root.position.y = (driving||riding ? .05 : .1) + floor.dy;
       visual.initialized = true; visual.location = pose.interior; visual.mode = pose.mode;visual.passengerOf=pose.passengerOf??null;
       visual.avatar.visible = !driving&&!riding; visual.car.visible = driving&&member.id!==hideVehicleOf;
       visual.avatar.rotation.y = visual.car.rotation.y = -visual.heading;

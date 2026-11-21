@@ -140,3 +140,20 @@ describe('walk-in casino',()=>{
     advance(wall,1.5,{throttle:true,viewHeading:0});expect(wall.interior).toBeNull();expect(wall.player.z).toBeGreaterThan(72.4);
   });
 });
+
+describe('VIP lift',()=>{
+  it('rides up to the lounge and back down, walking within the lounge walls',()=>{
+    const state=enter();Object.assign(state.player,{x:CASINO.elevator.x-1,z:CASINO.elevator.z});
+    expect(casinoAction(state)).toBe('elevator');
+    tick(state,{interact:true});
+    expect(state.interior).toBe('casino');expect(state.player.x).toBeGreaterThan(30);
+    advance(state,6,{throttle:true,viewHeading:Math.PI/2});
+    expect(state.player.x).toBeLessThanOrEqual(CASINO.vip.bounds.maxX);expect(state.player.x).toBeGreaterThan(CASINO.vip.bounds.minX);
+    // No poker table, street door or hall station is reachable upstairs.
+    Object.assign(state.player,{x:40,z:6});expect(casinoAction(state)).toBeNull();
+    advance(state,3,{brake:true,viewHeading:0});expect(state.interior).toBe('casino');expect(state.player.z).toBeLessThanOrEqual(CASINO.vip.bounds.maxZ);
+    Object.assign(state.player,{x:CASINO.vip.elevator.x+1,z:CASINO.vip.elevator.z});
+    tick(state,{interact:true});
+    expect(state.player.x).toBeLessThan(CASINO.bounds.maxX);expect(Math.hypot(state.player.x-CASINO.elevator.x,state.player.z-CASINO.elevator.z)).toBeLessThan(2);
+  });
+});

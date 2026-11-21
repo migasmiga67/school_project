@@ -1,4 +1,4 @@
-import { CASINO } from './casino-location';
+import { CASINO, onVipFloor } from './casino-location';
 import { WORLD_BOUNDS, type GameState, type Point } from './model';
 import { CITY_BUILDINGS, CITY_SPACES, CITY_STREETS, routeStreets } from './city-map';
 import { FUEL_STATIONS } from './fuel-stations';
@@ -45,13 +45,27 @@ function teammate(ctx: CanvasRenderingContext2D, point: {x:number;y:number}, mem
 }
 
 function indoorMap(ctx: CanvasRenderingContext2D, state: GameState, others: OnlineMember[]) {
+  if (onVipFloor(state.player)) {
+    // The VIP lounge one floor up: its own plan, with guests on the same floor only.
+    ctx.fillStyle = '#14252d'; ctx.fillRect(0, 0, 224, 200); ctx.fillStyle = '#3a2433'; ctx.fillRect(22, 20, 180, 160);
+    ctx.strokeStyle = '#cbb581'; ctx.lineWidth = 2; ctx.strokeRect(22, 20, 180, 160);
+    ctx.fillStyle = '#9fc8d8'; ctx.fillRect(22, 176, 180, 4);
+    const at = (p: { x: number; z: number }) => ({ x: 112 + (p.x - 40) * 10, y: 110 + (p.z + 1.5) * 10 });
+    const table = at({ x: 40, z: -3 }); ctx.fillStyle = '#14523f'; ctx.beginPath(); ctx.ellipse(table.x, table.y, 24, 13, 0, 0, Math.PI * 2); ctx.fill();
+    ctx.fillStyle = '#efdcb3'; ctx.font = 'bold 11px Arial'; ctx.textAlign = 'center'; ctx.textBaseline = 'middle'; ctx.fillText('VIP', 112, 38);
+    const lift = at(CASINO.vip.elevator); ctx.fillStyle = '#e2b47e'; ctx.fillRect(lift.x - 4, lift.y - 9, 8, 18);
+    let upstairs = 0;
+    for (const member of others) if (member.pose.interior === 'casino' && onVipFloor(member.pose)) { teammate(ctx, at(member.pose), member); upstairs++; }
+    arrow(ctx, at(state.player), state.player.heading);
+    return upstairs;
+  }
   ctx.fillStyle = '#14252d'; ctx.fillRect(0, 0, 224, 200); ctx.fillStyle = '#29484b'; ctx.fillRect(16, 12, 192, 176);
   ctx.strokeStyle = '#cbb581'; ctx.lineWidth = 2; ctx.strokeRect(16, 12, 192, 176);
   ctx.fillStyle = '#236c62'; ctx.beginPath(); ctx.ellipse(112, 78, 31, 17, 0, 0, Math.PI * 2); ctx.fill();
   ctx.fillStyle = '#efdcb3'; ctx.font = 'bold 13px Arial'; ctx.textAlign = 'center'; ctx.textBaseline = 'middle'; ctx.fillText('♠', 112, 79);
   ctx.fillStyle = '#e2b47e'; ctx.fillRect(100, 181, 24, 8);
   let visible = 0;
-  for (const member of others) if (member.pose.interior === 'casino') {
+  for (const member of others) if (member.pose.interior === 'casino' && !onVipFloor(member.pose)) {
     const position = member.pose.seated
       ? { x: 112 + Math.sin(member.slot * Math.PI / 2) * 37, y: 78 + Math.cos(member.slot * Math.PI / 2) * 23 }
       : { x: 112 + member.pose.x * 8.4, y: 94 + member.pose.z * 8.4 };
