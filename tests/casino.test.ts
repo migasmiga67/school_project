@@ -59,7 +59,7 @@ describe('casino portals and interactions',()=>{
     expect(casinoAction(state)).toBe('exit');
     const events=tick(state,{interact:true});
     expect(state.interior).toBeNull();expect(state.player.mode).toBe('foot');expect(state.player.x).toBe(CASINO.door.x);
-    expect(state.player.z).toBeCloseTo(CASINO.door.z+1.8);expect(state.player.heading).toBe(Math.PI);
+    expect(state.player.z).toBeCloseTo(73.6);expect(state.player.heading).toBe(Math.PI);
     expect(events.filter(event=>event.kind==='interior')).toHaveLength(1);expect(state.money).toBe(1250);
   });
   it('opens poker only near the table without changing the wallet in the simulation',()=>{
@@ -117,5 +117,25 @@ describe('walkable casino and suspended city',()=>{
     expect(state.interior).toBe('casino');expect(state.player.x).toBe(CASINO.entry.x);expect(state.player.z).toBe(CASINO.entry.z);
     expect(state.player.health).toBe(63);expect(state.vehicles[0].health).toBe(22);expect(state.money).toBe(1250);
     expect(events.some(event=>event.text.includes('wejścia kasyna'))).toBe(true);
+  });
+});
+
+describe('walk-in casino',()=>{
+  it('walks from the pavement through the doorway into the hall and back out, without pressing E',()=>{
+    const state=atDoor();Object.assign(state.player,{x:CASINO.door.x+.6,z:74.4});
+    advance(state,1.5,{throttle:true,viewHeading:0});
+    expect(state.interior).toBe('casino');
+    // The hall frame is the tower's ground floor: local + offset lands inside the building.
+    const world={x:state.player.x+CASINO.offset.x,z:state.player.z+CASINO.offset.z};
+    expect(Math.abs(world.x-CASINO.door.x)).toBeLessThan(CASINO.doorHalf);expect(world.z).toBeLessThan(72);
+    advance(state,1,{throttle:true,viewHeading:0});expect(state.player.z).toBeLessThan(CASINO.bounds.maxZ-1);
+    advance(state,3,{brake:true,viewHeading:0});
+    expect(state.interior).toBeNull();expect(state.player.z).toBeGreaterThan(73);expect(Math.abs(state.player.x-CASINO.door.x)).toBeLessThan(CASINO.doorHalf);
+  });
+  it('keeps the doorway shut to a wanted player and the walls solid beside it',()=>{
+    const wanted=atDoor();wanted.wanted=1;Object.assign(wanted.player,{x:CASINO.door.x,z:74.2});
+    advance(wanted,1.5,{throttle:true,viewHeading:0});expect(wanted.interior).toBeNull();
+    const wall=atDoor();Object.assign(wall.player,{x:CASINO.door.x+5,z:74.2});
+    advance(wall,1.5,{throttle:true,viewHeading:0});expect(wall.interior).toBeNull();expect(wall.player.z).toBeGreaterThan(72.4);
   });
 });

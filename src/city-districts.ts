@@ -5,6 +5,7 @@ import type { SurfaceLibrary, SurfaceMaterial } from './surface-materials';
 import { WORLD_LANDMARKS } from './world-layout';
 import { CITY_ACCESS_CLEARANCES,CITY_BENCH_PLACEMENTS,CITY_PLACEMENT_CONTEXT,CITY_STREET_SIGN_PLACEMENTS,canPlaceDecoration,findStreetDecoration,type DecorationFootprint } from './city-placement';
 import { GARAGE_BUILDING } from './garage-building';
+import { CASINO } from './casino-location';
 
 const HOME_COLORS=[0xe4c8a4,0xb8cbb5,0xd4ada1,0xb7c9ce,0xd3c692];
 const SHOP_NAMES=['PALM MARKET','CAFE AZUL','COAST RECORDS','SUNDOWN HOTEL','LA FLOR','NOVA STUDIO'];
@@ -33,8 +34,18 @@ export class CityDistrictsView {
     const brick=art.tinted(surfaces.brick,index%2?0xcfc1ad:0xe2c9b1),pastel=art.tinted(surfaces.stucco,HOME_COLORS[index%HOME_COLORS.length]);
     const facade=b.district==='port'?art.tinted(surfaces.stucco,0xb9c2b8):b.district==='financial'?surfaces.office:b.district==='westwood'?pastel:art.tinted(surfaces.stucco,HOME_COLORS[index%HOME_COLORS.length]);
     if(b.style==='tower'||b.style==='office'){
-      const podium=b.style==='tower'?5.3:Math.min(4,h*.25),towerW=b.style==='tower'?w*.76:w,towerD=b.style==='tower'?d*.78:d;
-      this.body(w,podium,d,trim,b.x,b.z);this.body(towerW,h-podium,towerD,surfaces.office,b.x,b.z,podium+(h-podium)/2+.18);
+      // The casino tower is hollow at street level: its hall is a real, walk-in ground floor.
+      const casino=b.x===CASINO.center.x&&b.z===CASINO.center.z;
+      const podium=casino?7.2:b.style==='tower'?5.3:Math.min(4,h*.25),towerW=b.style==='tower'?w*.76:w,towerD=b.style==='tower'?d*.78:d;
+      if(casino){
+        const dark=art.material(0x15303a),wall=.4;
+        for(const side of[-1,1])this.body(wall,podium,d,dark,b.x+side*(w/2-wall/2),b.z);
+        this.body(w,podium,wall,dark,b.x,b.z-d/2+wall/2);
+        // Behind the hall: service rooms fill the rest of the footprint.
+        const hallBack=CASINO.offset.z+CASINO.bounds.minZ-1.65;this.body(w-wall*2,podium,Math.max(.4,hallBack-(b.z-d/2)),dark,b.x,(hallBack+b.z-d/2)/2);
+        art.box(w,.4,d,trim,b.x,podium-.02,b.z);
+      }else this.body(w,podium,d,trim,b.x,b.z);
+      this.body(towerW,h-podium,towerD,surfaces.office,b.x,b.z,podium+(h-podium)/2+.18);
       if(b.style==='tower'){
         this.body(towerW*.78,Math.max(2,h*.13),towerD*.8,surfaces.office,b.x,b.z,h+h*.065+.18);
         art.box(towerW+.22,.28,towerD+.22,trim,b.x,h+.3,b.z);
@@ -44,7 +55,7 @@ export class CityDistrictsView {
       art.box(w+.12,.32,d+.12,trim,b.x,podium+.2,b.z);
       // The podium gets lobby and office windows on its side and rear walls.
       this.windows(b,w,d,podium,index,3.6);
-      this.storefront(b,w,d,'AETHER  /  FINANCIAL',index);
+      if(!casino)this.storefront(b,w,d,'AETHER  /  FINANCIAL',index);
     }else if(b.style==='townhouse'){
       const count=w>17?3:2,unit=w/count;
       for(let home=0;home<count;home++){

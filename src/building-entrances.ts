@@ -26,6 +26,8 @@ const unit=(value:number)=>Math.max(0,Math.min(1,Number.isFinite(value)?value:0)
 export function entranceWantsOpen(entrance:BuildingEntrance,actors:readonly EntranceActor[],alreadyOpen=false):boolean {
  const radius=alreadyOpen?7.2:5.8;
  return actors.some(actor=>{
+  // Someone inside the hall walking towards the front opens the casino door from within.
+  if(actor.interior==='casino'&&entrance.id==='casino')return actor.mode==='foot'&&!actor.homeId&&Number.isFinite(actor.x+actor.z)&&actor.z>=CASINO.bounds.maxZ-(alreadyOpen?5:3.8)&&Math.abs(actor.x)<=entrance.width/2+1.6;
   if(actor.mode!=='foot'||actor.interior||actor.homeId||actor.passengerOf||!Number.isFinite(actor.x+actor.z))return false;
   if(!(actor.access??['casino']).includes(entrance.id))return false;
   const dx=actor.x-entrance.portal.x,dz=actor.z-entrance.portal.z,c=Math.cos(entrance.rotation),s=Math.sin(entrance.rotation);
