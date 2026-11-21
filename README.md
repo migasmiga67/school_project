@@ -162,7 +162,7 @@ Co **120 sekund** pojawia się wydarzenie dostępne przez **40 sekund**: zgubion
 
 ## Kasyno i poker
 
-Kasyno Sapphire Club zajmuje parter wieżowca przy Southside Avenue. Drzwi otwierają się po podejściu i można po prostu wejść z chodnika do środka (albo nacisnąć **E** przy wejściu); tak samo wychodzi się na ulicę. W budynku są sala gier, bar z barmanem, kasa z żetonami, dwa rzędy automatów pod antresolą, toalety i drzwi dla personelu. Przez otwarte drzwi widać ulicę, a z ulicy wnętrze. Z pościgiem na ogonie ochrona cię nie wpuści.
+Kasyno Sapphire Club zajmuje parter wieżowca przy Southside Avenue. Drzwi otwierają się po podejściu i można po prostu wejść z chodnika do środka (albo nacisnąć **E** przy wejściu); tak samo wychodzi się na ulicę. Przy prawej ścianie sali jest winda (**E**) do salonu VIP na piętrze: stół high stakes z krupierem, bar z szampanem, fortepian, kanapy i panoramiczne okna na Southside (przy grafice sprzętowej widać przez nie miasto). W budynku są też sala gier, bar z barmanem, kasa z żetonami, dwa rzędy automatów pod antresolą, toalety i drzwi dla personelu. Przez otwarte drzwi widać ulicę, a z ulicy wnętrze. Z pościgiem na ogonie ochrona cię nie wpuści.
 
 W sali są osobne stanowiska: **blackjack po lewej**, **ruletka po prawej**, **turniej przy lewej ścianie w głębi** i dotychczasowy stół pokerowy pośrodku. Podejdź i naciśnij **E** albo **K** przy dodatkowym stanowisku. Niewielki panel pozostawia widoczne wnętrze 3D.
 

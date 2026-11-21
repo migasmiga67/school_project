@@ -556,13 +556,13 @@ function district(p:Point):string{return state.interior==='casino'?CASINO.name:!
 function updateCasinoHUD(){
  const action=casinoAction(state),near=nearestVehicle(state),inside=state.interior==='casino';
  $('#interaction').classList.toggle('hidden',state.player.mode==='foot'&&!near&&!action);
- if(action)$('#interaction-text').textContent=action==='enter'?(state.wanted?'Zgub pościg, aby wejść do kasyna':'Wejdź do kasyna Sapphire Club'):action==='exit'?'Wyjdź z kasyna':'Zagraj w Texas Hold’em';
+ if(action)$('#interaction-text').textContent=action==='enter'?(state.wanted?'Zgub pościg, aby wejść do kasyna':'Wejdź do kasyna Sapphire Club'):action==='exit'?'Wyjdź z kasyna':action==='elevator'?(state.player.x>25?'Winda: zjedź na parter':'Winda: wjedź do salonu VIP'):'Zagraj w Texas Hold’em';
  $('#wanted').classList.toggle('hidden',inside);
  $('#casino-nav').setAttribute('aria-pressed',String(casinoNavigation));
  $('#map-hint').textContent=inside?'♠ Stół · ↳ Wyjście':casinoNavigation?'♠ Trasa do kasyna':'◈ Cel zlecenia · ♠ Kasyno';
  if(inside){
   $('#mission-label').textContent='SAPPHIRE CLUB · KASYNO';$('#mission-status').textContent='OTWARTE';
-  $('#mission-title').textContent='Sala gier Sapphire';$('#mission-instruction').textContent='Poker pośrodku, blackjack po lewej, ruletka po prawej. E przy stanowisku; turniej przy lewej ścianie.';
+  const upstairs=state.player.x>25;$('#mission-title').textContent=upstairs?'Salon VIP':'Sala gier Sapphire';$('#mission-instruction').textContent=upstairs?'Stół high stakes, bar z szampanem i panorama Southside. Winda na parter przy lewej ścianie.':'Poker pośrodku, blackjack po lewej, ruletka po prawej, turniej przy lewej ścianie. Winda do salonu VIP przy prawej ścianie.';
   $('#mission-distance').textContent='Blindy $5 / $10';$('#mission-reward').textContent='Texas Hold’em';
   $('#mission-progress').classList.add('hidden');$('#mission-next').classList.add('hidden');$('#escape').classList.add('hidden');
   $('#car-name').textContent='SAPPHIRE CLUB · SALA GIER';$('#clock').textContent='♠ SAPPHIRE CLUB';

@@ -34,6 +34,7 @@ export class CasinoView {
     this.exterior.position.set(CASINO.center.x, 0, CASINO.center.z);
     this.makeExterior();
     this.makeInterior();
+    this.makeVipLounge();
 
     const blue = this.material(0x80e0f0, 0x2875c2, 0.65);
     const gold = this.material(0xf3d394, 0xb28436, 0.45);
@@ -290,6 +291,77 @@ export class CasinoView {
     }
   }
 
+
+  /** Lift doors in the hall and the VIP lounge one floor up, with panorama windows over Southside. */
+  private makeVipLounge() {
+    const hall = this.interior;
+    const steel = this.material(0x9aa4a8), gold = this.material(0xd7b66e), dark = this.material(0x10262e);
+    const call = this.material(0xf4dca9, 0xd8a24a, .8);
+    // Hall side: brushed steel doors in a gold portal on the right wall.
+    const ex = 10.82, ez = CASINO.elevator.z;
+    this.box(.12, 3.1, 2.3, gold, hall, ex, 1.55, ez);
+    for (const side of [-1, 1]) this.box(.06, 2.6, .92, steel, hall, ex - .07, 1.3, ez + side * .47);
+    this.box(.05, .3, .2, dark, hall, ex - .08, 1.3, ez + 1.4);
+    this.box(.04, .08, .08, call, hall, ex - .11, 1.35, ez + 1.4);
+    this.label('WINDA · SALON VIP', '#f4db9d', 2.3, .45, hall, ex - .09, 3.35, ez, -Math.PI / 2);
+    // Lounge one floor up, built in its own walking frame (x 31..49) and shifted over the hall.
+    const vip = new THREE.Group(); vip.name = 'Sapphire VIP lounge';
+    vip.position.set(CASINO.vip.shift, CASINO.vip.floor, 0); hall.add(vip);
+    const b = CASINO.vip.bounds, cx = (b.minX + b.maxX) / 2, cz = (b.minZ + b.maxZ) / 2, w = b.maxX - b.minX + 1, d = b.maxZ - b.minZ + 1.2;
+    const carpet = this.material(0x3a1d2e), wall = this.material(0x1b2b33), wood = this.material(0x3d241f), velvet = this.material(0x6b2140);
+    const felt = this.material(0x14523f), cream = this.material(0xe7dcc4), black = this.material(0x0d0f12);
+    this.box(w, .2, d, carpet, vip, cx, -.1, cz);
+    for (let x = b.minX + 1; x < b.maxX; x += 3) this.box(.08, .01, d - .4, gold, vip, x, .01, cz);
+    this.box(w, .25, d, dark, vip, cx, 3.6, cz);
+    this.box(.3, 3.6, d, wall, vip, b.minX - .5, 1.8, cz);
+    this.box(.3, 3.6, d, wall, vip, b.maxX + .5, 1.8, cz);
+    this.box(w, 3.6, .3, wall, vip, cx, 1.8, b.minZ - .6);
+    for (const x of [b.minX - .32, b.maxX + .32]) this.box(.05, .1, d, gold, vip, x, 1.1, cz);
+    // Floor-to-ceiling glass over the street: thin gold mullions, a low sill.
+    this.box(w, .45, .3, wall, vip, cx, .22, b.maxZ + .6);
+    this.box(w, .2, .3, wall, vip, cx, 3.45, b.maxZ + .6);
+    for (let x = b.minX - .5; x <= b.maxX + .6; x += 2.2) this.box(.08, 3.2, .1, gold, vip, x, 1.8, b.maxZ + .55);
+    const glass = this.software ? new THREE.MeshLambertMaterial({ color: 0x9fc8d8, transparent: true, opacity: .22 }) : new THREE.MeshStandardMaterial({ color: 0x9fc8d8, transparent: true, opacity: .18, roughness: .05, metalness: .6 });
+    const pane = this.mesh(new THREE.PlaneGeometry(w, 3), glass, vip, cx, 1.95, b.maxZ + .5); pane.rotation.y = Math.PI; pane.castShadow = false;
+    // Lift landing on the west wall.
+    const lz = CASINO.vip.elevator.z;
+    this.box(.12, 3.1, 2.3, gold, vip, b.minX - .36, 1.55, lz);
+    for (const side of [-1, 1]) this.box(.06, 2.6, .92, steel, vip, b.minX - .3, 1.3, lz + side * .47);
+    this.label('PARTER · SALA GIER', '#c9f3dc', 2.3, .42, vip, b.minX - .28, 3.0, lz, Math.PI / 2);
+    // High-roller table with a dealer and two players.
+    const table = new THREE.Group(); table.position.set(40, 0, -3); vip.add(table);
+    const rim = this.mesh(new THREE.CylinderGeometry(1, 1, .2, 40), wood, table, 0, .98, 0); rim.scale.set(2.5, 1, 1.35);
+    const top = this.mesh(new THREE.CylinderGeometry(1, 1, .06, 40), felt, table, 0, 1.1, 0); top.scale.set(2.3, 1, 1.2);
+    this.mesh(new THREE.CylinderGeometry(.5, .8, .9, 10), dark, table, 0, .45, 0);
+    for (const [x, z, r] of [[-1.6, 1.25, 0], [1.6, 1.25, 0], [-2.85, 0, -Math.PI / 2], [2.85, 0, Math.PI / 2]] as const) this.chair(table, x, z, r, wood, velvet, gold);
+    this.guest(table, 0, -1.6, Math.PI, 0x111418, 0xc49a7a, 0x2a2420);
+    this.guest(table, -2.85, 0, -Math.PI / 2, 0x6e1f3f, 0xd0a684, 0x1f1a1c);
+    this.guest(table, 2.85, 0, Math.PI / 2, 0x1f3a5e, 0x8c6449, 0x161414);
+    for (let i = 0; i < 6; i++) this.mesh(new THREE.CylinderGeometry(.06, .06, .05 + (i % 3) * .04, 10), [gold, velvet, cream][i % 3], table, -.8 + i * .32, 1.17, .35);
+    this.label('HIGH STAKES · $1000', '#f4db9d', 3.2, .5, vip, 40, 3.05, b.minZ - .43);
+    // Champagne bar on the east wall.
+    this.box(.7, 1.1, 6.2, wood, vip, 47.9, .55, -2.5);
+    this.box(.86, .07, 6.4, gold, vip, 47.85, 1.14, -2.5);
+    this.box(.3, 2.4, 6.4, black, vip, b.maxX + .3, 1.7, -2.5);
+    for (const y of [1.45, 2.05]) for (let i = 0; i < 10; i++) this.mesh(new THREE.CylinderGeometry(.045, .055, .34, 6), [gold, felt, cream][i % 3], vip, b.maxX + .22, y + .17, -5.1 + i * .55);
+    this.mesh(new THREE.CylinderGeometry(.16, .12, .24, 12), steel, vip, 47.75, 1.3, -1.2);
+    this.guest(vip, 48.55, -3.4, Math.PI / 2, 0xf0ece2, 0xb98466, 0x2a2121);
+    this.label('CHAMPAGNE BAR', '#f4db9d', 2.8, .5, vip, b.maxX + .13, 3.0, -2.5, -Math.PI / 2);
+    // Sofas facing the windows, low tables, a grand piano and palms.
+    for (const x of [36, 44]) {
+      this.box(3.3, .45, 1, velvet, vip, x, .32, 4.9); this.box(3.3, .7, .25, velvet, vip, x, .75, 5.32);
+      this.box(1.4, .38, .7, wood, vip, x, .2, 3.4);
+    }
+    this.box(2, .95, 1.8, black, vip, 33.6, .55, -7.6); this.box(2.05, .06, 1.85, black, vip, 33.6, 1.25, -7.4);
+    const lid = this.box(1.9, .04, 1.6, black, vip, 33.6, 1.6, -7.8); lid.rotation.x = -.5;
+    for (const [x, z] of [[b.minX + .3, b.maxZ - .3], [b.maxX - .3, b.maxZ - .3], [b.maxX - .4, b.minZ + .4]] as const) {
+      this.mesh(new THREE.CylinderGeometry(.28, .22, .5, 10), gold, vip, x, .25, z);
+      this.mesh(new THREE.SphereGeometry(.55, 10, 8), felt, vip, x, 1.05, z);
+    }
+    this.guest(vip, 44.6, 4.9, 0, 0x2d4a5a, 0xc8a07a, 0x2b241f);
+    const chandelier = this.mesh(new THREE.TorusGeometry(1.6, .05, 6, 36), gold, vip, 40, 3.1, -3); chandelier.rotation.x = -Math.PI / 2;
+    this.label('SALON VIP', '#f4db9d', 4, .9, vip, 40, 2.3, b.minZ - .43);
+  }
   private chair(root: THREE.Object3D, x: number, z: number, rotation: number, wood: LitMaterial, cushion: LitMaterial, gold: LitMaterial) {
     const seat = new THREE.Group(); seat.position.set(x, 0, z); seat.rotation.y = rotation; root.add(seat);
     this.box(1.12, 0.2, 1.0, cushion, seat, 0, 0.65, 0);
