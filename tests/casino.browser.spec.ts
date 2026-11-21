@@ -81,6 +81,8 @@ async function visitCasinoTable(page: Page, capture?: (name: string) => Promise<
   // The doorway is walk-in: a step too far already carries the player inside.
   if (doorway.state.interior !== 'casino') {
     expect(Math.hypot(doorway.state.player.x - 20, doorway.state.player.z - 74)).toBeLessThan(3);
+    // Centre on the doorway first: at x 18.5 an overshoot leaves the body against the door frame.
+    await approach(page, { x: 20, z: 74.9 }, .45);
     await page.keyboard.down('w');
     try { await expect.poll(async () => (await snapshot(page)).state.interior, { intervals: [50, 100], timeout: 8000 }).toBe('casino'); }
     finally { await page.keyboard.up('w'); }
