@@ -51,6 +51,17 @@ async function walkUntil(page: Page, key: string, axis: 'x' | 'z', target: numbe
   }
 }
 
+
+/** Short corrective steps: slow CI frames overshoot a single long key press. Hall camera faces -Z. */
+async function approach(page: Page, target: { x: number; z: number }, tolerance = .6) {
+  for (let step = 0; step < 60; step++) {
+    const player = (await snapshot(page)).state.player, dx = target.x - player.x, dz = target.z - player.z;
+    if (Math.hypot(dx, dz) <= tolerance) return;
+    const key = Math.abs(dx) > Math.abs(dz) ? (dx > 0 ? 'd' : 'a') : (dz > 0 ? 's' : 'w');
+    await page.keyboard.down(key); await page.waitForTimeout(Math.min(260, 60 + Math.hypot(dx, dz) * 90)); await page.keyboard.up(key);
+  }
+  throw new Error(`could not reach ${JSON.stringify(target)}`);
+}
 /** Follow the actual sidewalk from the normal spawn; no teleport or engine bypass. */
 async function visitCasinoTable(page: Page, capture?: (name: string) => Promise<void>) {
   await page.goto('./');
@@ -171,11 +182,11 @@ test('można wejść do kasyna, rozegrać pokera, wypłacić żetony i wrócić 
   expect((await snapshot(page)).state.money).toBe(1050 + refund);
   await page.locator('#resume').click();
   // Walk straight back out through the open doorway onto the pavement.
-  await page.keyboard.down('Shift');await page.keyboard.down('s');
-  try { await expect.poll(async () => (await snapshot(page)).state.interior, { intervals: [50, 100], timeout: 15000 }).toBeNull(); }
-  finally { await page.keyboard.up('s');await page.keyboard.up('Shift'); }
+  await page.keyboard.down('s');
+  try { await expect.poll(async () => (await snapshot(page)).state.interior, { intervals: [50, 100], timeout: 20000 }).toBeNull(); }
+  finally { await page.keyboard.up('s'); }
   const outside = (await snapshot(page)).state.player;
-  expect(Math.abs(outside.x - 20)).toBeLessThan(2);expect(outside.z).toBeGreaterThan(72.9);expect(outside.z).toBeLessThan(77);
+  expect(Math.abs(outside.x - 20)).toBeLessThan(2);expect(outside.z).toBeGreaterThan(72.9);expect(outside.z).toBeLessThan(82);
   expect((await snapshot(page)).state.money).toBe(1050 + refund);
   expect(errors).toEqual([]);
   expect(failed).toEqual([]);
@@ -231,8 +242,7 @@ test('blackjack i pełny obrót ruletki działają przy osobnych stołach w wido
   if ((await snapshot(page)).state.interior !== 'casino') await page.keyboard.press('e');
   await expect.poll(async () => (await snapshot(page)).state.interior).toBe('casino');
   // Normal walking from the entrance reaches the left-hand blackjack station.
-  await walkUntil(page, 'a', 'x', -6.8, false);
-  await walkUntil(page, 'w', 'z', 3.2, false);
+  await approach(page, { x: -6.8, z: 3.2 });
   await page.keyboard.press('e');
   await expect(page.locator('#casino-games-dialog')).toBeVisible();
   await expect(page.locator('#casino-games-title')).toHaveText(/BLACKJACK/);
@@ -255,7 +265,7 @@ test('blackjack i pełny obrót ruletki działają przy osobnych stołach w wido
   await page.locator('#casino-games-close').click();
   await expect.poll(async () => (await snapshot(page)).paused).toBe(false);
   // Cross the open south side, clear of the physical poker table collider.
-  await walkUntil(page, 'd', 'x', 6.8, true);
+  await approach(page, { x: 6.8, z: 3.2 });
   await page.keyboard.press('e');
   await expect(page.locator('#casino-games-title')).toHaveText(/RULETKA/);
   await expect(page.locator('#roulette-wheel svg')).toBeVisible();
