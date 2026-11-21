@@ -6,7 +6,7 @@ import { nextSignalOpening } from './traffic-signals';
 import { advanceGarageGate,createGarageGate,garageGateCollision,garageSolidCollision,isGarageBuildingCollider } from './garage-building';
 import type { GarageVisitor } from './garage-building';
 import { fuelStationCollision } from './fuel-stations';
-import { CASINO } from './casino-location';
+import { CASINO, casinoToWorld } from './casino-location';
 import { BIKE_LOCATION, DOCK, advanceBikeFlight, advanceBoat, canBoardDockBoat, canDisembarkBoat, resetMobilityMotion } from './mobility';
 import type { GameEvent, GameState, Input, Point, Vehicle, PursuitState, Roadblock } from './model';
 
@@ -96,8 +96,8 @@ export function casinoAction(s: GameState): 'enter' | 'exit' | 'poker' | null {
   return length(s.player, CASINO.door) <= 3 ? 'enter' : null;
 }
 function moveIndoor(p: Point, dx: number, dz: number, radius: number) {
-  const { bounds, tableCollider: table } = CASINO;
-  const occupied = (point: Point) => point.x > table.x - table.halfX - radius && point.x < table.x + table.halfX + radius && point.z > table.z - table.halfZ - radius && point.z < table.z + table.halfZ + radius;
+  const { bounds, tableCollider } = CASINO;
+  const occupied = (point: Point) => [tableCollider, ...CASINO.furniture].some(table => point.x > table.x - table.halfX - radius && point.x < table.x + table.halfX + radius && point.z > table.z - table.halfZ - radius && point.z < table.z + table.halfZ + radius);
   const x = clamp(p.x + dx, bounds.minX + radius, bounds.maxX - radius);
   if (!occupied({ x, z: p.z })) p.x = x;
   const z = clamp(p.z + dz, bounds.minZ + radius, bounds.maxZ - radius);
@@ -174,7 +174,7 @@ function interact(s: GameState, events: GameEvent[]) {
     }
     if (action === 'exit') {
       s.interior = null;
-      Object.assign(s.player, { x: CASINO.door.x, z: CASINO.door.z + 1.8, heading: Math.PI, mode: 'foot', vehicleId: null });
+      Object.assign(s.player, { x: CASINO.door.x, z: 73.6, heading: Math.PI, mode: 'foot', vehicleId: null });
       events.push({ kind: 'interior', text: 'Wyszedłeś z kasyna. Miasto znów czeka.' });
       return;
     }
@@ -232,11 +232,23 @@ function walk(s: GameState, input: Input, dt: number) {
   if (norm) {
     const speed = input.sprint ? ((s.player.caffeine ?? 0) > 0 ? 7 : 6) : 3.2;
     s.player.heading = Math.atan2(x, -z);
-    if (s.interior === 'casino') moveIndoor(s.player, x / norm * speed * dt, z / norm * speed * dt, .55);
-    else {
+    if (s.interior === 'casino') {
+      moveIndoor(s.player, x / norm * speed * dt, z / norm * speed * dt, .55);
+      // Walking out through the open doorway returns to the street without a portal.
+      if (z > 0 && s.player.z >= CASINO.bounds.maxZ - .6 && Math.abs(s.player.x) < CASINO.doorHalf) {
+        s.interior = null;
+        const outside = casinoToWorld(s.player);
+        Object.assign(s.player, { x: outside.x, z: 73.25 });
+      }
+    } else {
       const previous={x:s.player.x,z:s.player.z};
       move(s,s.player, x / norm * speed * dt, z / norm * speed * dt, .55);
       if(roadblockHit(s,s.player,.55))Object.assign(s.player,previous);
+      // The casino has a real doorway: pressing into it walks you inside.
+      if (z < 0 && s.wanted === 0 && Math.abs(s.player.x - CASINO.door.x) < CASINO.doorHalf && s.player.z < 73.3 && s.player.z > 71) {
+        s.interior = 'casino';
+        Object.assign(s.player, { x: s.player.x - CASINO.offset.x, z: CASINO.bounds.maxZ - .9 });
+      }
     }
   }
 }

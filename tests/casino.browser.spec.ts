@@ -65,10 +65,15 @@ async function visitCasinoTable(page: Page, capture?: (name: string) => Promise<
   // Approach the door after traversing the sidewalk; a rendered frame can pass
   // between the position read and key-up on a software GPU.
   await walkUntil(page, 'w', 'z', 74.5, false);
-  const doorway = (await snapshot(page)).state.player;
-  expect(Math.hypot(doorway.x - 20, doorway.z - 74)).toBeLessThan(3);
+  const doorway = await snapshot(page);
   await capture?.('casino-entrance.png');
-  await page.keyboard.press('e');
+  // The doorway is walk-in: a step too far already carries the player inside.
+  if (doorway.state.interior !== 'casino') {
+    expect(Math.hypot(doorway.state.player.x - 20, doorway.state.player.z - 74)).toBeLessThan(3);
+    await page.keyboard.down('w');
+    try { await expect.poll(async () => (await snapshot(page)).state.interior, { intervals: [50, 100], timeout: 8000 }).toBe('casino'); }
+    finally { await page.keyboard.up('w'); }
+  }
   await expect.poll(async () => (await snapshot(page)).state.interior).toBe('casino');
   await expectCasinoView(page, 'casino');
   await capture?.('casino-interior.png');
@@ -165,11 +170,12 @@ test('można wejść do kasyna, rozegrać pokera, wypłacić żetony i wrócić 
   await expect.poll(async () => (await snapshot(page)).paused).toBe(true);
   expect((await snapshot(page)).state.money).toBe(1050 + refund);
   await page.locator('#resume').click();
-  await walkUntil(page, 's', 'z', 8, true);
-  await page.keyboard.press('e');
-  await expect.poll(async () => (await snapshot(page)).state.interior).toBeNull();
+  // Walk straight back out through the open doorway onto the pavement.
+  await page.keyboard.down('Shift');await page.keyboard.down('s');
+  try { await expect.poll(async () => (await snapshot(page)).state.interior, { intervals: [50, 100], timeout: 15000 }).toBeNull(); }
+  finally { await page.keyboard.up('s');await page.keyboard.up('Shift'); }
   const outside = (await snapshot(page)).state.player;
-  expect(Math.hypot(outside.x - 20, outside.z - 75.8)).toBeLessThan(1);
+  expect(Math.abs(outside.x - 20)).toBeLessThan(2);expect(outside.z).toBeGreaterThan(72.9);expect(outside.z).toBeLessThan(77);
   expect((await snapshot(page)).state.money).toBe(1050 + refund);
   expect(errors).toEqual([]);
   expect(failed).toEqual([]);

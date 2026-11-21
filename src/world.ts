@@ -1,6 +1,7 @@
 import * as THREE from 'three';
 import type { CameraPose } from './camera-controls';
 import { CasinoView } from './casino-view';
+import { CASINO } from './casino-location';
 import type { Point } from './model';
 import type { PokerState } from './poker-model';
 import type { RouletteSnapshot } from './casino-games';
@@ -120,6 +121,9 @@ export class CityView {
   private readonly occluders: THREE.Mesh[] = [];
   private readonly raycaster = new THREE.Raycaster();
   private readonly partRay = new THREE.Raycaster();
+  private readonly casinoAnchor = new THREE.Group();
+  private casinoLight:THREE.PointLight|null=null;
+  private cityHidden=false;
   private readonly fuelStations:FuelStationsView;
   private fuelPose:(FuelViewPose&{flapOpen:boolean;hoseTarget:THREE.Vector3|null})|null=null;
   private enginePose:EngineBayPose|null=null;
@@ -197,8 +201,11 @@ export class CityView {
     this.scene.add(this.marker);
     this.waterMaterial = this.water();
     this.casino = new CasinoView(this.softwareRendering);
-    this.scene.add(this.casino.exterior, this.casino.interior);
-    this.cityObjects = this.scene.children.filter(object => object !== this.hero && object !== this.marker && object !== this.casino.interior);
+    // The hall is built in its own frame and placed inside the tower's ground floor.
+    this.casinoAnchor.position.set(CASINO.offset.x,0,CASINO.offset.z);this.casinoAnchor.add(this.casino.interior);
+    if(!this.softwareRendering){this.casinoLight=new THREE.PointLight(0xffddb0,0,24,2);this.casinoLight.position.set(0,6.2,-1);this.casinoAnchor.add(this.casinoLight);}
+    this.scene.add(this.casino.exterior, this.casinoAnchor);
+    this.cityObjects = this.scene.children.filter(object => object !== this.hero && object !== this.marker && object !== this.casinoAnchor && object !== this.entrances.group);
     // A small retained overlay keeps hands clear of walls and self-occluding.
     this.firstPerson=new FirstPersonView(this.softwareRendering);
     this.cityBackground = this.scene.background;
@@ -410,23 +417,26 @@ export class CityView {
   update(state: GameState, dt: number, cameraMode: number, pose?: CameraPose, navigation?: Point, crewTarget=false, citySeconds=state.time) {
     if(this.homeGroup){this.updateHome(state,dt,cameraMode,pose);return;}
     const inside = state.interior === 'casino';
+    // Walking through the doorway keeps one continuous camera; only the frame changes.
     if(inside !== this.indoors) {
-      this.indoors = inside;this.initialized = false;
-      for(const object of this.cityObjects)object.visible = !inside;
-      this.casino.interior.visible = inside;
-      this.scene.background = inside ? new THREE.Color(0x101420) : this.cityBackground;
-      this.scene.fog = inside ? new THREE.Fog(0x101420,35,80) : this.cityFog;
+      this.indoors = inside;this.lastPlayer=null;
+      (inside?this.casinoAnchor:this.scene).add(this.hero,this.remote.group);
     }
+    // Deep inside the hall the street is out of sight; skip drawing it.
+    const hideCity=inside&&state.player.z<3;
+    if(hideCity!==this.cityHidden){this.cityHidden=hideCity;for(const object of this.cityObjects)object.visible=!hideCity;}
+    const doorDistance=inside?0:Math.hypot(state.player.x-CASINO.door.x,state.player.z-CASINO.door.z);
+    this.casino.interior.visible=inside||doorDistance<38;if(this.casinoLight)this.casinoLight.intensity=inside?22:0;
     const environment=getCityEnvironment(citySeconds);
-    this.garageBuilding.update(state,this.camera.position);this.garageBuilding.group.visible=!inside;
-    this.fuelStations.group.visible=!inside;
+    this.garageBuilding.update(state,this.camera.position);this.garageBuilding.group.visible=!hideCity;
+    this.fuelStations.group.visible=!hideCity;
     const actors:EntranceActor[]=[{...state.player,interior:state.interior,access:this.entranceAccess},...this.onlineMembers.filter(member=>member.id!==this.onlineSelf).map(member=>({...member.pose,access:['casino'] as BuildingEntranceId[]}))];
-    this.entrances.update(actors,dt);this.entrances.group.visible=!inside;
+    this.entrances.update(actors,dt);
     if(inside)this.casino.updateDoor(state.player,dt);
     this.living.update(citySeconds,state.player,inside,dt,[...state.vehicles,...state.police,...(state.pursuit?.patrols??[])]);
     this.streets.updateSignals(citySeconds);
-    this.policeVisuals.update(state,dt);this.policeVisuals.group.visible=!inside;
-    this.mobilityVisuals.update(state,dt,this.remoteCars,cameraMode===2?state.player.vehicleId??undefined:undefined);this.mobilityVisuals.group.visible=!inside;
+    this.policeVisuals.update(state,dt);this.policeVisuals.group.visible=!hideCity;
+    this.mobilityVisuals.update(state,dt,this.remoteCars,cameraMode===2?state.player.vehicleId??undefined:undefined);this.mobilityVisuals.group.visible=!hideCity;
     if(inside){
       this.hemisphere.intensity=2.25;this.hemisphere.color.setHex(0xd6ebf8);this.hemisphere.groundColor.setHex(0x8a666c);
       this.sunlight.intensity=3.2;this.sunlight.color.setHex(0xffd1a1);
@@ -449,7 +459,7 @@ export class CityView {
       if(visual&&(visual.kind!==vehicle.kind||visual.styleKey!==vehicleStyleKey(vehicle.style)||visual.hero!==CityView.isHero(vehicle))){this.disposeCar(visual);this.cars.delete(vehicle.id);visual=undefined;}
       if (!visual) { visual = this.car(vehicle); this.cars.set(vehicle.id, visual); }
       if(visual.paintColor!==vehicle.color){visual.paint.color.setHex(vehicle.color);visual.paintColor=vehicle.color;if(visual.distant)this.distantCars?.setColor(visual.distant,vehicle.color);}
-      visual.group.visible = !inside && !this.remoteCars.has(vehicle.id) && !(cameraMode === 2 && state.player.mode === 'drive' && state.player.vehicleId === vehicle.id);
+      visual.group.visible = !hideCity && !this.remoteCars.has(vehicle.id) && !(cameraMode === 2 && state.player.mode === 'drive' && state.player.vehicleId === vehicle.id);
       visual.group.position.set(vehicle.x, 0.05, vehicle.z); visual.group.rotation.y = -vehicle.heading;
       visual.motion=stepVehicleMotion(visual.motion,vehicle,dt);
       if(visual.full&&visual.distant){
@@ -477,7 +487,7 @@ export class CityView {
     for (const [id, visual] of this.cars) if (!alive.has(id)){this.disposeCar(visual);this.cars.delete(id);}
     const lightSources:VehicleLightSource[]=[...state.vehicles,...state.police,...(state.pursuit?.patrols??[])].filter(v=>v.kind!=='boat'&&v.kind!=='bike'&&!this.remoteCars.has(v.id)).map(vehicle=>({id:vehicle.id,x:vehicle.x,z:vehicle.z,heading:vehicle.heading,kind:vehicle.kind,braking:this.cars.get(vehicle.id)?.motion.braking??0}));
     for(const member of this.onlineMembers){if(member.id===this.onlineSelf||member.pose.mode!=='drive'||member.pose.interior||member.pose.homeId||member.pose.passengerOf)continue;lightSources.push({id:`remote-${member.id}`,x:member.pose.x,z:member.pose.z,heading:member.pose.heading,kind:member.pose.vehicle?.kind});}
-    this.vehicleLighting.update(lightSources,state.player,environment.daylight,dt,!inside,environment.rain);
+    this.vehicleLighting.update(lightSources,state.player,environment.daylight,dt,!hideCity,environment.rain);
     const p = state.player,riding=Boolean(p.passengerOf),inCar=p.mode==='drive'||riding;
     if((p.passengerOf??null)!==this.lastPassengerOf){this.lastPassengerOf=p.passengerOf??null;this.initialized=false;}
     this.motion = this.lastPlayer ? Math.hypot(p.x - this.lastPlayer.x, p.z - this.lastPlayer.z) : 0; this.lastPlayer = {x:p.x,z:p.z}; this.hero.visible = !this.seated && !riding && p.mode === 'foot' && cameraMode !== 2; this.hero.position.set(p.x, 0.1, p.z); this.hero.rotation.y = -p.heading;
@@ -526,6 +536,7 @@ export class CityView {
       destination.x = THREE.MathUtils.clamp(destination.x, -9.9, 9.9);
       destination.z = THREE.MathUtils.clamp(destination.z, -8.7, 9.2);
       destination.y = THREE.MathUtils.clamp(destination.y, .6, 5.8);
+      destination.x+=CASINO.offset.x;destination.z+=CASINO.offset.z;lookAt.x+=CASINO.offset.x;lookAt.z+=CASINO.offset.z;
     }
     const fieldOfView = this.seated ? THREE.MathUtils.clamp((this.camera.aspect < 1 ? 78 : 62) / zoom, 42, 90) : cameraMode === 2 ? THREE.MathUtils.clamp(58 / zoom, 35, 85) : 58;
     if(this.camera.fov !== fieldOfView){this.camera.fov = fieldOfView;this.camera.updateProjectionMatrix();}

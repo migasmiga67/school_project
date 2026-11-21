@@ -7,7 +7,6 @@ import type { PokerState } from './poker-model';
 import type { RouletteSnapshot } from './casino-games';
 import { ROULETTE_POCKETS, ROULETTE_STEP, rouletteMotion } from './roulette-motion';
 import { RoulettePlayback, rouletteColor } from './roulette-view';
-import { InteriorEntranceDoor } from './building-entrances-view';
 import type { Point } from './model';
 
 type LitMaterial = THREE.MeshLambertMaterial | THREE.MeshStandardMaterial;
@@ -27,7 +26,6 @@ export class CasinoView {
   private rouletteBall: THREE.Mesh | null = null;
   private rouletteState: RouletteSnapshot | null = null;
   private readonly reducedMotion = window.matchMedia('(prefers-reduced-motion: reduce)');
-  private readonly exitDoor:InteriorEntranceDoor;
 
   constructor(software: boolean) {
     this.software = software;
@@ -47,9 +45,7 @@ export class CasinoView {
     this.interior.visible = false;
     this.compact(this.exterior);
     this.compact(this.interior);
-    // Moving parts are added after static geometry batching.
-    this.exitDoor=new InteriorEntranceDoor(4,3.8,0xd7b66e,this.software);
-    this.exitDoor.visual.group.position.set(0,.12,9.77);this.exitDoor.visual.group.rotation.y=Math.PI;this.interior.add(this.exitDoor.visual.group);
+    // The street door (building entrances) is the only door: the hall opens straight onto it.
     this.makeRouletteWheel();
     this.poker = new PokerTableView();
     this.poker.group.position.set(CASINO.table.x, 0, CASINO.table.z);
@@ -130,7 +126,7 @@ export class CasinoView {
       this.mesh(new THREE.CylinderGeometry(0.38, 0.5, 1.25, 8), stone, root, x, 0.82, z + 1.5);
       this.mesh(new THREE.SphereGeometry(0.31, 10, 8), violet, root, x, 1.58, z + 1.5);
     }
-    this.label('WEJŚCIE · E', '#f4dca9', 3.2, 0.56, root, 0, 3.95, z + 0.51);
+    this.label('WEJŚCIE', '#f4dca9', 3.2, 0.56, root, 0, 3.95, z + 0.51);
   }
 
   private makeInterior() {
@@ -143,9 +139,7 @@ export class CasinoView {
     const gold = this.material(0xd7b66e);
     const red = this.material(0x743245);
     const blue = this.material(0x5eabb8, 0x245565, 0.2);
-    root.add(new THREE.HemisphereLight(0xffe8c4, 0x15333e, 2.0));
-    const overhead = new THREE.PointLight(0xffddb0, 22, 24, 2);
-    overhead.position.set(0, 6.2, -1); root.add(overhead);
+    // Lighting belongs to the world (always in the scene graph), so walking in never recompiles shaders.
 
     // A complete room surrounds the walking and seated cameras.
     this.box(22, 0.18, 20, dark, root, 0, -0.12, 0);
@@ -158,7 +152,7 @@ export class CasinoView {
     this.box(4,2.8,.3,dark,root,0,5.35,10);
     for(const x of [-2.1,2.1])this.box(.18,4,.35,gold,root,x,2,9.8);
     this.box(4.4,.15,.35,gold,root,0,4.05,9.8);
-    this.label('WYJŚCIE · E','#c9f3dc',3.2,.58,root,0,4.35,9.78,Math.PI);
+    this.label('WYJŚCIE','#c9f3dc',3.2,.58,root,0,4.35,9.78,Math.PI);
     for (const x of [-11, 11]) {
       this.box(0.3, 6.8, 20.3, dark, root, x, 3.35, 0);
       this.box(0.34, 0.12, 20.3, gold, root, x, 1.16, 0);
@@ -178,7 +172,7 @@ export class CasinoView {
     for (const x of [-2.18, 2.18]) this.box(0.045, 0.04, 7.4, gold, root, x, 0.09, 5.3);
 
     // The floor marker remains visible when approaching the actual doorway.
-    const exitSign = this.label('WYJŚCIE · E', '#c9f3dc', 2.8, 0.65, root, 0, 0.13, 8.45);
+    const exitSign = this.label('WYJŚCIE', '#c9f3dc', 2.8, 0.65, root, 0, 0.13, 8.45);
     exitSign.rotation.x = -Math.PI / 2;
     this.mesh(new THREE.TorusGeometry(1.1, 0.04, 5, 36), blue, root, CASINO.exit.x, 0.12, CASINO.exit.z).rotation.x = -Math.PI / 2;
 
@@ -238,6 +232,56 @@ export class CasinoView {
       this.mesh(new THREE.CylinderGeometry(0.23, 0.34, 2.4, 10), gold, root, x, 1.25, z);
       this.mesh(new THREE.SphereGeometry(0.35, 10, 8), blue, root, x, 2.65, z);
     }
+    // Bar along the right wall: counter, back shelves with bottles, stools and a bartender.
+    const barX = 9.8, barZ = -5.6;
+    this.box(.62, 1.1, 5.2, wood, root, barX, .55, barZ);
+    this.box(.8, .08, 5.4, gold, root, barX - .05, 1.14, barZ);
+    this.box(.3, 2.6, 5.4, dark, root, 10.7, 1.9, barZ);
+    for (const y of [1.3, 1.85, 2.4]) {
+      this.box(.34, .05, 5.2, gold, root, 10.55, y, barZ);
+      for (let i = 0; i < 9; i++) this.mesh(new THREE.CylinderGeometry(.05, .06, .32, 6), [green, red, blue, gold][(i + Math.round(y * 3)) % 4], root, 10.5, y + .18, barZ - 2.2 + i * .55);
+    }
+    for (let i = 0; i < 4; i++) {
+      this.mesh(new THREE.CylinderGeometry(.03, .03, .8, 6), gold, root, 9.05, .4, barZ - 1.8 + i * 1.2);
+      this.mesh(new THREE.CylinderGeometry(.24, .24, .1, 12), red, root, 9.05, .85, barZ - 1.8 + i * 1.2);
+    }
+    this.guest(root, 10.35, barZ + .8, Math.PI / 2, 0x1d2a30, 0xb98466, 0x2a2121);
+    this.label('BAR · SAPPHIRE', '#f4db9d', 3.2, .6, root, 10.83, 3.55, barZ, -Math.PI / 2);
+    // Two banks of slot machines against the back wall, screens lit, stools in front.
+    const screen = this.material(0x6fd8e8, 0x2e8fb0, .9), cabinet = this.material(0x2a1f3a);
+    for (const bank of [-2.8, 2.8]) for (let i = 0; i < 4; i++) {
+      const x = bank - 1.2 + i * .8;
+      this.box(.72, 1.75, .7, cabinet, root, x, .88, -9.15);
+      this.box(.56, .5, .04, screen, root, x, 1.3, -8.79);
+      this.box(.6, .2, .05, i % 2 ? red : gold, root, x, 1.86, -8.8);
+      this.box(.5, .05, .25, gold, root, x, .92, -8.7);
+      this.mesh(new THREE.CylinderGeometry(.2, .2, .08, 10), red, root, x, .7, -8.1);
+      this.mesh(new THREE.CylinderGeometry(.03, .03, .66, 6), gold, root, x, .34, -8.1);
+    }
+    this.label('AUTOMATY', '#b8eff5', 3, .55, root, 0, 2.35, -9.5);
+    // Cashier cage on the left wall: counter, grille and chip window.
+    this.box(.7, 1.15, 2.5, wood, root, -10.1, .58, -.6);
+    this.box(.86, .07, 2.6, gold, root, -10.05, 1.18, -.6);
+    for (let i = 0; i < 9; i++) this.box(.03, 1.5, .03, gold, root, -9.8, 1.95, -1.75 + i * .29);
+    this.box(.04, .06, 2.6, gold, root, -9.8, 2.7, -.6);
+    this.guest(root, -10.6, -.6, -Math.PI / 2, 0x2d4a5a, 0xc8a07a, 0x2b241f);
+    this.label('KASA · ŻETONY', '#f4db9d', 2.6, .5, root, -9.75, 3.05, -.6, Math.PI / 2);
+    // Restrooms and staff door near the entrance.
+    for (const [z, text] of [[5.2, 'WC'], [7.6, 'PERSONEL']] as const) {
+      this.box(.08, 2.3, 1.1, wood, root, -10.82, 1.15, z);
+      this.box(.09, .06, .06, gold, root, -10.76, 1.1, z + .35);
+      this.label(text, '#c8e9e7', 1.1, .32, root, -10.76, 2.55, z, Math.PI / 2);
+    }
+    // Mezzanine balcony over the slots, reached by a staff staircase.
+    this.box(13, .22, 1.7, dark, root, 0, 3.6, -9.05);
+    this.box(13, .9, .05, blue, root, 0, 4.17, -8.2);
+    this.box(13.1, .06, .1, gold, root, 0, 4.64, -8.2);
+    for (let i = 0; i < 8; i++) this.box(.32, .24, .9, wood, root, -8.6 + i * .24, .12 + i * .45, -9.4);
+    this.guest(root, -3.5, -9.2, 0, 0x5b3a6e, 0xd0a684, 0x1f1a1c).position.y = 3.71;
+    this.guest(root, 4.2, -9.2, 0, 0x3a5e4f, 0x9f7256, 0x2a2420).position.y = 3.71;
+    // A few regulars on the floor.
+    this.guest(root, 2.4, -8, 0, 0x7a3d3d, 0xc28c67, 0x2b2227);
+    this.guest(root, 8.9, -3.9, -Math.PI / 2, 0x3e4f75, 0xa77a5c, 0x1c1a1b);
     const chandelier = this.mesh(new THREE.TorusGeometry(2.4, 0.065, 6, 40), gold, root, 0, 6.2, CASINO.table.z);
     chandelier.rotation.x = -Math.PI / 2;
     for (let i = 0; i < 8; i++) {
@@ -254,7 +298,7 @@ export class CasinoView {
     for (const x of [-0.43, 0.43]) for (const z of [-0.37, 0.37]) this.box(0.075, 0.6, 0.075, gold, seat, x, 0.32, z);
   }
 
-  private guest(root:THREE.Object3D,x:number,z:number,rotation:number,jacketColor:number,skinColor:number,hairColor:number) {
+  private guest(root:THREE.Object3D,x:number,z:number,rotation:number,jacketColor:number,skinColor:number,hairColor:number):THREE.Group {
     const guest=new THREE.Group();guest.position.set(x,0,z);guest.rotation.y=rotation;root.add(guest);
     const jacket=this.material(jacketColor),skin=this.material(skinColor),hair=this.material(hairColor),trousers=this.material(0x19292c),shirt=this.material(0xd1c9af);
     this.box(.68,.74,.39,jacket,guest,0,1.16,0);
@@ -272,6 +316,7 @@ export class CasinoView {
       this.box(.18,.15,.2,skin,guest,side*.44,1,-.82);
       this.box(.07,.05,.02,hair,guest,side*.11,1.96,-.211);
     }
+    return guest;
   }
 
   updatePoker(state:PokerState|null,seated:boolean) {
@@ -362,11 +407,11 @@ export class CasinoView {
     this.tableRing.scale.setScalar(1 + Math.sin(time * 1.8) * 0.04);
     this.updateRoulette();
   }
-  updateDoor(position:Point,dt:number){this.exitDoor.update(position,CASINO.exit,dt);}
+  /** Kept for callers; the shared street door now animates the entrance. */
+  updateDoor(_position:Point,_dt:number){}
 
   destroy() {
     this.poker.destroy();
-    this.exitDoor.destroy();
     const geometries = new Set<THREE.BufferGeometry>(); const materials = new Set<THREE.Material>();
     for (const root of [this.exterior, this.interior]) root.traverse(object => {
       if (object instanceof THREE.Mesh) {
