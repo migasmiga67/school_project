@@ -423,10 +423,11 @@ export class CityView {
       (inside?this.casinoAnchor:this.scene).add(this.hero,this.remote.group);
     }
     // Deep inside the hall the street is out of sight; skip drawing it.
-    const hideCity=inside&&state.player.z<3;
+    // Software WebGL keeps the street hidden from the hall altogether (the door is too costly to see through).
+    const hideCity=inside&&(this.softwareRendering||state.player.z<3);
     if(hideCity!==this.cityHidden){this.cityHidden=hideCity;for(const object of this.cityObjects)object.visible=!hideCity;}
     const doorDistance=inside?0:Math.hypot(state.player.x-CASINO.door.x,state.player.z-CASINO.door.z);
-    this.casino.interior.visible=inside||doorDistance<38;if(this.casinoLight)this.casinoLight.intensity=inside?22:0;
+    this.casino.interior.visible=inside||doorDistance<(this.softwareRendering?9:38);if(this.casinoLight)this.casinoLight.intensity=inside?22:0;
     const environment=getCityEnvironment(citySeconds);
     this.garageBuilding.update(state,this.camera.position);this.garageBuilding.group.visible=!hideCity;
     this.fuelStations.group.visible=!hideCity;
