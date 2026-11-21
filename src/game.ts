@@ -245,7 +245,7 @@ function walk(s: GameState, input: Input, dt: number) {
       move(s,s.player, x / norm * speed * dt, z / norm * speed * dt, .55);
       if(roadblockHit(s,s.player,.55))Object.assign(s.player,previous);
       // The casino has a real doorway: pressing into it walks you inside.
-      if (z < 0 && s.wanted === 0 && Math.abs(s.player.x - CASINO.door.x) < CASINO.doorHalf && s.player.z < 73.3 && s.player.z > 71) {
+      if (z < 0 && s.wanted === 0 && Math.abs(s.player.x - CASINO.door.x) < CASINO.doorHalf && s.player.z < 72.7 && s.player.z > 71) {
         s.interior = 'casino';
         Object.assign(s.player, { x: s.player.x - CASINO.offset.x, z: CASINO.bounds.maxZ - .9 });
       }

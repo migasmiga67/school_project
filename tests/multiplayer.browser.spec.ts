@@ -130,10 +130,13 @@ async function visitCasino(page: Page) {
   await expect.poll(async () => (await snapshot(page)).state.player.mode).toBe('foot');
   await walkUntil(page, 's', 'z', 75, true);
   await walkUntil(page, 'd', 'x', 18.5, true);
-  await walkUntil(page, 'w', 'z', 74.5, false);
-  const doorway = (await snapshot(page)).state.player;
-  expect(Math.hypot(doorway.x - 20, doorway.z - 74)).toBeLessThan(3);
-  await page.keyboard.press('e');
+  await walkUntil(page, 'w', 'z', 74.9, false);
+  // The doorway is walk-in; only press E when a slow frame has not already carried us inside.
+  if ((await snapshot(page)).state.interior !== 'casino') {
+    const doorway = (await snapshot(page)).state.player;
+    expect(Math.hypot(doorway.x - 20, doorway.z - 74)).toBeLessThan(3);
+    await page.keyboard.press('e');
+  }
   await expect.poll(async () => (await snapshot(page)).state.interior).toBe('casino');
   await walkUntil(page, 'w', 'z', 2.5, false);
   await page.keyboard.press('e');
