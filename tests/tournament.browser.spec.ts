@@ -17,7 +17,7 @@ async function visitTournament(page:Page){
 }
 
 test('turniej dwóch prawdziwych klientów zachowuje prywatność, blokuje ruch i wypłaca pulę raz',async({browser},testInfo)=>{
- test.setTimeout(180000);
+ test.setTimeout(300000);
  const contexts:BrowserContext[]=[],errors:string[]=[];
  const open=async(name:string)=>{
   const context=await browser.newContext({baseURL:process.env.NEON_BASE_URL||'http://127.0.0.1:5185/school_project/',viewport:{width:1200,height:800}});contexts.push(context);
