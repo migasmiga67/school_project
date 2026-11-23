@@ -49,7 +49,7 @@ jobs:
           - group: city
             specs: tests/casino.browser.spec.ts tests/stories.browser.spec.ts tests/tournament.browser.spec.ts
           - group: multiplayer
-            specs: tests/multiplayer.browser.spec.ts
+            specs: tests/multiplayer.browser.spec.ts tests/phone-apps.browser.spec.ts
           - group: activities
             specs: tests/expansion.browser.spec.ts tests/garage-building.browser.spec.ts
     steps:

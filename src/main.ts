@@ -32,10 +32,13 @@ import { InventoryUI } from './inventory-ui';
 import { FUEL_STATIONS, PUMP_SIDES, HOSE_REACH, atShopCounter, canLeavePump, createFuelSession, fuelAction, fuelFlapPoint, fuelHint, fuelPartPrompt, nearestPump, nearestStation, owed, stationPoint, stepFuel, type FuelPart, type FuelSession, type FuelStation } from './fuel-stations';
 import type { EnginePartId } from './vehicle-model';
 import { loadGraphicsQuality, saveGraphicsQuality } from './graphics';
+import { PhoneApps } from './phone-apps-controller';
 
 const $=<T extends HTMLElement=HTMLElement>(selector:string)=>document.querySelector<T>(selector)!;
 const SAVE_KEY='neon-coast-profile-v1';
-let loadedEngine:unknown,loadedInventory:unknown;
+let loadedEngine:unknown,loadedInventory:unknown,loadedPhoneApps:unknown;
+// Assigned once the view exists; persist() can run earlier during start-up.
+let phoneApps:PhoneApps|undefined;
 let expansion:CityExpansion|undefined,loadedCareer:unknown,stories:CityStories|undefined,loadedStories:unknown,loadedRoulette:unknown;
 let muted=true, cameraMode=0, profileMoney=1250, recordWins=0, bestRace:number|null=null;
 let saveAvailable=true;
@@ -48,7 +51,7 @@ let soloGarage=createGarage(),garageNavigation=false,panelWasPaused=false,cityCl
 const soloCityClaims=new Set<string>();
 try {
  const raw=localStorage.getItem(SAVE_KEY);
-  if(raw){const data=JSON.parse(raw);if(typeof data.muted==='boolean')muted=data.muted;if(Number.isFinite(data.money)&&data.money>=0&&data.money<1e8)profileMoney=data.money;if(Number.isSafeInteger(data.wins)&&data.wins>=0)recordWins=data.wins;if(typeof data.bestRace==='number'&&data.bestRace>0)bestRace=data.bestRace;if(Number.isSafeInteger(data.pokerReserve)&&data.pokerReserve>=0&&data.pokerReserve<1e8)recoveredCasino=data.pokerReserve;soloGarage=parseGarage(data.garage);loadedCareer=data.career;loadedStories=data.stories;loadedRoulette=data.roulette;loadedEngine=data.engine;loadedInventory=data.inventory;}
+  if(raw){const data=JSON.parse(raw);if(typeof data.muted==='boolean')muted=data.muted;if(Number.isFinite(data.money)&&data.money>=0&&data.money<1e8)profileMoney=data.money;if(Number.isSafeInteger(data.wins)&&data.wins>=0)recordWins=data.wins;if(typeof data.bestRace==='number'&&data.bestRace>0)bestRace=data.bestRace;if(Number.isSafeInteger(data.pokerReserve)&&data.pokerReserve>=0&&data.pokerReserve<1e8)recoveredCasino=data.pokerReserve;soloGarage=parseGarage(data.garage);loadedCareer=data.career;loadedStories=data.stories;loadedRoulette=data.roulette;loadedEngine=data.engine;loadedInventory=data.inventory;loadedPhoneApps=data.phoneApps;}
 }catch{saveAvailable=false;}
 let state=createGame();state.money=profileMoney+recoveredCasino;state.missionsWon=recordWins;state.bestRace=bestRace;applyGarage(state,soloGarage);
 const held=new Set<string>();
@@ -117,12 +120,22 @@ expansion=new CityExpansion({
  onRoute:()=>{casinoNavigation=false;garageNavigation=false;eventNavigationId='';},onPlanning:()=>activitiesUI.open(),
  onInterior:()=>{held.clear();pulse={interact:false,nextMission:false,reset:false};cameraMode=0;orbit.setMode(0,state.player.heading);},
 },loadedCareer,loadedRoulette);
+// ---- Phone city apps: scanner, races, food, property, mechanic, weather/radio, black market ----
+phoneApps=new PhoneApps({
+ getState:()=>state,worldSeconds,online:()=>onlineState.status==='online',indoors:()=>Boolean(state.interior||expansion?.homeId),
+ spend:chargeService,earn:amount=>{if(amount<=0)return;state.money+=amount;persist();updateHUD();},
+ getInventory:()=>inventory,getGarage:()=>onlineState.snapshot?.garage??soloGarage,
+ installUpgrade:upgrade=>{const result=garageAction(soloGarage,Number.MAX_SAFE_INTEGER,{type:'upgrade',upgrade},expansion?.career.reputation??0);if(!result.ok)return false;soloGarage=result.garage;applyGarage(state,soloGarage);persist();return true;},
+ ownCar,care:()=>careFor('stratus'),tank:FUEL_CAPACITY,
+ notify,persist,route:(point,label)=>stories?.navigate(point,label),sound:kind=>audio.effect(kind),
+},loadedPhoneApps);
+view.addCityObject(phoneApps.view.group);
 stories=new CityStories({
  getState:()=>state,getRoom:()=>onlineState,session:room,view,getPose:currentPose,getGarage:()=>onlineState.snapshot?.garage??soloGarage,
  getTime:worldSeconds,getStarted:()=>started,getPaused:()=>paused,getHome:()=>expansion?.homeId??null,getReputation:()=>expansion?.career.reputation??0,
  isStored:()=>Boolean(expansion?.career.storedCars[(onlineState.snapshot?.garage??soloGarage).selected]),award:(source,rep)=>expansion?.awardSolo(source,rep),
  onOpen:panelOpen,onClose:panelClose,onMessage:notify,onSave:persist,onRoute:()=>{casinoNavigation=false;garageNavigation=false;eventNavigationId='';expansion?.clearRoute();},
- onContacts:()=>expansion?.openCareer(),onActivities:()=>activitiesUI.open(),
+ onContacts:()=>expansion?.openCareer(),onActivities:()=>activitiesUI.open(),phoneApps,
 },loadedStories);
 
 // ---- Engine: live running state, oil ageing and the workshop oil change ----
@@ -472,6 +485,7 @@ function startCrewChallenge(){
  room.startChallenge();
 }
 function navigationTarget():Point|undefined {
+ if(phoneApps?.racing&&phoneApps.target)return phoneApps.target;
  if(fuelNavigation)return fuelNavigation;
  if(garageNavigation)return GARAGE_LOCATION;
  const event=cityEventAt(worldSeconds());if(eventNavigationId&&event?.id===eventNavigationId)return event.target;
@@ -550,7 +564,7 @@ function openPoker(){if(state.interior!=='casino'||poker.active)return;held.clea
 function updateMouseHint(){ $('#mouse-hint').classList.toggle('hidden',mouse.locked);view.renderer.domElement.classList.toggle('mouse-locked',mouse.locked); }
 function fatal(message:string){const box=document.createElement('div');box.className='fatal';box.setAttribute('role','alert');box.textContent=message;const button=document.createElement('button');button.className='primary';button.textContent='Odśwież stronę';button.onclick=()=>location.reload();box.append(button);document.body.append(box);}
 function notify(message:string){clearTimeout(notificationTimer);$('#toast').textContent=message;$('#toast').classList.add('show');notificationTimer=setTimeout(()=>$('#toast').classList.remove('show'),4200);}
-function persist(){const saved=soloState??state;try{localStorage.setItem(SAVE_KEY,JSON.stringify({money:saved.money,wins:saved.missionsWon,bestRace:saved.bestRace,muted,pokerReserve:casinoReserve,garage:soloGarage,career:expansion?.savedCareer??loadedCareer,stories:stories?.saved??loadedStories,roulette:expansion?.savedRoulette??loadedRoulette,engine:engineCare,inventory}));saveAvailable=true;}catch{saveAvailable=false;}}
+function persist(){const saved=soloState??state;try{localStorage.setItem(SAVE_KEY,JSON.stringify({money:saved.money,wins:saved.missionsWon,bestRace:saved.bestRace,muted,pokerReserve:casinoReserve,garage:soloGarage,career:expansion?.savedCareer??loadedCareer,stories:stories?.saved??loadedStories,roulette:expansion?.savedRoulette??loadedRoulette,engine:engineCare,inventory,phoneApps:phoneApps?.saved??loadedPhoneApps}));saveAvailable=true;}catch{saveAvailable=false;}}
 async function toggleSound(){muted=!muted;await audio.toggle(!muted);if(!muted&&audio.muted){muted=true;notify('Audio jest niedostępne. Gra działa bez dźwięku.');}persist();updateHUD();}
 function district(p:Point):string{return state.interior==='casino'?CASINO.name:!expansion?.homeId&&isInsideGarageBay(p)?'MOD SHOP · WARSZTAT':districtAt(p);}
 function updateCasinoHUD(){
@@ -594,7 +608,7 @@ function drawMap(){
   casinoNavigation,onlineMembers:snapshot?.members??[],selfId:snapshot?.youId??'',
   target:navigationTarget()??(state.mission.active?state.mission.waypoint:null),
   targetKind:crew?'crew':casinoNavigation?'casino':'mission',time:state.time,
-  cityEvent:claimed?null:event,
+  cityEvent:claimed?null:event,scanner:phoneApps?.scannerUnits??[],helpers:phoneApps?.helpers??[],
  });
 }
 function openGraphics(){graphicsFrameAt=0;held.clear();pulse={interact:false,nextMission:false,reset:false};paused=true;mouse.release();audio.update(0,false);$('#overlay-root').replaceChildren();graphicsUI.open();}
@@ -660,6 +674,7 @@ function frame(now:number){requestAnimationFrame(frame);const dt=Math.max(0,Math
  view.setFlashlight(started&&hasItem(inventory,'flashlight')&&state.player.mode==='foot'&&!state.interior);
  expansion?.step(dt,input(),started&&!paused&&!state.player.passengerOf&&!raceCountdown);
  stories?.step(dt);
+ phoneApps?.step(dt,started&&!paused&&!expansion?.homeId);
  if(state.player.passengerOf||raceCountdown||tournamentSeated)pulse={interact:false,nextMission:false,reset:false};
  if(onlineState.status==='online')room.updatePose(currentPose());
  if(poker.active)orbit.yaw=Math.max(-1.25,Math.min(1.25,orbit.yaw));
@@ -672,7 +687,7 @@ function frame(now:number){requestAnimationFrame(frame);const dt=Math.max(0,Math
  }
  hudClock+=dt;mapClock+=dt;if(hudClock>.09){updateHUD();hudClock=0;}if(mapClock>.08){drawMap();mapClock=0;}
 }
-Object.defineProperty(window,'__NEON_TEST__',{get:()=>({state:structuredClone(state),started,paused,cameraMode,garage:structuredClone(onlineState.snapshot?.garage??soloGarage),inventory:structuredClone(inventory),inventoryOpen:inventoryUI.active,fuel:{session:structuredClone(fuelSession),part:fuelPart,bill:structuredClone(fuelBill),navigation:structuredClone(fuelNavigation)},engine:{care:structuredClone(careFor()),run:{...engineRun},service:structuredClone(oilService),part:servicePart,crouch:view.crouchAmount},garageOpen:garageUI.active,activitiesOpen:activitiesUI.active,expansion:expansion?.snapshot,stories:stories?.snapshot,city:view.cityLifeSnapshot,buildings:view.buildingSnapshot,cityClaimPending,casino:{pokerOpen:poker.active,poker:structuredClone(poker.snapshot),reserve:casinoReserve},camera:{yaw:orbit.yaw,pitch:orbit.pitch,zoom:orbit.zoom,locked:mouse.locked},online:structuredClone(onlineState),navigation:structuredClone(mapNavigation),rendering:{firstPerson:view.firstPersonSnapshot,remotePlayers:view.remotePlayers,view:view.presentation,frames:view.renderFrames,software:view.softwareRendering,graphics:view.graphicsProfile,calls:view.renderer.info.render.calls,triangles:view.renderer.info.render.triangles}})});
+Object.defineProperty(window,'__NEON_TEST__',{get:()=>({state:structuredClone(state),phoneApps:phoneApps?{race:structuredClone(phoneApps.race),food:phoneApps.food?{item:phoneApps.food.item,position:{...phoneApps.food.courier.position}}:null,tow:phoneApps.tow?{position:{...phoneApps.tow.position}}:null,estate:structuredClone(phoneApps.estate),market:structuredClone(phoneApps.market),radio:phoneApps.radio.station,scannerOnMap:phoneApps.scannerOnMap}:null,started,paused,cameraMode,garage:structuredClone(onlineState.snapshot?.garage??soloGarage),inventory:structuredClone(inventory),inventoryOpen:inventoryUI.active,fuel:{session:structuredClone(fuelSession),part:fuelPart,bill:structuredClone(fuelBill),navigation:structuredClone(fuelNavigation)},engine:{care:structuredClone(careFor()),run:{...engineRun},service:structuredClone(oilService),part:servicePart,crouch:view.crouchAmount},garageOpen:garageUI.active,activitiesOpen:activitiesUI.active,expansion:expansion?.snapshot,stories:stories?.snapshot,city:view.cityLifeSnapshot,buildings:view.buildingSnapshot,cityClaimPending,casino:{pokerOpen:poker.active,poker:structuredClone(poker.snapshot),reserve:casinoReserve},camera:{yaw:orbit.yaw,pitch:orbit.pitch,zoom:orbit.zoom,locked:mouse.locked},online:structuredClone(onlineState),navigation:structuredClone(mapNavigation),rendering:{firstPerson:view.firstPersonSnapshot,remotePlayers:view.remotePlayers,view:view.presentation,frames:view.renderFrames,software:view.softwareRendering,graphics:view.graphicsProfile,calls:view.renderer.info.render.calls,triangles:view.renderer.info.render.triangles}})});
 Object.defineProperty(window,'__NEON_AIM__',{value:(part:EnginePartId|FuelPart)=>{const aim=fuelSession?view.aimAtFuelPart(part as FuelPart):view.aimAtEnginePart(part as EnginePartId);if(!aim)return false;orbit.yaw=aim.yaw;orbit.pitch=Math.max(-1.1,Math.min(1.4,aim.pitch));return true;}});
 view.renderer.domElement.addEventListener('pointerdown',event=>{if(mouse.locked&&event.button===0&&started&&!paused){if(fuelSession)fuelUse();else if(oilService)serviceUse();}});
 room.subscribe(handleOnlineState);updateHUD();updateMouseHint();drawMap();if(recoveredCasino>0)persist();if(new URLSearchParams(location.search).has('room'))onlineUI.open();requestAnimationFrame(frame);

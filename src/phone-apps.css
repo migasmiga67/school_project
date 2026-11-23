@@ -1,0 +1,44 @@
+.pa-card{padding:15px;border-radius:13px;background:linear-gradient(140deg,#2d4b4b,#1a2c3a);border:1px solid #6f8d7d44;margin-bottom:14px}
+.pa-card>small{display:block;font-size:9px;letter-spacing:1.4px;color:#d9c49a}
+.pa-card h2{font-size:20px;margin:8px 0}
+.pa-card p{font-size:11px;line-height:1.5;color:#cbdcd4;margin:8px 0}
+.pa-stats{display:grid;grid-template-columns:repeat(3,1fr);gap:6px;margin:10px 0}
+.pa-stats span{display:flex;flex-direction:column;gap:3px;padding:8px 6px;border-radius:8px;background:#10232b99;font-size:9px;color:#a8c0ba;text-align:center}
+.pa-stats b{font-size:13px;color:#f1ddb0}
+.pa-h{font-size:10px;letter-spacing:1.4px;color:#c4b18d;margin:16px 2px 8px;text-transform:uppercase}
+.pa-list{list-style:none;margin:0;padding:0;display:grid;gap:7px}
+.pa-list li{display:flex;align-items:center;gap:10px;padding:10px;border-radius:9px;background:#1a343b;border:1px solid #6f8d7d33}
+.pa-list li>span{display:grid;place-items:center;flex:0 0 30px;height:30px;border-radius:8px;background:#2d5049;font-size:15px}
+.pa-list li>div{flex:1;min-width:0;display:flex;flex-direction:column;gap:3px}
+.pa-list strong{font-size:11px}
+.pa-list small{font-size:9px;color:#a9c0bb;line-height:1.4}
+.pa-list em{font-style:normal;font-size:10px;color:#e8d3a5;white-space:nowrap}
+.pa-list button,.pa-actions button{border:1px solid #8eae9666;border-radius:7px;background:#385d50;color:#e7f1e9;padding:7px 9px;font:700 10px Arial;cursor:pointer;white-space:nowrap}
+.pa-list li.pa-owned{border-color:#d9c49a88;background:#24403b}
+.pa-actions{display:flex;flex:0 0 auto !important;flex-direction:row !important;gap:5px !important}
+.pa-empty{justify-content:center;color:#a9c0bd;font-size:11px}
+.pa-note{font-size:10px !important;color:#a9c0bb !important;line-height:1.5}
+.pa-result{padding:9px;border-radius:8px;background:#2a3d33}
+.pa-alert{color:#ff9a8a}
+.pa-ok{color:#9fe3bf}
+.pa-toggle{display:flex;gap:8px;align-items:flex-start;font-size:11px;color:#d7e6df;margin-top:6px;cursor:pointer}
+.pa-log{list-style:none;margin:0;padding:0;display:grid;gap:5px;font-size:10px;line-height:1.45;color:#c8d9d1}
+.pa-log li{padding:7px 9px;border-left:2px solid #5d7d74;background:#15292f;border-radius:0 6px 6px 0}
+.pa-log li.pa-alert{border-left-color:#ff7b6b;color:#ffcfc6}
+.pa-log time{display:inline-block;min-width:38px;color:#8fb3a7;font-weight:bold}
+.pa-live{display:flex;align-items:center;justify-content:space-between;gap:8px;padding:10px;border-radius:9px;background:#5a2f2f;margin:10px 0;font-size:11px}
+.pa-live strong{color:#ffd9a0;letter-spacing:1px}
+.pa-weather-now{display:flex;align-items:center;gap:14px;margin:8px 0}
+.pa-weather-now>span{font-size:44px}
+.pa-weather-now b{font-size:28px;color:#f3e1b6}
+.pa-weather-now p{margin:3px 0 0}
+.pa-forecast{list-style:none;margin:8px 0 0;padding:0;display:grid;grid-template-columns:repeat(8,1fr);gap:3px}
+.pa-forecast li{display:flex;flex-direction:column;align-items:center;gap:3px;padding:6px 0;border-radius:7px;background:#10232b99;font-size:12px}
+.pa-forecast small{font-size:8px;color:#a8c0ba}
+.pa-forecast b{font-size:10px;color:#f1ddb0}
+.pa-menu button{min-width:58px}
+.phone-shell button:disabled.pa-x{opacity:.4}
+.phone-apps-section{font-size:9px;letter-spacing:1.6px;color:#c4b18d;margin:0 2px 10px}
+.phone-back{border:0;background:transparent;color:#bcd8cb;font:700 11px Arial;cursor:pointer;padding:0 0 10px}
+.radio-chip{position:fixed;left:50%;top:64px;transform:translateX(-50%);padding:5px 12px;border-radius:20px;background:#10212bcc;color:#f0dcb0;font:700 10px Arial;letter-spacing:1px;z-index:5;pointer-events:none}
+.radio-chip.hidden{display:none}

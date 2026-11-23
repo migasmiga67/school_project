@@ -18,6 +18,10 @@ export interface MinimapOptions {
   targetKind?: 'crew' | 'casino' | 'mission';
   time?: number;
   cityEvent?: {target:Point}|null;
+  /** Police scanner app: chase units, roadblocks and the helicopter. */
+  scanner?: readonly {kind:'patrol'|'pursuit'|'helicopter'|'roadblock';point:Point}[];
+  /** Phone-app vehicles on their way: food scooter, tow truck. */
+  helpers?: readonly {point:Point;icon:string}[];
 }
 
 /** Keep the neighborhood readable as the overall world grows. North stays up. */
@@ -152,6 +156,21 @@ export function renderMinimap(ctx: CanvasRenderingContext2D, state: GameState, o
   }
   for (const police of state.police) {
     const p = mapPoint(police); ctx.fillStyle = Math.sin(time * 10) > 0 ? '#ff7b7b' : '#79bfff'; ctx.beginPath(); ctx.arc(p.x, p.y, 3, 0, Math.PI * 2); ctx.fill();
+  }
+  for (const unit of options.scanner ?? []) {
+    if (unit.kind === 'patrol') continue;
+    const p = edge(mapPoint(unit.point));
+    if (unit.kind === 'roadblock') { ctx.fillStyle = '#ff5a4a'; ctx.fillRect(p.x - 5, p.y - 2, 10, 4); ctx.fillStyle = '#fff'; ctx.fillRect(p.x - 1, p.y - 2, 2, 4); continue; }
+    if (unit.kind === 'helicopter') {
+      ctx.strokeStyle = '#ffdf7a88'; ctx.lineWidth = 1; ctx.beginPath(); ctx.arc(p.x, p.y, 14, 0, Math.PI * 2); ctx.stroke();
+      ctx.fillStyle = '#ffdf7a'; ctx.font = 'bold 10px Arial'; ctx.textAlign = 'center'; ctx.textBaseline = 'middle'; ctx.fillText('✚', p.x, p.y); continue;
+    }
+    ctx.strokeStyle = '#11262e'; ctx.lineWidth = 1.5; ctx.fillStyle = Math.sin(time * 12) > 0 ? '#ff5a5a' : '#5aa8ff'; ctx.beginPath(); ctx.arc(p.x, p.y, 4, 0, Math.PI * 2); ctx.fill(); ctx.stroke();
+  }
+  for (const helper of options.helpers ?? []) {
+    const p = edge(mapPoint(helper.point)); ctx.fillStyle = '#f6c343'; ctx.strokeStyle = '#11262e'; ctx.lineWidth = 1.5;
+    ctx.beginPath(); ctx.arc(p.x, p.y, 6, 0, Math.PI * 2); ctx.fill(); ctx.stroke();
+    ctx.fillStyle = '#11262e'; ctx.font = 'bold 8px Arial'; ctx.textAlign = 'center'; ctx.textBaseline = 'middle'; ctx.fillText(helper.icon, p.x, p.y + .5);
   }
   for (const member of others) {
     if (member.pose.homeId==='crew'||member.pose.homeId==='canal'||member.pose.homeId==='loft') {

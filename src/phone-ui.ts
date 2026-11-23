@@ -7,6 +7,7 @@ import { WORLD_BOUNDS, type Point } from './model';
 import { CITY_BUILDINGS, CITY_SPACES, CITY_STREETS } from './city-map';
 import { WATER_BOUNDS } from './mobility';
 import { WORLD_LANDMARKS } from './world-layout';
+import type { PhoneAppsHost } from './phone-apps-controller';
 
 export interface PhoneDestination {id:string;name:string;point:Point;icon?:string}
 export interface PhoneCallbacks {
@@ -15,6 +16,8 @@ export interface PhoneCallbacks {
  onAction(action:PhoneAction):void;onRoute(point:Point,label:string):void;onContacts():void;onActivities():void;
  onAppearance?():void;onFactions?():void;onCampaign?():void;onMobility?():void;
  onOpen():void;onClose():void;onMessage(text:string):void;
+ /** City apps (scanner, races, food, ...) shown on the home screen. */
+ apps?:PhoneAppsHost;
 }
 type Tab='home'|'map'|'contacts'|'chat'|'invites'|'garage';
 const safe=(value:string)=>value.replace(/[&<>"']/g,item=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[item]!));
@@ -45,6 +48,7 @@ export function renderPhoneMapSvg(destinations:readonly PhoneDestination[],posit
 export class PhoneUI {
  private root:HTMLDivElement|null=null;
  private tab:Tab='home';
+ private app:string|null=null;
  private signature='';
  private notice='';
  private draft='';
@@ -54,8 +58,8 @@ export class PhoneUI {
  private lastActionKey='';
  constructor(private parent:HTMLElement,private callbacks:PhoneCallbacks){}
  get active(){return this.root!==null;}
- open(tab:Tab='home'){
-  this.tab=tab;
+ open(tab:Tab='home',app:string|null=null){
+  this.tab=tab;this.app=app&&this.callbacks.apps?.apps.some(item=>item.id===app)?app:null;
   if(this.root){this.refresh(true);return;}
   this.notice='';this.signature='';this.previousFocus=document.activeElement as HTMLElement;
   this.root=document.createElement('div');this.root.id='phone-root';this.root.className='phone-overlay';
@@ -77,7 +81,8 @@ export class PhoneUI {
  refresh(force=false){
   if(!this.root)return;
   const snapshot=this.callbacks.getSnapshot(),position=this.callbacks.getPosition?.();
-  const signature=JSON.stringify([this.tab,snapshot.messages,snapshot.invites,snapshot.deliveryCooldownMs>0,this.callbacks.getWallet(),this.callbacks.isOnline(),this.callbacks.getReputation?.(),this.callbacks.getCarName?.(),position&&[Math.round(position.x),Math.round(position.z)],this.notice]);
+  const appSignature=this.app?this.callbacks.apps?.signature(this.app)??'':'';
+  const signature=JSON.stringify([this.tab,this.app,appSignature,snapshot.messages,snapshot.invites,snapshot.deliveryCooldownMs>0,this.callbacks.getWallet(),this.callbacks.isOnline(),this.callbacks.getReputation?.(),this.callbacks.getCarName?.(),position&&[Math.round(position.x),Math.round(position.z)],this.notice]);
   if(force||signature!==this.signature){this.signature=signature;this.render(snapshot);}
   const timer=this.query('#phone-delivery-cooldown');if(timer)timer.textContent=snapshot.deliveryCooldownMs>0?`Kolejna dostawa za ${Math.ceil(snapshot.deliveryCooldownMs/1000)} s`:'Kurier jest dostępny';
   for(const invite of snapshot.invites){const node=this.query(`#phone-invite-clock-${invite.id}`);if(node)node.textContent=invite.status==='expired'?'Zaproszenie wygasło':invite.status==='cancelled'?'Zaproszenie anulowane':'Potwierdźcie plan w panelu J';}
@@ -94,11 +99,14 @@ export class PhoneUI {
   const focused=(document.activeElement instanceof HTMLElement||document.activeElement instanceof SVGElement)&&this.root.contains(document.activeElement)?document.activeElement:null;
   const focusedId=focused?.id??'',selection=focused instanceof HTMLInputElement?[focused.selectionStart,focused.selectionEnd]:null;
   const scroll=this.query('#phone-content')?.scrollTop??0;
-  this.root.innerHTML=`<section class="phone-shell"><div class="phone-status"><span>NEON MOBILE</span><span>${this.callbacks.isOnline()?'● EKIPA ONLINE':'● TRYB SOLO'} ▰</span></div><header class="phone-header"><div><span>TWÓJ TELEFON</span><h1 id="phone-heading">${labels[this.tab]}</h1></div><button id="phone-close" aria-label="Schowaj telefon">×</button></header><nav class="phone-tabs" aria-label="Aplikacje telefonu">${(Object.keys(labels) as Tab[]).map(tab=>`<button id="phone-tab-${tab}" aria-pressed="${tab===this.tab}" class="${tab===this.tab?'selected':''}">${labels[tab]}</button>`).join('')}</nav><div id="phone-content" class="phone-content">${this.tab==='home'?this.home():this.tab==='map'?this.map():this.tab==='contacts'?this.contacts():this.tab==='chat'?this.chat(snapshot):this.tab==='invites'?this.invites(snapshot):this.garage(snapshot)}</div><p id="phone-notice" class="phone-notice" role="status" aria-live="polite">${safe(this.notice||'T · telefon / Esc · schowaj')}</p><div class="phone-home-bar" aria-hidden="true"></div></section>`;
+  this.root.innerHTML=`<section class="phone-shell"><div class="phone-status"><span>NEON MOBILE</span><span>${this.callbacks.isOnline()?'● EKIPA ONLINE':'● TRYB SOLO'} ▰</span></div><header class="phone-header"><div><span>TWÓJ TELEFON</span><h1 id="phone-heading">${this.app?safe(this.appInfo()?.name??''):labels[this.tab]}</h1></div><button id="phone-close" aria-label="Schowaj telefon">×</button></header><nav class="phone-tabs" aria-label="Aplikacje telefonu">${(Object.keys(labels) as Tab[]).map(tab=>`<button id="phone-tab-${tab}" aria-pressed="${tab===this.tab&&!this.app}" class="${tab===this.tab&&!this.app?'selected':''}">${labels[tab]}</button>`).join('')}</nav><div id="phone-content" class="phone-content" data-phone-app="${safe(this.app??'')}">${this.app?`<button class="phone-back" id="phone-app-back">← Ekran główny</button>${this.callbacks.apps?.render(this.app)??''}`:this.tab==='home'?this.home():this.tab==='map'?this.map():this.tab==='contacts'?this.contacts():this.tab==='chat'?this.chat(snapshot):this.tab==='invites'?this.invites(snapshot):this.garage(snapshot)}</div><p id="phone-notice" class="phone-notice" role="status" aria-live="polite">${safe(this.notice||'T · telefon / Esc · schowaj')}</p><div class="phone-home-bar" aria-hidden="true"></div></section>`;
   const on=(selector:string,callback:()=>void)=>this.query(selector)?.addEventListener('click',callback);
   on('#phone-close',()=>this.close());
-  (Object.keys(labels) as Tab[]).forEach(tab=>on(`#phone-tab-${tab}`,()=>{this.tab=tab;this.notice='';this.refresh(true);}));
-  (Object.keys(labels) as Tab[]).forEach(tab=>on(`#phone-app-${tab}`,()=>{this.tab=tab;this.notice='';this.refresh(true);}));
+  (Object.keys(labels) as Tab[]).forEach(tab=>on(`#phone-tab-${tab}`,()=>{this.tab=tab;this.app=null;this.notice='';this.refresh(true);}));
+  (Object.keys(labels) as Tab[]).forEach(tab=>on(`#phone-app-${tab}`,()=>{this.tab=tab;this.app=null;this.notice='';this.refresh(true);}));
+  for(const app of this.callbacks.apps?.apps??[])on(`#phone-launch-app-${app.id}`,()=>{this.app=app.id;this.notice='';this.refresh(true);});
+  on('#phone-app-back',()=>{this.app=null;this.tab='home';this.notice='';this.refresh(true);});
+  if(this.app)this.callbacks.apps?.bind(this.app,this.root,text=>this.report(text),()=>this.close());
   for(const [id,callback] of [['appearance',this.callbacks.onAppearance],['factions',this.callbacks.onFactions],['campaign',this.callbacks.onCampaign],['mobility',this.callbacks.onMobility]] as const)if(callback)on(`#phone-launch-${id}`,()=>{this.close();callback();});
   for(const destination of this.destinations())on(`#phone-route-${CSS.escape(destination.id)}`,()=>{this.close();this.callbacks.onRoute({...destination.point},destination.name);});
   for(const marker of this.root.querySelectorAll<SVGGElement>('[data-map-destination]')){
@@ -120,7 +128,7 @@ export class PhoneUI {
  private home(){
   const extra=[{id:'appearance',name:'Wygląd',icon:'◉',callback:this.callbacks.onAppearance},{id:'factions',name:'Frakcje',icon:'⚑',callback:this.callbacks.onFactions},{id:'campaign',name:'Historia',icon:'◈',callback:this.callbacks.onCampaign},{id:'mobility',name:'Sport',icon:'ϟ',callback:this.callbacks.onMobility}];
   const icons:Partial<Record<Tab,string>>={map:'⌖',contacts:'N',chat:'☷',invites:'♟',garage:'◒'};
-  return`<section class="phone-home-card"><span>NEON COAST</span><h2>Miasto w kieszeni.</h2><p>Twoja gotówka <strong>${money(this.callbacks.getWallet())}</strong></p></section><div class="phone-apps">${(Object.keys(labels) as Tab[]).filter(tab=>tab!=='home').map(tab=>`<button id="phone-app-${tab}"><b>${icons[tab]}</b><span>${labels[tab]}</span></button>`).join('')}${extra.filter(app=>app.callback).map(app=>`<button id="phone-launch-${app.id}"><b>${app.icon}</b><span>${app.name}</span></button>`).join('')}</div><p class="phone-copy">Wybierz aplikację. Możesz wyznaczyć trasę, zebrać ekipę, zmienić swój styl albo wrócić do historii miasta.</p>`;
+  return`<section class="phone-home-card"><span>NEON COAST</span><h2>Miasto w kieszeni.</h2><p>Twoja gotówka <strong>${money(this.callbacks.getWallet())}</strong></p></section><div class="phone-apps">${(Object.keys(labels) as Tab[]).filter(tab=>tab!=='home').map(tab=>`<button id="phone-app-${tab}"><b>${icons[tab]}</b><span>${labels[tab]}</span></button>`).join('')}${extra.filter(app=>app.callback).map(app=>`<button id="phone-launch-${app.id}"><b>${app.icon}</b><span>${app.name}</span></button>`).join('')}</div>${this.callbacks.apps?`<h3 class="phone-apps-section">APLIKACJE MIASTA</h3><div class="phone-apps">${this.callbacks.apps.apps.map(app=>`<button id="phone-launch-app-${safe(app.id)}"><b>${app.icon}</b><span>${safe(app.name)}</span></button>`).join('')}</div>`:''}<p class="phone-copy">Wybierz aplikację. Możesz wyznaczyć trasę, zebrać ekipę, zmienić swój styl albo wrócić do historii miasta.</p>`;
  }
  private map(){
   const points=this.destinations(),position=this.callbacks.getPosition?.();
@@ -141,6 +149,7 @@ export class PhoneUI {
  private garage(snapshot:PhoneSnapshot){
   return`<div class="phone-car-card"><span aria-hidden="true">◒</span><small>TWÓJ WŁASNY POJAZD</small><h2>${safe(this.callbacks.getCarName?.()??'Wybrany samochód')}</h2><p>Kurier dostawi wybrany model na najbliższą ulicę za ${money(PHONE_DELIVERY_PRICE)}. Wyjdź pieszo na zewnątrz, poza aktywnym zleceniem i pościgiem.</p><strong>Portfel: ${money(this.callbacks.getWallet())}</strong><button id="phone-request-car" class="phone-primary" ${snapshot.deliveryCooldownMs>0||this.callbacks.getWallet()<PHONE_DELIVERY_PRICE?'disabled':''}>Zamów własne auto · ${money(PHONE_DELIVERY_PRICE)}</button><small id="phone-delivery-cooldown"></small></div><p class="phone-copy">Model zabezpieczony na parkingu przy mieszkaniu odbiera się przez panel L. Telefon zachowuje obecny stan i tuning auta.</p>`;
  }
+ private appInfo(){return this.callbacks.apps?.apps.find(item=>item.id===this.app);}
  private trapFocus(event:KeyboardEvent){
   const controls=[...(this.root?.querySelectorAll<HTMLElement>('button:not(:disabled),input:not(:disabled),select:not(:disabled),a[href],[data-map-destination]')??[])],first=controls[0],last=controls.at(-1);
   if(!first){event.preventDefault();return;}
