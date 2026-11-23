@@ -2,6 +2,7 @@ import { appearanceAction, parseAppearance, type AppearanceAction, type Appearan
 import { AppearanceUI } from './appearance-ui';
 import { HostPhone, type PhoneAction } from './phone';
 import { PHONE_DESTINATIONS, PhoneUI } from './phone-ui';
+import type { PhoneAppsHost } from './phone-apps-controller';
 import { CampaignController, type CampaignAction } from './campaign';
 import { CampaignUI } from './campaign-ui';
 import { Factions, type FactionAction } from './factions';
@@ -21,6 +22,7 @@ interface StoriesContext {
  getReputation():number;isStored():boolean;award(source:string,reputation:number):void;
  onOpen():void;onClose():void;onMessage(text:string):void;onSave():void;onRoute():void;
  onContacts():void;onActivities():void;
+ phoneApps?:PhoneAppsHost;
 }
 const SOLO='solo';
 const object=(value:unknown):value is Record<string,unknown>=>Boolean(value&&typeof value==='object'&&!Array.isArray(value));
@@ -52,7 +54,7 @@ export class CityStories {
    getDestinations:()=>[...PHONE_DESTINATIONS,{id:'dock',name:'Przystań TideRunner',point:DOCK.land,icon:'≈'},{id:'bike',name:'Motocykl Vortex R',point:BIKE_LOCATION,icon:'◉'}],
    onAction:action=>this.phoneAction(action),onRoute:(p,label)=>this.navigate(p,label),onContacts:ctx.onContacts,onActivities:ctx.onActivities,
    onAppearance:()=>this.appearanceUI.open(),onFactions:()=>this.factionsUI.open(),onCampaign:()=>this.campaignUI.open(),onMobility:()=>this.mobilityUI.open(),
-   onOpen:ctx.onOpen,onClose:ctx.onClose,onMessage:ctx.onMessage,
+   onOpen:ctx.onOpen,onClose:ctx.onClose,onMessage:ctx.onMessage,apps:ctx.phoneApps,
   });
   ctx.view.addCityObject(this.factionView.group);
   const button=document.createElement('button');button.id='phone-open';button.innerHTML='Telefon <kbd>T</kbd>';button.onclick=()=>this.openPhone();document.querySelector('.expansion-toolbar')!.append(button);
@@ -73,7 +75,7 @@ export class CityStories {
   return this.route??(this.story.status==='active'?this.story.target: null)??(this.faction.job.status==='active'?this.faction.job.target:null)??(this.trial.status==='running'?this.trial.target:null)??undefined;
  }
  clearRoute(){this.route=null;this.routeKind='fixed';}
- private navigate(point:Point,label:string){this.ctx.onRoute();const same=(other:Point|null)=>Boolean(other&&Math.hypot(point.x-other.x,point.z-other.z)<.01);this.routeKind=same(this.story.target)?'campaign':same(this.faction.job.target)?'faction':same(this.trial.target)?'trial':'fixed';this.route={...point};this.routeLabel=label;this.ctx.onMessage(`GPS: ${label}.`);}
+ navigate(point:Point,label:string){this.ctx.onRoute();const same=(other:Point|null)=>Boolean(other&&Math.hypot(point.x-other.x,point.z-other.z)<.01);this.routeKind=same(this.story.target)?'campaign':same(this.faction.job.target)?'faction':same(this.trial.target)?'trial':'fixed';this.route={...point};this.routeLabel=label;this.ctx.onMessage(`GPS: ${label}.`);}
  openPhone(){if(!this.active)this.phoneUI.open();}
  handleKey(event:KeyboardEvent):boolean {
   const visible=[this.phoneUI,this.appearanceUI,this.factionsUI,this.campaignUI,this.mobilityUI].find(ui=>ui.active);

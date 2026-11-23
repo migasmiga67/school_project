@@ -1,5 +1,5 @@
 /** Backpack contents and the PetroCoast shop catalogue. Pure data, no DOM. */
-export type ItemId = 'canister' | 'oil' | 'repair' | 'medkit' | 'hotdog' | 'coffee' | 'water' | 'flashlight';
+export type ItemId = 'canister' | 'oil' | 'repair' | 'medkit' | 'hotdog' | 'coffee' | 'water' | 'flashlight' | 'burger' | 'energy';
 export interface ItemDefinition {
   id: ItemId; name: string; icon: string; description: string;
   price: number; weight: number; stack: number;
@@ -15,6 +15,8 @@ export const ITEMS: Record<ItemId, ItemDefinition> = {
   coffee: { id: 'coffee', name: 'Kawa na wynos', icon: '☕', description: '+10 zdrowia i szybszy sprint pieszo przez 60 sekund.', price: 4, weight: .4, stack: 5, use: 'self' },
   water: { id: 'water', name: 'Woda 0,5 L', icon: '💧', description: 'Orzeźwia: +12 zdrowia.', price: 2, weight: .5, stack: 6, use: 'self' },
   flashlight: { id: 'flashlight', name: 'Latarka', icon: '🔦', description: 'Nocą świeci przed tobą, gdy chodzisz pieszo. Działa z plecaka.', price: 18, weight: .4, stack: 1, use: 'passive' },
+  burger: { id: 'burger', name: 'Burger Coast', icon: '🍔', description: 'Podwójny burger z dostawy. +45 zdrowia.', price: 12, weight: .5, stack: 3, use: 'self' },
+  energy: { id: 'energy', name: 'Energetyk Volt', icon: '⚡', description: '+5 zdrowia i szybszy sprint pieszo przez 2 minuty.', price: 6, weight: .4, stack: 4, use: 'self' },
 };
 export const ITEM_IDS = Object.keys(ITEMS) as ItemId[];
 export const INVENTORY_SLOTS = 12;
@@ -91,10 +93,11 @@ export function useItem(inventory: Inventory, item: ItemId, context: UseContext)
       const repair = Math.min(35, 100 - car.health); effect = { carHealth: repair }; message = `Prowizoryczna naprawa: +${Math.round(repair)}% stanu auta.`;
     }
   } else {
-    const heal = item === 'medkit' ? 60 : item === 'hotdog' ? 25 : item === 'coffee' ? 10 : 12;
-    if (context.health >= 100 && item !== 'coffee') return fail('Jesteś w pełni sił.');
-    effect = { health: Math.min(heal, 100 - context.health), ...(item === 'coffee' ? { sprintSeconds: 60 } : {}) };
-    message = item === 'medkit' ? 'Opatrunek założony: +60 zdrowia.' : item === 'coffee' ? 'Kawa: +10 zdrowia i szybszy sprint przez minutę.' : `${definition.name}: +${heal} zdrowia.`;
+    const heal = item === 'medkit' ? 60 : item === 'burger' ? 45 : item === 'hotdog' ? 25 : item === 'coffee' ? 10 : item === 'energy' ? 5 : 12;
+    const boost = item === 'coffee' ? 60 : item === 'energy' ? 120 : 0;
+    if (context.health >= 100 && !boost) return fail('Jesteś w pełni sił.');
+    effect = { health: Math.min(heal, 100 - context.health), ...(boost ? { sprintSeconds: boost } : {}) };
+    message = item === 'medkit' ? 'Opatrunek założony: +60 zdrowia.' : item === 'coffee' ? 'Kawa: +10 zdrowia i szybszy sprint przez minutę.' : item === 'energy' ? 'Energetyk: szybszy sprint przez 2 minuty!' : `${definition.name}: +${heal} zdrowia.`;
   }
   removeItem(inventory, item);
   return { ok: true, message, effect };
