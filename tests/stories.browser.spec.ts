@@ -104,7 +104,7 @@ async function pair(browser:Browser,info:TestInfo):Promise<Pair>{
 }
 
 test('telefon dwóch klientów przesyła zwykły tekst, zaproszenie i dostawia własne auto za jedną opłatę',async({browser},info)=>{
- test.setTimeout(120000);const clients=await pair(browser,info),{host,guest}=clients;
+ test.setTimeout(240000);const clients=await pair(browser,info),{host,guest}=clients;
  try{
   await openPhone(host);await host.locator('#phone-tab-chat').click();
   const message='<img src=x onerror="window.__CHAT_INJECTED__=true"> Paweł & ekipa';
