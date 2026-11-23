@@ -45,6 +45,7 @@ export class PhoneApps implements PhoneAppsHost {
   tow: Courier | null = null;
   private log: { at: string; text: string; alert: boolean }[] = [];
   private lastWorld = NaN;
+  private lastReal = NaN;
   private chatterSlot = -1;
   private lastRaceResult = '';
   private reminded = -1;
@@ -70,6 +71,10 @@ export class PhoneApps implements PhoneAppsHost {
     this.radio.update(audible);
     this.radioChip(audible ? RADIO_STATIONS.find(item => item.id === this.radio.station)?.name ?? null : null);
     this.view.update(this.food?.courier ?? null, this.tow, now);
+    // Couriers ride on wall-clock time so slow frames (software rendering) do not slow them down.
+    const real = typeof performance === 'undefined' ? Date.now() : performance.now();
+    const realDt = active && Number.isFinite(this.lastReal) ? Math.max(0, Math.min(1, (real - this.lastReal) / 1000)) : Math.min(dt, .2);
+    this.lastReal = active ? real : NaN;
     if (!active) return;
     if (!this.ctx.online()) accrueRent(this.estate, worldDt);
     // Scanner: dispatcher alerts on chase changes, routine chatter otherwise.
@@ -80,8 +85,8 @@ export class PhoneApps implements PhoneAppsHost {
     if (slot !== this.chatterSlot) { this.chatterSlot = slot; if (now > 5) this.push(scannerChatter(state, now), false); }
     if (marketWindow(now) !== this.market.window) this.market = { window: marketWindow(now), bought: [] };
     this.stepRace(state, now);
-    this.stepFood(state, dt);
-    this.stepTow(dt);
+    this.stepFood(state, realDt);
+    this.stepTow(realDt);
   }
   private chip: HTMLElement | null = null;
   private radioChip(name: string | null) {

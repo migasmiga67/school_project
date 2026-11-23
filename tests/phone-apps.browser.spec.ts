@@ -5,6 +5,7 @@ type Snapshot = { state: GameState; inventory: { slots: { item: string; count: n
 const snapshot = (page: Page): Promise<Snapshot> => page.evaluate(() => (window as unknown as { __NEON_TEST__: Snapshot }).__NEON_TEST__);
 
 test('aplikacje telefonu: wszystkie się otwierają, kurier dowozi jedzenie, radio i nieruchomości działają', async ({ page }) => {
+  test.setTimeout(180000);
   const errors: string[] = [];
   page.on('pageerror', error => errors.push(error.message));
   await page.goto('./');
@@ -43,7 +44,7 @@ test('aplikacje telefonu: wszystkie się otwierają, kurier dowozi jedzenie, rad
   await expect(page.locator('#phone-notice')).toContainText('Kurier już jedzie');
   await page.keyboard.press('Escape');
   await expect(page.locator('#phone-root')).toBeHidden();
-  await expect.poll(async () => (await snapshot(page)).phoneApps.food, { timeout: 60000, intervals: [500] }).toBeNull();
+  await expect.poll(async () => (await snapshot(page)).phoneApps.food, { timeout: 100000, intervals: [500] }).toBeNull();
   expect((await snapshot(page)).inventory.slots.some(slot => slot.item === 'coffee')).toBe(true);
   expect(errors).toEqual([]);
 });
